@@ -6,13 +6,17 @@
   --color-text-primary: #eae5d9;
   --color-text-muted: #8b867c;
   --color-accent-ember: #d97746;
+  --font-sans: var(--font-inter), sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
 }
 
 html, body {
   background-color: #11100f;
   color: #eae5d9;
+  font-family: var(--font-sans);
   overflow-x: hidden;
   scroll-behavior: smooth;
+  transition: background-color 1s ease;
 }
 
 ::selection {
@@ -59,7 +63,17 @@ html, body {
   animation: dot-pulse 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Custom styles for inputs */
+/* Blinking cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.blinking-cursor {
+  animation: blink 1.2s step-end infinite;
+}
+
+/* Custom autofill */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus {

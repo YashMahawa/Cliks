@@ -6,6 +6,8 @@ interface AcousticContextProps {
   triggerSound: () => void;
   pulseActive: boolean;
   triggerPulse: () => void;
+  typingProgress: number;
+  setTypingProgress: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const AcousticContext = createContext<AcousticContextProps | undefined>(undefined);
@@ -20,6 +22,7 @@ export function useAcoustic() {
 
 export function AcousticProvider({ children }: { children: React.ReactNode }) {
   const [pulseActive, setPulseActive] = useState<boolean>(false);
+  const [typingProgress, setTypingProgress] = useState<number>(0);
   const [buffers, setBuffers] = useState<AudioBuffer[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const buffersRef = useRef<AudioBuffer[]>([]);
@@ -53,7 +56,7 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
         setBuffers(loadedBuffers);
         buffersRef.current = loadedBuffers;
       } catch (error) {
-        // AUDIO INTEGRITY: fail silently, do not log errors, no beeps
+        // AUDIO INTEGRITY: fail silently
       }
     };
 
@@ -62,7 +65,6 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
 
   const triggerPulse = () => {
     setPulseActive(true);
-    // Reset pulse class immediately after animation finishes to allow repeating keydowns
     setTimeout(() => setPulseActive(false), 200);
   };
 
@@ -102,17 +104,28 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       ) {
-        // Still play tactile sound but don't pulse the central hero dot or block key defaults
         triggerSound();
+        return;
+      }
+
+      // Ignore standard modifier keys
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
         return;
       }
       
       triggerSound();
       triggerPulse();
+
+      setTypingProgress((prev) => {
+        if (prev < 10) {
+          return prev + 1;
+        }
+        return prev;
+      });
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Ignore interactive HTML elements to avoid double click sound / focus sound
+      // Ignore interactive HTML elements
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -142,6 +155,8 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
         triggerSound,
         pulseActive,
         triggerPulse,
+        typingProgress,
+        setTypingProgress,
       }}
     >
       {children}
