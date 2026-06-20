@@ -26,7 +26,7 @@ Core promise:
 ## Current Structure
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join commands.
-- `server`: Fastify API/WebSocket relay intended for Render. It stores teams in Supabase when configured, otherwise uses an in-memory local test store.
+- `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, otherwise uses an in-memory local test store.
 - `cli`: `typ` command. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
 - `deploy/render.yaml`: starter Render config.
@@ -132,13 +132,15 @@ typ set hear.self off
 Vercel deploys the site. Set:
 
 ```text
-NEXT_PUBLIC_CLIKS_API_URL=https://your-render-service.onrender.com
+NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 ```
 
-Render deploys the server. Set:
+The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`.
+
+If using App Platform or another managed Node host, set:
 
 ```text
-CORS_ORIGIN=https://your-vercel-domain.vercel.app
+CORS_ORIGIN=https://your-vercel-site
 SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```

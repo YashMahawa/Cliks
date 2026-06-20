@@ -135,7 +135,7 @@ export default function HomePage() {
 
           <p className="notes">
             The website only creates room codes. The live coworking session happens in the CLI
-            through the Render backend.
+            through the Cliks backend.
           </p>
         </section>
       </main>

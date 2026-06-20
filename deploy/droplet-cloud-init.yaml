@@ -1,0 +1,75 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - caddy
+
+runcmd:
+  - [ bash, -lc, |
+      set -euxo pipefail
+
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      apt-get install -y nodejs
+
+      if ! id cliks >/dev/null 2>&1; then
+        useradd --system --create-home --shell /usr/sbin/nologin cliks
+      fi
+
+      rm -rf /opt/cliks
+      git clone --depth 1 https://github.com/YashMahawa/Cliks.git /opt/cliks
+      chown -R cliks:cliks /opt/cliks
+
+      cd /opt/cliks
+      npm ci
+      npm --workspace @cliks/server run build
+
+      cat >/etc/cliks-api.env <<'EOF'
+      NODE_ENV=production
+      PORT=8787
+      EOF
+
+      cat >/etc/systemd/system/cliks-api.service <<'EOF'
+      [Unit]
+      Description=Cliks backend API and WebSocket server
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=cliks
+      Group=cliks
+      WorkingDirectory=/opt/cliks
+      EnvironmentFile=/etc/cliks-api.env
+      ExecStart=/usr/bin/npm --workspace @cliks/server start
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+
+      systemctl daemon-reload
+      systemctl enable --now cliks-api
+
+      PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"
+      DOMAIN="${PUBLIC_IPV4}.sslip.io"
+
+      cat >/etc/caddy/Caddyfile <<EOF
+      ${DOMAIN} {
+        encode zstd gzip
+        reverse_proxy 127.0.0.1:8787
+      }
+      EOF
+
+      systemctl enable --now caddy
+      systemctl reload caddy
+
+      if command -v ufw >/dev/null 2>&1; then
+        ufw allow OpenSSH || true
+        ufw allow 80/tcp || true
+        ufw allow 443/tcp || true
+        ufw --force enable || true
+      fi
+    ]

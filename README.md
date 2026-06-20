@@ -100,7 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.s
 Cliks is split into three parts:
 
 - Website: deploy `site` to Vercel.
-- Backend: deploy `server` to Render or another Node host with WebSocket support.
+- Backend: deploy `server` to DigitalOcean or another Node host with WebSocket support.
 - Database: run `supabase/schema.sql` in Supabase.
 
 For the website, set:
