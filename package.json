@@ -1,0 +1,21 @@
+{
+  "name": "cliks-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cliks ambient coworking prototype: Vercel site, Render backend, and typ CLI.",
+  "workspaces": [
+    "server",
+    "site",
+    "cli"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @cliks/server run dev",
+    "dev:site": "npm --workspace @cliks/site run dev",
+    "dev:cli": "npm --workspace @cliks/cli run dev",
+    "build": "npm --workspace @cliks/server run build && npm --workspace @cliks/site run build && npm --workspace @cliks/cli run build",
+    "check": "npm --workspace @cliks/server run check && npm --workspace @cliks/site run check && npm --workspace @cliks/cli run check"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: cliks-server
+    env: node
+    plan: free
+    buildCommand: npm install && npm --workspace @cliks/server run build
+    startCommand: npm --workspace @cliks/server start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
