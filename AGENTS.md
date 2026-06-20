@@ -105,6 +105,7 @@ Current modes:
 - `typ start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
 - `typ sound-test`: plays sample sounds without joining a room.
 - `typ doctor`: explains privacy and capture permission/setup.
+- `cli/install.sh`: installs the CLI, runs `typ doctor`, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
 
 Important platform reality:
 
@@ -139,6 +140,15 @@ NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 
 The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
 
+Security posture for the live Droplet:
+
+- the DigitalOcean API token is not in the repo, website bundle, CLI, installer, or Droplet app env
+- the CLI contains only the public backend URL, which is not secret
+- UFW allows only OpenSSH, HTTP, and HTTPS
+- Node listens on port 8787 behind Caddy, and direct public access to 8787 should be blocked by firewall
+- SSH password and keyboard-interactive auth are disabled
+- CORS is set to the production Vercel origin
+
 If using App Platform or another managed Node host, set:
 
 ```text
@@ -159,3 +169,7 @@ Supabase should run `supabase/schema.sql`.
 ## README Policy
 
 Keep `README.md` from the user point of view. It should explain what Cliks does, how to install/run it, privacy guarantees, and basic deploy steps. Do not overload it with internal details like ring math, protocol internals, or backend implementation notes. Put those details here or in `docs/`.
+
+## Public Backend URL
+
+`cli/src/config.ts` currently points new installs at `https://139.59.29.207.sslip.io`. This is a public backend URL, not a secret. Never put the DigitalOcean API token, SSH private key, or service credentials into the CLI, website bundle, README, install script, or committed env files.

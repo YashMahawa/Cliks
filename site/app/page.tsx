@@ -8,13 +8,14 @@ type CreatedTeam = {
 };
 
 const apiBase = process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "http://localhost:8787";
+const installCommand = "curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash";
 
 export default function HomePage() {
   const [name, setName] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState<"code" | "command" | null>(null);
+  const [copied, setCopied] = useState<"install" | "code" | "command" | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const joinCommand = useMemo(() => {
@@ -44,7 +45,7 @@ export default function HomePage() {
     }
   }
 
-  async function copyText(value: string, kind: "code" | "command") {
+  async function copyText(value: string, kind: "install" | "code" | "command") {
     await navigator.clipboard.writeText(value);
     setCopied(kind);
     window.setTimeout(() => setCopied(null), 1600);
@@ -54,7 +55,12 @@ export default function HomePage() {
     <div className="shell">
       <header className="nav">
         <div className="brand">Cliks</div>
-        <small>ambient presence, not surveillance</small>
+        <div className="nav-actions">
+          <small>ambient presence, not surveillance</small>
+          <a className="github-link" href="https://github.com/YashMahawa/Cliks">
+            GitHub
+          </a>
+        </div>
       </header>
 
       <main className="main">
@@ -73,6 +79,23 @@ export default function HomePage() {
         </section>
 
         <section className="panel" aria-label="Create a team">
+          <h2>Install CLI</h2>
+          <div className="copy-row command-row install-row">
+            <div className="command">{installCommand}</div>
+            <button
+              className="copy-button"
+              type="button"
+              onClick={() => copyText(installCommand, "install")}
+            >
+              {copied === "install" ? "Copied" : "Copy install"}
+            </button>
+          </div>
+          <p className="notes">
+            The installer points `typ` at the hosted Cliks backend and checks input permissions.
+          </p>
+
+          <div className="panel-divider" />
+
           <h2>Create a team</h2>
           <form onSubmit={createTeam}>
             <div className="field">

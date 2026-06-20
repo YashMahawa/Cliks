@@ -105,19 +105,38 @@ CLIKS_API_URL=http://localhost:8787 typ start
 
 ## Install Script
 
-Once this repo is public, the one-line installer is:
+Install the CLI with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-## Hosting
+The installer points `typ` at the hosted Cliks backend by default. On Linux it also checks whether global input capture needs permission and shows the relevant setup step.
+
+## Self-Hosting
 
 Cliks is split into three parts:
 
 - Website: deploy `site` to Vercel.
 - Backend: deploy `server` to DigitalOcean or another Node host with WebSocket support.
-- Database: run `supabase/schema.sql` in Supabase.
+- Database: use local Postgres on the same server, or use Supabase/Postgres elsewhere.
+
+To build your own CLI pointed at your own backend:
+
+```bash
+git clone https://github.com/YashMahawa/Cliks.git
+cd Cliks
+npm install
+npm run build
+typ set api.url https://your-backend-domain
+```
+
+For users installing from your fork, update `productionApiUrl` in `cli/src/config.ts`, then commit and publish your fork. They can install from your repo by running:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_FORK/main/cli/install.sh \
+  | CLIKS_REPO_URL=https://github.com/YOUR_USER/YOUR_FORK.git bash
+```
 
 For the website, set:
 

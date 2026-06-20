@@ -7,6 +7,7 @@ packages:
   - caddy
   - postgresql
   - postgresql-contrib
+  - ufw
 
 runcmd:
   - [ bash, -lc, |
@@ -39,7 +40,18 @@ runcmd:
       NODE_ENV=production
       PORT=8787
       CLIKS_LOCAL_POSTGRES=true
+      CORS_ORIGIN=https://site-kappa-six-64.vercel.app
       EOF
+
+      mkdir -p /etc/ssh/sshd_config.d
+      cat >/etc/ssh/sshd_config.d/90-cliks-hardening.conf <<'EOF'
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      X11Forwarding no
+      EOF
+      sshd -t
+      systemctl reload ssh || systemctl reload sshd
 
       cat >/etc/systemd/system/cliks-api.service <<'EOF'
       [Unit]
