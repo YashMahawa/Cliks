@@ -117,7 +117,13 @@ SUPABASE_URL=your-supabase-url
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-Without Supabase env vars, the backend uses a temporary in-memory store for local development.
+On a single Droplet, the backend can store team records in SQLite by setting:
+
+```text
+CLIKS_SQLITE_PATH=/var/lib/cliks/cliks.sqlite
+```
+
+Supabase is optional.
 
 ## Current Status
 

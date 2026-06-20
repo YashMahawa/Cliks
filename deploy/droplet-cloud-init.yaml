@@ -16,6 +16,7 @@ runcmd:
       if ! id cliks >/dev/null 2>&1; then
         useradd --system --create-home --shell /usr/sbin/nologin cliks
       fi
+      install -d -o cliks -g cliks /var/lib/cliks
 
       rm -rf /opt/cliks
       git clone --depth 1 https://github.com/YashMahawa/Cliks.git /opt/cliks
@@ -28,6 +29,7 @@ runcmd:
       cat >/etc/cliks-api.env <<'EOF'
       NODE_ENV=production
       PORT=8787
+      CLIKS_SQLITE_PATH=/var/lib/cliks/cliks.sqlite
       EOF
 
       cat >/etc/systemd/system/cliks-api.service <<'EOF'

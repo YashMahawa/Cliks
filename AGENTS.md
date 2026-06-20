@@ -26,7 +26,7 @@ Core promise:
 ## Current Structure
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join commands.
-- `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, otherwise uses an in-memory local test store.
+- `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, SQLite when `CLIKS_SQLITE_PATH` is set, otherwise an in-memory local test store.
 - `cli`: `typ` command. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
 - `deploy/render.yaml`: starter Render config.
@@ -135,7 +135,7 @@ Vercel deploys the site. Set:
 NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 ```
 
-The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`.
+The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should set `CLIKS_SQLITE_PATH=/var/lib/cliks/cliks.sqlite` so team codes survive service restarts.
 
 If using App Platform or another managed Node host, set:
 
