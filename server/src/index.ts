@@ -6,7 +6,7 @@ import { z } from "zod";
 import { RoomHub } from "./rooms.js";
 import { createTeamStoreFromEnv } from "./store.js";
 
-const port = Number(process.env.PORT ?? 8787);
+const port = Number(process.env.PORT ?? process.env.DO_APP_PORT ?? 8787);
 const corsOrigin = process.env.CORS_ORIGIN ?? true;
 const server = Fastify({ logger: true });
 const store = createTeamStoreFromEnv();

@@ -1,0 +1,23 @@
+name: cliks-backend
+region: blr
+services:
+  - name: api
+    github:
+      repo: YashMahawa/Cliks
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    build_command: npm install && npm --workspace @cliks/server run build
+    run_command: npm --workspace @cliks/server start
+    environment_slug: node-js
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8787
+    health_check:
+      http_path: /health
+    routes:
+      - path: /
+    envs:
+      - key: NODE_VERSION
+        value: "20"
+        scope: RUN_AND_BUILD_TIME
