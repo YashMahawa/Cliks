@@ -109,10 +109,10 @@ export default function HomePage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full flex flex-col items-center bg-[#11100f] text-[#eae5d9] px-6 py-8 selection:bg-[#d97746]/15 selection:text-[#d97746]"
+          className="w-full flex flex-col items-center bg-[#11100f] text-[#eae5d9] px-6 md:px-12 selection:bg-[#d97746]/15 selection:text-[#d97746]"
         >
           {/* Navigation */}
-          <header className="w-full max-w-2xl flex items-center justify-between py-6">
+          <header className="w-full max-w-5xl flex items-center justify-between py-8 border-b border-[#2a2826]">
             <div className="font-mono text-sm tracking-widest text-[#eae5d9] font-bold">
               CLIKS
             </div>
@@ -128,65 +128,86 @@ export default function HomePage() {
             </div>
           </header>
 
-          <main className="w-full max-w-2xl flex-1 flex flex-col items-center">
-            {/* Section 1: The Sensory Hero */}
-            <section className="w-full flex flex-col items-center text-center pt-20 pb-24">
-              {/* Glowing ember dot */}
-              <div className="flex items-center justify-center h-12">
-                <div className={`w-2 h-2 rounded-full bg-[#d97746] opacity-80 ${
-                  pulseActive ? "ember-pulse" : ""
-                }`} style={{ boxShadow: "0 0 8px rgba(217, 119, 70, 0.4)" }} />
+          <main className="w-full max-w-5xl">
+            {/* Section 1: Asymmetric Split Hero */}
+            <section className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-12 lg:gap-20 py-20 items-center border-b border-[#2a2826]">
+              {/* Left Column: Typography and Action Block */}
+              <div className="flex flex-col items-start text-left">
+                {/* Glowing ember dot */}
+                <div className="flex items-center justify-start h-8 mb-6">
+                  <div className={`w-2 h-2 rounded-full bg-[#d97746] opacity-80 ${
+                    pulseActive ? "ember-pulse" : ""
+                  }`} style={{ boxShadow: "0 0 8px rgba(217, 119, 70, 0.4)" }} />
+                </div>
+
+                <h1 className="text-4xl md:text-5xl lg:text-6xl font-semibold tracking-tight text-[#eae5d9] leading-tight">
+                  Work alone, together.
+                </h1>
+
+                <p className="mt-8 text-[#8b867c] leading-relaxed text-sm md:text-base max-w-[48ch]">
+                  Cliks is an open-source CLI that turns your remote team's typing into ambient background sound. No keystrokes shared, no microphones, just presence.
+                </p>
+
+                {/* Copy-to-clipboard install block */}
+                <div className="w-full mt-10 border border-[#2a2826] bg-[#1a1918] rounded-lg p-4 flex items-center justify-between gap-4">
+                  <code className="text-[#eae5d9] font-mono text-xs overflow-x-auto select-all whitespace-nowrap text-left flex-1 scrollbar-none">
+                    {installCommand}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => copyText(installCommand, "install")}
+                    className="h-9 px-3 rounded border border-[#2a2826] hover:border-[#3a3835] bg-[#11100f] text-[#eae5d9] hover:text-[#d97746] text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer active:scale-98"
+                  >
+                    {copied === "install" ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <span className="mt-4 text-[#8b867c] font-mono text-xs">
+                  Press any key on this page to hear how it sounds.
+                </span>
               </div>
 
-              <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-[#eae5d9] leading-tight max-w-lg mt-6">
-                Work alone, together.
-              </h1>
-
-              <p className="mt-8 text-[#8b867c] leading-relaxed text-sm md:text-base max-w-[55ch]">
-                Cliks is an open-source CLI that turns your remote team's typing into ambient background sound. No keystrokes shared, no microphones, just presence.
-              </p>
-
-              {/* Copy-to-clipboard install block */}
-              <div className="w-full mt-12 border border-[#2a2826] bg-[#1a1918] rounded-lg p-4 flex items-center justify-between gap-4">
-                <code className="text-[#eae5d9] font-mono text-xs overflow-x-auto select-all whitespace-nowrap text-left flex-1 scrollbar-none">
-                  {installCommand}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => copyText(installCommand, "install")}
-                  className="h-9 px-3 rounded border border-[#2a2826] hover:border-[#3a3835] bg-[#11100f] text-[#eae5d9] hover:text-[#d97746] text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer active:scale-98"
-                >
-                  {copied === "install" ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>copy</span>
-                    </>
-                  )}
-                </button>
+              {/* Right Column: Moody Framed Desk Image */}
+              <div className="relative group w-full aspect-square rounded-lg border border-[#2a2826] bg-[#1a1918] overflow-hidden">
+                <img
+                  src="/images/warm_desk_workspace.png"
+                  alt="Minimalist wooden workspace at night with cozy ambient lamp light"
+                  className="w-full h-full object-cover opacity-60 grayscale group-hover:opacity-90 group-hover:grayscale-0 transition-all duration-1000 ease-out"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#11100f] via-transparent to-transparent opacity-40 pointer-events-none" />
               </div>
-
-              <span className="mt-4 text-[#8b867c] font-mono text-xs">
-                Press any key on this page to hear how it sounds.
-              </span>
             </section>
 
             {/* Section 2: The Philosophy (Why this exists) */}
-            <section className="w-full py-16 border-t border-[#2a2826] flex flex-col items-center">
-              <div className="w-full max-w-[65ch] space-y-6 text-[#eae5d9] text-sm md:text-base leading-relaxed">
-                <p>
+            <section className="grid grid-cols-1 lg:grid-cols-[1fr_2.2fr] gap-12 py-24 border-b border-[#2a2826]">
+              {/* Left Column: Large Statement */}
+              <div>
+                <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-[#eae5d9] leading-tight">
+                  Acoustic presence, complete privacy.
+                </h2>
+              </div>
+
+              {/* Right Column: Editorial Prose & Guarantees */}
+              <div className="space-y-8 text-sm md:text-base text-[#8b867c] leading-relaxed max-w-[65ch]">
+                <p className="text-[#eae5d9] text-base md:text-lg">
                   Video calls are exhausting. Complete silence is isolating. We built Cliks to bring back the feeling of sitting in a room with people getting things done.
                 </p>
                 
-                <div className="pt-4">
-                  <span className="font-mono text-xs uppercase tracking-wider text-[#8b867c] block mb-4">
+                <div className="pt-4 border-t border-[#2a2826]">
+                  <span className="font-mono text-xs uppercase tracking-wider text-[#eae5d9] block mb-4">
                     Privacy Guarantee
                   </span>
-                  <ul className="space-y-3 text-xs md:text-sm text-[#8b867c] font-mono">
+                  <ul className="space-y-3 text-xs md:text-sm font-mono">
                     <li className="flex items-start gap-3">
                       <span className="text-[#d97746]">1.</span>
                       <span>Native OS hooks only capture timing.</span>
@@ -205,8 +226,8 @@ export default function HomePage() {
             </section>
 
             {/* Section 3: Room Creation (The Form) */}
-            <section className="w-full py-16 border-t border-[#2a2826]">
-              <div className="w-full bg-[#1a1918] border border-[#2a2826] rounded-lg p-6 md:p-8">
+            <section className="py-24 border-b border-[#2a2826]">
+              <div className="max-w-2xl mx-auto bg-[#1a1918] border border-[#2a2826] rounded-lg p-8 md:p-10">
                 <h2 className="text-xl font-medium text-[#eae5d9] mb-2 font-mono">
                   Create a Room
                 </h2>
@@ -302,12 +323,12 @@ export default function HomePage() {
             </section>
 
             {/* Section 4: Community & Support (The Donation Model) */}
-            <section className="w-full py-16 border-t border-[#2a2826] flex flex-col items-center">
-              <h2 className="text-xl font-medium text-[#eae5d9] font-mono text-center mb-6">
+            <section className="py-24 flex flex-col items-center text-center">
+              <h2 className="text-xl font-medium text-[#eae5d9] font-mono mb-6">
                 Keep the servers humming.
               </h2>
 
-              <p className="text-[#8b867c] leading-relaxed text-sm text-center max-w-[55ch] mb-10">
+              <p className="text-[#8b867c] leading-relaxed text-sm max-w-[55ch] mb-10">
                 Cliks is 100% free and open-source. I built this to work alongside my friends. If your team uses this every day, consider throwing a few dollars in the jar to help me scale it to more people for free, cover server costs, and keep building.
               </p>
 
@@ -342,7 +363,7 @@ export default function HomePage() {
           </main>
 
           {/* Footer */}
-          <footer className="w-full max-w-2xl py-8 border-t border-[#2a2826] flex flex-col md:flex-row items-center justify-between gap-4">
+          <footer className="w-full max-w-5xl py-12 border-t border-[#2a2826] flex flex-col md:flex-row items-center justify-between gap-4">
             <span className="text-[#8b867c] text-xs font-mono">
               &copy; {new Date().getFullYear()} Cliks. Open source.
             </span>
