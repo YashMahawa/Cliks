@@ -3,6 +3,7 @@ import { constants, createReadStream, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { captureTerminalState, restoreTerminalState } from "./terminal.js";
 
 export type LocalActivityEvent = {
   kind: "keyboard" | "mouse";
@@ -181,6 +182,7 @@ export class ActivityCapture extends EventEmitter {
 
   private startTerminalCapture(options: ActivityOptions) {
     if (!process.stdin.isTTY) return;
+    const terminalState = captureTerminalState();
     process.stdin.setRawMode(true);
     this.mode = "terminal";
     if (options.mouse) process.stdout.write("\x1b[?1000h\x1b[?1006h");
@@ -213,8 +215,7 @@ export class ActivityCapture extends EventEmitter {
     process.stdin.on("data", onData);
     this.cleanupFns.push(() => {
       process.stdin.off("data", onData);
-      if (options.mouse) process.stdout.write("\x1b[?1000l\x1b[?1006l");
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      restoreTerminalState(terminalState);
     });
   }
 }

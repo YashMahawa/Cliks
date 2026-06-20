@@ -106,6 +106,7 @@ Current modes:
 - `typ sound-test`: plays sample sounds without joining a room.
 - `typ capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `typ doctor`: explains privacy, checks Node/audio/input-device readiness, and prints detected fix commands.
+- `typ fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
 - `cli/install.sh`: installs the CLI, runs `typ doctor`, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
 
 Important platform reality:
@@ -116,7 +117,7 @@ Important platform reality:
 - Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and timing.
 - Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, multi-finger gestures, or touchpad tool/finger events.
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state.
-- Terminal mode must restore raw input and mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events.
+- Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `typ fix-terminal`.
 - The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 
 ## Commands
@@ -131,6 +132,7 @@ npm run dev:server
 npm run dev:site
 typ sound-test
 typ capture-test
+typ fix-terminal
 typ join CLIK-LOCAL
 typ start --terminal --self
 typ set hear.self off

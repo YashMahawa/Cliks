@@ -4,6 +4,7 @@ import { AudioEngine } from "./audio.js";
 import { runCaptureTest } from "./captureTest.js";
 import { runDoctor } from "./doctor.js";
 import { startSession } from "./session.js";
+import { repairTerminal } from "./terminal.js";
 
 const program = new Command();
 
@@ -44,6 +45,14 @@ program
   .command("doctor")
   .description("check capture support and privacy expectations")
   .action(runDoctor);
+
+program
+  .command("fix-terminal")
+  .description("restore sane terminal input after an interrupted terminal-mode capture")
+  .action(() => {
+    repairTerminal();
+    console.log("Terminal input restored. If it still looks wrong, close and reopen this terminal tab.");
+  });
 
 program
   .command("capture-test")

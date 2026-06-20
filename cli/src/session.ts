@@ -152,6 +152,9 @@ function renderStatus(
   console.log("Privacy: only keyboard/mouse event type and timing are sent. Never key values.");
   console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
   console.log(`Capture: ${captureMode}`);
+  if (captureMode === "terminal") {
+    console.log("Terminal mode: affects this terminal only. If input gets weird, run: typ fix-terminal");
+  }
   console.log(`Local captured events: ${localCapturedEvents}`);
   console.log(`Local sent events: ${localSentEvents}`);
   if (permissionHint) console.log(`Permission: ${permissionHint}`);

@@ -116,6 +116,7 @@ typ switch CLIK-XXXX
 typ config
 typ sound-test
 typ capture-test
+typ fix-terminal
 typ doctor
 ```
 
@@ -127,6 +128,12 @@ typ capture-test --evdev
 ```
 
 While `typ start` is running, the status screen also shows local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check the connection/backend.
+
+If a terminal tab feels stuck in a strange input mode after terminal-only testing, run:
+
+```bash
+typ fix-terminal
+```
 
 The CLI defaults to the hosted Cliks backend. For local development, override it with:
 
