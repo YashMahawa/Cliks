@@ -1,5 +1,6 @@
 import { Command } from "commander";
-import { loadConfig, rememberTeam, saveConfig } from "./config.js";
+import { existsSync } from "node:fs";
+import { loadConfig, rememberTeam, saveConfig, toWsUrl } from "./config.js";
 import { AudioEngine } from "./audio.js";
 import { startSession } from "./session.js";
 
@@ -26,15 +27,54 @@ program
 
 program
   .command("start", { isDefault: true })
-  .option("--terminal", "capture keystrokes typed in this terminal instead of using the native global hook")
+  .option("--evdev", "Linux global capture through /dev/input; works across Wayland and Xorg when permitted")
+  .option("--terminal", "capture keystrokes typed in this terminal instead of using global capture")
   .option("--self", "hear your own local activity for testing")
   .description("start the selected team ambience")
-  .action(async (options: { terminal?: boolean; self?: boolean }) => {
+  .action(async (options: { evdev?: boolean; terminal?: boolean; self?: boolean }) => {
     const config = await loadConfig();
     await startSession(config, {
-      captureMode: options.terminal ? "terminal" : "auto",
+      captureMode: options.terminal ? "terminal" : options.evdev ? "evdev" : "auto",
       selfMonitor: options.self
     });
+  });
+
+program
+  .command("doctor")
+  .description("check capture support and privacy expectations")
+  .action(() => {
+    console.log("Cliks doctor");
+    console.log("");
+    console.log("Privacy:");
+    console.log("- Cliks sends only event kind: keyboard or mouse.");
+    console.log("- Cliks sends timing offsets inside each 500ms batch.");
+    console.log("- Cliks does not send key values, key codes, words, coordinates, windows, or app names.");
+    console.log("");
+    console.log(`Platform: ${process.platform}`);
+
+    if (process.platform === "linux") {
+      const hasInput = existsSync("/dev/input");
+      console.log(`Linux input devices: ${hasInput ? "found" : "not found"}`);
+      console.log("Best global mode on Linux: typ start --evdev");
+      console.log("If permission is denied, run:");
+      console.log("  sudo usermod -aG input $USER");
+      console.log("Then log out and back in.");
+      return;
+    }
+
+    if (process.platform === "darwin") {
+      console.log("macOS needs Accessibility permission for global input capture.");
+      console.log("Open System Settings > Privacy & Security > Accessibility and allow your terminal app.");
+      return;
+    }
+
+    if (process.platform === "win32") {
+      console.log("Windows global capture uses native low-level input hooks.");
+      console.log("If capture fails, run the terminal normally first, then as Administrator only if needed.");
+      return;
+    }
+
+    console.log("This platform is not fully supported yet. Use typ start --terminal --self for local testing.");
   });
 
 program
@@ -105,6 +145,11 @@ program
     else if (key === "hear.self") config.listening.self = bool;
     else if (key === "volume") config.listening.volume = Math.max(0, Math.min(1, Number(value)));
     else if (key === "batch.ms") config.batchWindowMs = Math.max(100, Math.min(2_000, Number(value)));
+    else if (key === "api.url") {
+      config.apiUrl = value.replace(/\/$/, "");
+      config.wsUrl = toWsUrl(config.apiUrl);
+    }
+    else if (key === "ws.url") config.wsUrl = value;
     else throw new Error(`Unknown setting: ${key}`);
     await saveConfig(config);
     console.log("Saved.");

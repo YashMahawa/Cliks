@@ -21,7 +21,9 @@ export type CliksConfig = {
   batchWindowMs: number;
 };
 
-const defaultApiUrl = process.env.CLIKS_API_URL ?? "http://localhost:8787";
+export const productionApiUrl = "https://139.59.29.207.sslip.io";
+
+const defaultApiUrl = process.env.CLIKS_API_URL ?? productionApiUrl;
 
 export function configPath() {
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "cliks", "config.json");
@@ -30,7 +32,7 @@ export function configPath() {
 export function defaultConfig(): CliksConfig {
   return {
     apiUrl: defaultApiUrl,
-    wsUrl: process.env.CLIKS_WS_URL ?? defaultApiUrl.replace(/^http/, "ws") + "/ws",
+    wsUrl: process.env.CLIKS_WS_URL ?? toWsUrl(defaultApiUrl),
     teams: [],
     sharing: {
       keyboard: true,
@@ -44,6 +46,10 @@ export function defaultConfig(): CliksConfig {
     },
     batchWindowMs: 500
   };
+}
+
+export function toWsUrl(apiUrl: string) {
+  return apiUrl.replace(/^http/, "ws").replace(/\/$/, "") + "/ws";
 }
 
 export async function loadConfig(): Promise<CliksConfig> {

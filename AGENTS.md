@@ -100,16 +100,18 @@ Before public release, review the mouse samples because one OpenGameArt source h
 
 Current modes:
 
-- `typ start`: tries `uiohook-napi` native/global capture first.
+- `typ start`: on Linux, tries `/dev/input` evdev capture first; otherwise tries `uiohook-napi` native/global capture.
+- `typ start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `typ start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
 - `typ sound-test`: plays sample sounds without joining a room.
+- `typ doctor`: explains privacy and capture permission/setup.
 
 Important platform reality:
 
 - Windows can use low-level hooks.
 - macOS can use Event Tap APIs with Accessibility permission.
 - Linux Xorg can use XRecord/XInput/native hooks.
-- Linux Wayland intentionally blocks normal global input capture. Production support needs a permissioned helper, compositor-specific integration, portal support if it emerges, or a clearly limited capture mode.
+- Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and timing.
 
 ## Commands
 

@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { createReadStream, existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 
 export type LocalActivityEvent = {
   kind: "keyboard" | "mouse";
@@ -6,29 +9,43 @@ export type LocalActivityEvent = {
   button?: "left" | "right" | "middle" | "unknown";
 };
 
+export type CaptureMode = "native" | "evdev" | "terminal" | "auto";
+
 type ActivityOptions = {
   keyboard: boolean;
   mouse: boolean;
-  mode?: "native" | "terminal" | "auto";
+  mode?: CaptureMode;
 };
 
 export class ActivityCapture extends EventEmitter {
   private cleanupFns: Array<() => void> = [];
   private usingNativeHook = false;
-  private mode: "native" | "terminal" | "off" = "off";
+  private mode: "native" | "evdev" | "terminal" | "off" = "off";
+  private permissionHint: string | undefined;
 
   async start(options: ActivityOptions) {
-    if ((options.keyboard || options.mouse) && options.mode !== "terminal") {
-      this.usingNativeHook = await this.tryNativeHooks(options);
+    if (options.keyboard || options.mouse) {
+      if (options.mode === "evdev") {
+        await this.tryEvdevCapture(options);
+      } else if (options.mode !== "terminal") {
+        if (process.platform === "linux") {
+          await this.tryEvdevCapture(options);
+        }
+
+        if (this.mode === "off") {
+          this.usingNativeHook = await this.tryNativeHooks(options);
+        }
+      }
     }
 
-    if ((!this.usingNativeHook || options.mode === "terminal") && (options.keyboard || options.mouse)) {
+    if (this.mode === "off" && options.mode === "terminal" && (options.keyboard || options.mouse)) {
       this.startTerminalCapture(options);
     }
 
     return {
       mode: this.mode,
-      nativeHookStarted: this.usingNativeHook
+      nativeHookStarted: this.usingNativeHook,
+      permissionHint: this.permissionHint
     };
   }
 
@@ -69,6 +86,78 @@ export class ActivityCapture extends EventEmitter {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private async tryEvdevCapture(options: ActivityOptions) {
+    if (process.platform !== "linux" || !existsSync("/dev/input")) {
+      return false;
+    }
+
+    let entries: string[];
+    try {
+      entries = await readdir("/dev/input");
+    } catch {
+      return false;
+    }
+
+    const eventDevices = entries
+      .filter((entry) => /^event\d+$/.test(entry))
+      .map((entry) => join("/dev/input", entry));
+
+    let opened = 0;
+    for (const device of eventDevices) {
+      try {
+        const stream = createReadStream(device, { highWaterMark: 24 * 32 });
+        const onData = (chunk: string | Buffer) => {
+          if (Buffer.isBuffer(chunk)) this.handleEvdevChunk(chunk, options);
+        };
+        stream.on("data", onData);
+        stream.on("error", () => undefined);
+        this.cleanupFns.push(() => stream.destroy());
+        opened += 1;
+      } catch (error) {
+        if (isPermissionError(error)) {
+          this.permissionHint =
+            "Linux global capture needs permission to read /dev/input/event*. Add your user to the input group, then log out/in: sudo usermod -aG input $USER";
+        }
+      }
+    }
+
+    if (opened > 0) {
+      this.mode = "evdev";
+      return true;
+    }
+
+    this.permissionHint ??=
+      "Linux global capture could not open /dev/input/event*. Try: sudo usermod -aG input $USER, then log out and back in.";
+    return false;
+  }
+
+  private handleEvdevChunk(chunk: Buffer, options: ActivityOptions) {
+    const eventSize = chunk.length % 24 === 0 ? 24 : chunk.length % 16 === 0 ? 16 : 0;
+    if (eventSize === 0) return;
+
+    for (let offset = 0; offset + eventSize <= chunk.length; offset += eventSize) {
+      const type = chunk.readUInt16LE(offset + (eventSize - 8));
+      const code = chunk.readUInt16LE(offset + (eventSize - 6));
+      const value = chunk.readInt32LE(offset + (eventSize - 4));
+
+      if (type !== 1 || value !== 1) continue;
+
+      if (isMouseButtonCode(code)) {
+        if (!options.mouse) continue;
+        this.emit("activity", {
+          kind: "mouse",
+          at: Date.now(),
+          button: mouseButtonFromEvdevCode(code)
+        } satisfies LocalActivityEvent);
+        continue;
+      }
+
+      if (options.keyboard) {
+        this.emit("activity", { kind: "keyboard", at: Date.now() } satisfies LocalActivityEvent);
+      }
     }
   }
 
@@ -150,4 +239,24 @@ function buttonName(button?: number): "left" | "right" | "middle" | "unknown" {
   if (button === 2) return "right";
   if (button === 3) return "middle";
   return "unknown";
+}
+
+function isMouseButtonCode(code: number) {
+  return code >= 0x110 && code <= 0x116;
+}
+
+function mouseButtonFromEvdevCode(code: number): "left" | "right" | "middle" | "unknown" {
+  if (code === 0x110) return "left";
+  if (code === 0x111) return "right";
+  if (code === 0x112) return "middle";
+  return "unknown";
+}
+
+function isPermissionError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ((error as { code?: string }).code === "EACCES" || (error as { code?: string }).code === "EPERM")
+  );
 }

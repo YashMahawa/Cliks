@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { ActivityBatcher, ActivityCapture } from "./activity.js";
+import { ActivityBatcher, ActivityCapture, type CaptureMode } from "./activity.js";
 import { AudioEngine } from "./audio.js";
 import type { CliksConfig } from "./config.js";
 
@@ -13,7 +13,7 @@ const quips = [
 
 export async function startSession(
   config: CliksConfig,
-  options: { captureMode?: "native" | "terminal" | "auto"; selfMonitor?: boolean } = {}
+  options: { captureMode?: CaptureMode; selfMonitor?: boolean } = {}
 ) {
   const teamCode = config.currentTeamCode;
   if (!teamCode) {
@@ -32,6 +32,7 @@ export async function startSession(
   let activeCount = 1;
   let teamName = teamCode;
   let captureMode = "starting";
+  let permissionHint: string | undefined;
   let ownPeerId: string | undefined;
 
   ws.on("open", () => {
@@ -51,12 +52,12 @@ export async function startSession(
       ownPeerId = message.peerId;
       activeCount = message.activeCount;
       teamName = message.team?.name ?? teamCode;
-      renderStatus(teamName, activeCount, listening.self, captureMode);
+      renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
     }
     if (message.type === "presence") {
       activeCount = message.activeCount;
       audio.updatePeers(message.peers ?? [], ownPeerId);
-      renderStatus(teamName, activeCount, listening.self, captureMode);
+      renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
     }
     if (message.type === "peer_activity_batch") {
       audio.scheduleBatch(message.peerId, message.events);
@@ -94,11 +95,12 @@ export async function startSession(
 
   const captureState = await capture.start({ ...config.sharing, mode: options.captureMode ?? "auto" });
   captureMode = captureState.mode;
-  renderStatus(teamName, activeCount, listening.self, captureMode);
+  permissionHint = captureState.permissionHint;
+  renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
 
   const quipTimer = setInterval(() => {
     process.stdout.write(`\n${quips[Math.floor(Math.random() * quips.length)]}\n`);
-    renderStatus(teamName, activeCount, listening.self, captureMode);
+    renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
   }, 18_000);
 
   process.on("SIGINT", () => {
@@ -113,7 +115,8 @@ function renderStatus(
   teamName: string,
   activeCount: number,
   hearingSelf: boolean | undefined,
-  captureMode: string
+  captureMode: string,
+  permissionHint?: string
 ) {
   process.stdout.write("\x1Bc");
   console.log("Cliks");
@@ -122,7 +125,9 @@ function renderStatus(
   console.log(`Active now: ${activeCount}`);
   console.log("");
   console.log("Sharing exact activity pulses in 500ms batches.");
+  console.log("Privacy: only keyboard/mouse event type and timing are sent. Never key values.");
   console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
   console.log(`Capture: ${captureMode}`);
+  if (permissionHint) console.log(`Permission: ${permissionHint}`);
   console.log("Press Ctrl+C to stop.");
 }

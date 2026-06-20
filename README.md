@@ -55,6 +55,15 @@ typ join CLIK-XXXX
 typ start
 ```
 
+On Linux, for global capture across apps on both Wayland and Xorg, use:
+
+```bash
+typ doctor
+typ start --evdev
+```
+
+If permission is needed, `typ doctor` shows the setup command. Cliks still does not send which key was pressed.
+
 For local testing where you want to hear your own typing:
 
 ```bash
@@ -85,6 +94,13 @@ typ teams
 typ switch CLIK-XXXX
 typ config
 typ sound-test
+typ doctor
+```
+
+The CLI defaults to the hosted Cliks backend. For local development, override it with:
+
+```bash
+CLIKS_API_URL=http://localhost:8787 typ start
 ```
 
 ## Install Script
@@ -129,4 +145,4 @@ Supabase is optional.
 
 This is an early prototype. The website, team codes, WebSocket relay, CLI config, event batching, and sample-based sounds are working.
 
-Global keyboard/mouse capture still needs proper production backends for Windows, macOS, Linux Xorg, and Linux Wayland.
+Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
