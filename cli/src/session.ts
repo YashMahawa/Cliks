@@ -32,6 +32,7 @@ export async function startSession(
   let activeCount = 1;
   let teamName = teamCode;
   let captureMode = "starting";
+  let ownPeerId: string | undefined;
 
   ws.on("open", () => {
     ws.send(
@@ -47,12 +48,14 @@ export async function startSession(
   ws.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
     if (message.type === "welcome") {
+      ownPeerId = message.peerId;
       activeCount = message.activeCount;
       teamName = message.team?.name ?? teamCode;
       renderStatus(teamName, activeCount, listening.self, captureMode);
     }
     if (message.type === "presence") {
       activeCount = message.activeCount;
+      audio.updatePeers(message.peers ?? [], ownPeerId);
       renderStatus(teamName, activeCount, listening.self, captureMode);
     }
     if (message.type === "peer_activity_batch") {

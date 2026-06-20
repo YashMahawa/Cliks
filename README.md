@@ -1,83 +1,126 @@
 # Cliks
 
-Cliks is an ambient coworking prototype. It lets a remote team share the feeling of working in the same room without sharing what anyone is typing.
+Cliks lets remote teammates hear the gentle background sound of each other working, without sharing what anyone is typing.
 
-The system has three parts:
+You create a team code, teammates join with the CLI, and Cliks turns anonymous keyboard/mouse activity into local ambience.
 
-- `site`: a Vercel-hosted Next.js site for creating team codes.
-- `server`: a Render-hosted API and WebSocket relay.
-- `cli`: the `typ` command that joins rooms, captures local activity pulses, and plays remote ambience.
+No login. No chat. No microphone. No keystrokes sent.
 
-## Privacy model
+## What It Sends
 
-The CLI never sends actual keys, key codes, text, mouse coordinates, window names, app names, clipboard data, screenshots, or microphone audio.
+Cliks sends only tiny activity pulses:
 
-It sends only batched activity pulses:
+- keyboard activity happened
+- mouse click happened
+- timing between those activity pulses
 
-```json
-{
-  "type": "activity_batch",
-  "teamCode": "CLIK-842K",
-  "events": [
-    { "kind": "keyboard", "offsetMs": 0 },
-    { "kind": "keyboard", "offsetMs": 84 },
-    { "kind": "mouse", "button": "left", "offsetMs": 301 }
-  ]
-}
-```
+Cliks does **not** send:
 
-Events are batched every 500ms by default, while preserving the exact kind and interval offsets inside the batch.
+- actual keys
+- key codes
+- typed text
+- mouse coordinates
+- active app or window names
+- clipboard data
+- screenshots
+- microphone audio
 
-## Local setup
+## Quick Start
+
+Clone and run locally:
 
 ```bash
-cd cliks
+git clone https://github.com/YashMahawa/Cliks.git
+cd Cliks
 npm install
-cp server/.env.example server/.env
-cp site/.env.example site/.env.local
+npm run build
+```
+
+Start the backend:
+
+```bash
 npm run dev:server
 ```
 
-In another terminal:
+Start the website in another terminal:
 
 ```bash
-cd cliks
 npm run dev:site
 ```
 
-In another terminal:
+Open the site, create a team, then join it from the CLI:
 
 ```bash
-cd cliks
-npm --workspace @cliks/cli run dev -- join CLIK-LOCAL
-npm --workspace @cliks/cli run dev
+typ join CLIK-XXXX
+typ start
 ```
 
-Without Supabase env vars, the server uses an in-memory store for local development.
-
-## Deploy
-
-Render should run `server`:
+For local testing where you want to hear your own typing:
 
 ```bash
-npm install
-npm --workspace @cliks/server run build
-npm --workspace @cliks/server start
+typ sound-test
+typ start --terminal --self
 ```
 
-Vercel should deploy `site` with:
+To turn self-monitoring back off:
 
-```text
-Root directory: cliks/site
-NEXT_PUBLIC_CLIKS_API_URL=https://your-render-service.onrender.com
+```bash
+typ set hear.self off
 ```
 
-## Install script shape
+## CLI
 
-The public install command will eventually be:
+The temporary command name is:
+
+```bash
+typ
+```
+
+Useful commands:
+
+```bash
+typ join CLIK-XXXX
+typ start
+typ teams
+typ switch CLIK-XXXX
+typ config
+typ sound-test
+```
+
+## Install Script
+
+Once this repo is public, the one-line installer is:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-For now it installs the npm package locally from the repository checkout.
+## Hosting
+
+Cliks is split into three parts:
+
+- Website: deploy `site` to Vercel.
+- Backend: deploy `server` to Render or another Node host with WebSocket support.
+- Database: run `supabase/schema.sql` in Supabase.
+
+For the website, set:
+
+```text
+NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
+```
+
+For the backend, set:
+
+```text
+CORS_ORIGIN=https://your-vercel-site
+SUPABASE_URL=your-supabase-url
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+Without Supabase env vars, the backend uses a temporary in-memory store for local development.
+
+## Current Status
+
+This is an early prototype. The website, team codes, WebSocket relay, CLI config, event batching, and sample-based sounds are working.
+
+Global keyboard/mouse capture still needs proper production backends for Windows, macOS, Linux Xorg, and Linux Wayland.
