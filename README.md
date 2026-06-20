@@ -6,6 +6,25 @@ You create a team code, teammates join with the CLI, and Cliks turns anonymous k
 
 No login. No chat. No microphone. No keystrokes sent.
 
+## Use The Hosted App
+
+Open the Cliks website, create a team code, and copy the install or join command from the page:
+
+[https://site-kappa-six-64.vercel.app](https://site-kappa-six-64.vercel.app)
+
+Install the CLI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
+```
+
+Then join a room:
+
+```bash
+typ join CLIK-XXXX
+typ start
+```
+
 ## What It Sends
 
 Cliks sends only tiny activity pulses:

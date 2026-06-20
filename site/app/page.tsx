@@ -9,13 +9,14 @@ type CreatedTeam = {
 
 const apiBase = process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "http://localhost:8787";
 const installCommand = "curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash";
+const doctorCommand = "typ doctor";
 
 export default function HomePage() {
   const [name, setName] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState<"install" | "code" | "command" | null>(null);
+  const [copied, setCopied] = useState<"install" | "doctor" | "code" | "command" | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const joinCommand = useMemo(() => {
@@ -45,7 +46,7 @@ export default function HomePage() {
     }
   }
 
-  async function copyText(value: string, kind: "install" | "code" | "command") {
+  async function copyText(value: string, kind: "install" | "doctor" | "code" | "command") {
     await navigator.clipboard.writeText(value);
     setCopied(kind);
     window.setTimeout(() => setCopied(null), 1600);
@@ -78,8 +79,31 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="panel" aria-label="Create a team">
-          <h2>Install CLI</h2>
+        <section className="panel" aria-label="Install and create a team">
+          <h2>Start in under a minute</h2>
+          <div className="steps" aria-label="Setup steps">
+            <div className="step">
+              <div className="step-number">1</div>
+              <div>
+                <strong>Install the CLI</strong>
+                <span>Paste this once in your terminal.</span>
+              </div>
+            </div>
+            <div className="step">
+              <div className="step-number">2</div>
+              <div>
+                <strong>Create a team code</strong>
+                <span>Share the code or copied command with teammates.</span>
+              </div>
+            </div>
+            <div className="step">
+              <div className="step-number">3</div>
+              <div>
+                <strong>Start the room</strong>
+                <span>Run <code>typ start</code> whenever you want the ambience on.</span>
+              </div>
+            </div>
+          </div>
           <div className="copy-row command-row install-row">
             <div className="command">{installCommand}</div>
             <button
@@ -91,7 +115,23 @@ export default function HomePage() {
             </button>
           </div>
           <p className="notes">
-            The installer points `typ` at the hosted Cliks backend and checks input permissions.
+            The installer points <code>typ</code> at the hosted Cliks backend and checks input
+            permissions. Cliks sends activity type and timing only, never typed keys.
+          </p>
+          <div className="copy-row command-row">
+            <div className="command">{doctorCommand}</div>
+            <button
+              className="copy-button"
+              type="button"
+              onClick={() => copyText(doctorCommand, "doctor")}
+            >
+              {copied === "doctor" ? "Copied" : "Copy doctor"}
+            </button>
+          </div>
+          <p className="notes compact">
+            On Linux, <code>typ doctor</code> tells you if global keyboard and mouse capture needs
+            permission for Wayland or Xorg. On macOS and Windows, use the permission prompts shown
+            by the CLI.
           </p>
 
           <div className="panel-divider" />
@@ -153,6 +193,10 @@ export default function HomePage() {
                   {copied === "command" ? "Copied" : "Copy command"}
                 </button>
               </div>
+              <p className="result-note">
+                Teammates install once, paste this command, then run <code>typ start</code> whenever
+                they want to join the room again.
+              </p>
             </div>
           ) : null}
 

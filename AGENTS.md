@@ -138,6 +138,8 @@ Vercel deploys the site. Set:
 NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 ```
 
+Current production site alias is `https://site-kappa-six-64.vercel.app`. An attempt on 2026-06-20 to assign `https://cliks.vercel.app` failed because Vercel reported that alias was already in use.
+
 The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
 
 Security posture for the live Droplet:
