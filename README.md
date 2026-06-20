@@ -117,10 +117,10 @@ SUPABASE_URL=your-supabase-url
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-On a single Droplet, the backend can store team records in SQLite by setting:
+On a single Droplet, the backend can store team records in local Postgres by setting:
 
 ```text
-CLIKS_SQLITE_PATH=/var/lib/cliks/cliks.sqlite
+CLIKS_LOCAL_POSTGRES=true
 ```
 
 Supabase is optional.

@@ -5,18 +5,27 @@ packages:
   - curl
   - git
   - caddy
+  - postgresql
+  - postgresql-contrib
 
 runcmd:
   - [ bash, -lc, |
       set -euxo pipefail
 
       curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-      apt-get install -y nodejs
+      apt-get install -y nodejs postgresql postgresql-contrib
 
       if ! id cliks >/dev/null 2>&1; then
         useradd --system --create-home --shell /usr/sbin/nologin cliks
       fi
-      install -d -o cliks -g cliks /var/lib/cliks
+
+      systemctl enable --now postgresql
+      if ! sudo -u postgres psql -tAc "select 1 from pg_roles where rolname='cliks'" | grep -q 1; then
+        sudo -u postgres createuser cliks
+      fi
+      if ! sudo -u postgres psql -tAc "select 1 from pg_database where datname='cliks'" | grep -q 1; then
+        sudo -u postgres createdb -O cliks cliks
+      fi
 
       rm -rf /opt/cliks
       git clone --depth 1 https://github.com/YashMahawa/Cliks.git /opt/cliks
@@ -29,7 +38,7 @@ runcmd:
       cat >/etc/cliks-api.env <<'EOF'
       NODE_ENV=production
       PORT=8787
-      CLIKS_SQLITE_PATH=/var/lib/cliks/cliks.sqlite
+      CLIKS_LOCAL_POSTGRES=true
       EOF
 
       cat >/etc/systemd/system/cliks-api.service <<'EOF'

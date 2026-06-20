@@ -1,10 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
-import Database from "better-sqlite3";
 import { customAlphabet } from "nanoid";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import pg from "pg";
 
 export type Team = {
   id: string;
@@ -43,70 +41,73 @@ function toPublicTeam(row: {
 export function createTeamStoreFromEnv(): TeamStore {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const sqlitePath = process.env.CLIKS_SQLITE_PATH;
+  const databaseUrl = process.env.DATABASE_URL;
+  const useLocalPostgres = process.env.CLIKS_LOCAL_POSTGRES === "true";
 
   if (supabaseUrl && serviceRoleKey) {
     return new SupabaseTeamStore(createClient(supabaseUrl, serviceRoleKey));
   }
 
-  if (sqlitePath) {
-    return new SqliteTeamStore(sqlitePath);
+  if (databaseUrl || useLocalPostgres) {
+    return new PostgresTeamStore(databaseUrl);
   }
 
   return new MemoryTeamStore();
 }
 
-class SqliteTeamStore implements TeamStore {
-  private db: Database.Database;
+class PostgresTeamStore implements TeamStore {
+  private pool: pg.Pool;
+  private ready: Promise<void>;
 
-  constructor(path: string) {
-    mkdirSync(dirname(path), { recursive: true });
-    this.db = new Database(path);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
-    this.db
-      .prepare(
-        `create table if not exists cliks_teams (
-          id text primary key,
-          code text not null unique,
-          name text not null,
-          delete_password_hash text not null,
-          created_at text not null,
-          deleted_at text
-        )`
-      )
-      .run();
-    this.db
-      .prepare(
-        `create index if not exists cliks_teams_code_active_idx
-          on cliks_teams (code)
-          where deleted_at is null`
-      )
-      .run();
+  constructor(connectionString?: string) {
+    this.pool = new pg.Pool(
+      connectionString
+        ? { connectionString }
+        : {
+            host: "/var/run/postgresql",
+            database: "cliks",
+            user: "cliks"
+          }
+    );
+    this.ready = this.init();
+  }
+
+  private async init() {
+    await this.pool.query(
+      `create table if not exists cliks_teams (
+        id uuid primary key,
+        code text not null unique,
+        name text not null,
+        delete_password_hash text not null,
+        created_at timestamptz not null default now(),
+        deleted_at timestamptz
+      )`
+    );
+    await this.pool.query(
+      `create index if not exists cliks_teams_code_active_idx
+        on cliks_teams (code)
+        where deleted_at is null`
+    );
   }
 
   async createTeam(input: { name: string; deletePassword: string }): Promise<Team> {
+    await this.ready;
     const deletePasswordHash = await bcrypt.hash(input.deletePassword, 12);
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const team = {
-        id: randomUUID(),
-        code: makeCode(),
-        name: input.name,
-        created_at: new Date().toISOString(),
-        delete_password_hash: deletePasswordHash
-      };
+      const id = randomUUID();
+      const code = makeCode();
 
       try {
-        this.db
-          .prepare(
-            `insert into cliks_teams (id, code, name, delete_password_hash, created_at)
-              values (@id, @code, @name, @delete_password_hash, @created_at)`
-          )
-          .run(team);
-        return toPublicTeam(team);
+        const { rows } = await this.pool.query(
+          `insert into cliks_teams (id, code, name, delete_password_hash)
+            values ($1, $2, $3, $4)
+            returning id, code, name, created_at`,
+          [id, code, input.name, deletePasswordHash]
+        );
+        return toPublicTeam(rows[0]);
       } catch (error) {
-        if (!isSqliteUniqueError(error)) throw error;
+        if (!isPostgresUniqueError(error)) throw error;
       }
     }
 
@@ -114,39 +115,34 @@ class SqliteTeamStore implements TeamStore {
   }
 
   async getTeamByCode(code: string): Promise<Team | null> {
-    const row = this.db
-      .prepare(
-        `select id, code, name, created_at
-          from cliks_teams
-          where code = ? and deleted_at is null
-          limit 1`
-      )
-      .get(code.toUpperCase()) as
-      | { id: string; code: string; name: string; created_at: string }
-      | undefined;
+    await this.ready;
+    const { rows } = await this.pool.query(
+      `select id, code, name, created_at
+        from cliks_teams
+        where code = $1 and deleted_at is null
+        limit 1`,
+      [code.toUpperCase()]
+    );
 
-    return row ? toPublicTeam(row) : null;
+    return rows[0] ? toPublicTeam(rows[0]) : null;
   }
 
   async deleteTeam(input: { code: string; deletePassword: string }): Promise<boolean> {
-    const row = this.db
-      .prepare(
-        `select id, delete_password_hash
-          from cliks_teams
-          where code = ? and deleted_at is null
-          limit 1`
-      )
-      .get(input.code.toUpperCase()) as
-      | { id: string; delete_password_hash: string }
-      | undefined;
+    await this.ready;
+    const { rows } = await this.pool.query(
+      `select id, delete_password_hash
+        from cliks_teams
+        where code = $1 and deleted_at is null
+        limit 1`,
+      [input.code.toUpperCase()]
+    );
+    const row = rows[0] as { id: string; delete_password_hash: string } | undefined;
 
     if (!row) return false;
     const ok = await bcrypt.compare(input.deletePassword, row.delete_password_hash);
     if (!ok) return false;
 
-    this.db
-      .prepare("update cliks_teams set deleted_at = ? where id = ?")
-      .run(new Date().toISOString(), row.id);
+    await this.pool.query("update cliks_teams set deleted_at = now() where id = $1", [row.id]);
     return true;
   }
 }
@@ -260,11 +256,11 @@ class SupabaseTeamStore implements TeamStore {
   }
 }
 
-function isSqliteUniqueError(error: unknown) {
+function isPostgresUniqueError(error: unknown) {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
+    (error as { code?: string }).code === "23505"
   );
 }
