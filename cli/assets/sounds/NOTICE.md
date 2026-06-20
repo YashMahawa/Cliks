@@ -17,27 +17,12 @@ These prototype samples are bundled so the CLI can use real recorded clicks inst
 
 ## Mouse
 
-- Source: mouse click
-- Author: LFA
-- URL: https://opengameart.org/content/mouse-click
-- License: CC0
-- File used:
-  - `mouse/mouse-01.wav`
-
-- Source: Click
-- Author: qubodup
-- URL: https://opengameart.org/content/click
-- License: CC0
-- File used:
-  - `mouse/mouse-02.wav`
-
-- Source: Multiple Click sounds effects
-- Author: jwiese
-- URL: https://opengameart.org/content/multiple-click-sounds-effects
-- License listed by OpenGameArt as CC-BY 3.0 and CC0
+- Source: Programmatically generated for Cliks
+- Author: Yash Mahawa / Cliks
+- License: MIT, same as this repository
 - Files used:
+  - `mouse/mouse-01.wav`
+  - `mouse/mouse-02.wav`
   - `mouse/mouse-03.wav`
   - `mouse/mouse-04.wav`
   - `mouse/mouse-05.wav`
-
-Before a public release, replace or re-record the mouse pack if you want to avoid mixed-license metadata entirely.

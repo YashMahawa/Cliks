@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { readdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type RemoteActivityEvent = {
@@ -31,6 +32,7 @@ type ListeningConfig = {
 export class AudioEngine {
   private placements = new Map<string, PeerPlacement>();
   private player = detectPlayer();
+  private warnedUnavailable = false;
   private keyboardSamples: string[] | undefined;
   private mouseSamples: string[] | undefined;
 
@@ -42,6 +44,7 @@ export class AudioEngine {
     for (const event of events) {
       if (event.kind === "keyboard" && !this.listening.keyboard) continue;
       if (event.kind === "mouse" && !this.listening.mouse) continue;
+      if (event.kind === "mouse" && !isPlayableMouseButton(event.button)) continue;
       setTimeout(() => void this.play(event, placement), Math.max(0, event.offsetMs));
     }
   }
@@ -60,6 +63,10 @@ export class AudioEngine {
   }
 
   async preview() {
+    if (!this.player) {
+      throw new Error(audioInstallMessage());
+    }
+
     const placement = { pan: 0, distance: 1, warmth: 1 };
     await this.play({ kind: "keyboard", offsetMs: 0 }, placement);
     await sleep(130);
@@ -72,7 +79,10 @@ export class AudioEngine {
   }
 
   private async play(event: RemoteActivityEvent, placement: PeerPlacement) {
-    if (!this.player) return;
+    if (!this.player) {
+      this.warnUnavailableOnce();
+      return;
+    }
 
     const samples = event.kind === "keyboard" ? await this.getKeyboardSamples() : await this.getMouseSamples();
     const file = samples[Math.floor(Math.random() * samples.length)];
@@ -85,7 +95,17 @@ export class AudioEngine {
         CLIKS_PAN: String(placement.pan)
       }
     });
+    child.on("error", () => {
+      this.player = null;
+      this.warnUnavailableOnce();
+    });
     child.unref();
+  }
+
+  private warnUnavailableOnce() {
+    if (this.warnedUnavailable) return;
+    this.warnedUnavailable = true;
+    console.error(`\nAudio disabled: ${audioInstallMessage()}`);
   }
 
   private async getKeyboardSamples() {
@@ -166,7 +186,67 @@ function detectPlayer(): { command: string; args: string[] } | null {
       args: ["-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();"]
     };
   }
-  return { command: "paplay", args: [] };
+
+  for (const command of ["paplay", "pw-play", "aplay"]) {
+    if (findExecutable(command)) return { command, args: [] };
+  }
+
+  return null;
+}
+
+export function getAudioPlayerStatus() {
+  const player = detectPlayer();
+  return {
+    player: player?.command,
+    hint: player ? undefined : audioInstallHint(),
+    commands: player ? [] : audioInstallCommands()
+  };
+}
+
+function findExecutable(command: string) {
+  const pathValue = process.env.PATH ?? "";
+  for (const directory of pathValue.split(delimiter)) {
+    if (!directory) continue;
+    const candidate = resolve(directory, command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Keep checking PATH.
+    }
+  }
+  return undefined;
+}
+
+function audioInstallHint() {
+  if (process.platform === "linux") {
+    return "no audio player found. Install PulseAudio/PipeWire playback tools such as pulseaudio-utils, pipewire-utils, or alsa-utils.";
+  }
+  return "no supported audio player found on this system.";
+}
+
+function audioInstallMessage() {
+  const commands = audioInstallCommands();
+  if (commands.length === 0) return audioInstallHint();
+  return `${audioInstallHint()}\nRun:\n  ${commands.join("\n  ")}`;
+}
+
+function audioInstallCommands() {
+  if (process.platform !== "linux") return [];
+  if (findExecutable("pacman")) return ["sudo pacman -S --needed libpulse"];
+  if (findExecutable("apt")) return ["sudo apt update", "sudo apt install -y pulseaudio-utils"];
+  if (findExecutable("dnf")) return ["sudo dnf install -y pulseaudio-utils"];
+  if (findExecutable("zypper")) return ["sudo zypper install pulseaudio-utils"];
+  if (findExecutable("apk")) return ["sudo apk add pulseaudio-utils"];
+  if (findExecutable("pkg")) return ["pkg install pulseaudio"];
+  return [
+    "Install one of these commands with your package manager: paplay, pw-play, or aplay",
+    "Then run: typ sound-test"
+  ];
+}
+
+function isPlayableMouseButton(button?: RemoteActivityEvent["button"]) {
+  return button === "left" || button === "right";
 }
 
 function seeded(text: string) {

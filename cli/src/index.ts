@@ -1,7 +1,8 @@
 import { Command } from "commander";
-import { existsSync } from "node:fs";
 import { loadConfig, rememberTeam, saveConfig, toWsUrl } from "./config.js";
 import { AudioEngine } from "./audio.js";
+import { runCaptureTest } from "./captureTest.js";
+import { runDoctor } from "./doctor.js";
 import { startSession } from "./session.js";
 
 const program = new Command();
@@ -42,39 +43,21 @@ program
 program
   .command("doctor")
   .description("check capture support and privacy expectations")
-  .action(() => {
-    console.log("Cliks doctor");
-    console.log("");
-    console.log("Privacy:");
-    console.log("- Cliks sends only event kind: keyboard or mouse.");
-    console.log("- Cliks sends timing offsets inside each 500ms batch.");
-    console.log("- Cliks does not send key values, key codes, words, coordinates, windows, or app names.");
-    console.log("");
-    console.log(`Platform: ${process.platform}`);
+  .action(runDoctor);
 
-    if (process.platform === "linux") {
-      const hasInput = existsSync("/dev/input");
-      console.log(`Linux input devices: ${hasInput ? "found" : "not found"}`);
-      console.log("Best global mode on Linux: typ start --evdev");
-      console.log("If permission is denied, run:");
-      console.log("  sudo usermod -aG input $USER");
-      console.log("Then log out and back in.");
-      return;
-    }
-
-    if (process.platform === "darwin") {
-      console.log("macOS needs Accessibility permission for global input capture.");
-      console.log("Open System Settings > Privacy & Security > Accessibility and allow your terminal app.");
-      return;
-    }
-
-    if (process.platform === "win32") {
-      console.log("Windows global capture uses native low-level input hooks.");
-      console.log("If capture fails, run the terminal normally first, then as Administrator only if needed.");
-      return;
-    }
-
-    console.log("This platform is not fully supported yet. Use typ start --terminal --self for local testing.");
+program
+  .command("capture-test")
+  .option("--evdev", "test Linux global capture through /dev/input")
+  .option("--terminal", "test keystrokes typed in this terminal")
+  .option("--seconds <seconds>", "test duration in seconds")
+  .description("verify that local keyboard/mouse activity is being captured")
+  .action(async (options: { evdev?: boolean; terminal?: boolean; seconds?: string }) => {
+    const config = await loadConfig();
+    await runCaptureTest(config, {
+      captureMode: options.terminal ? "terminal" : options.evdev ? "evdev" : "auto",
+      seconds: options.seconds ? Number(options.seconds) : undefined
+    });
+    process.exit(0);
   });
 
 program

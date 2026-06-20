@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { createReadStream, existsSync } from "node:fs";
+import { constants, createReadStream, existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -16,6 +17,11 @@ type ActivityOptions = {
   mouse: boolean;
   mode?: CaptureMode;
 };
+
+const BTN_LEFT = 0x110;
+const BTN_RIGHT = 0x111;
+const KEY_MIN = 1;
+const KEY_MAX = 0xff;
 
 export class ActivityCapture extends EventEmitter {
   private cleanupFns: Array<() => void> = [];
@@ -51,6 +57,8 @@ export class ActivityCapture extends EventEmitter {
 
   stop() {
     for (const cleanup of this.cleanupFns.splice(0)) cleanup();
+    this.mode = "off";
+    this.usingNativeHook = false;
   }
 
   private async tryNativeHooks(options: ActivityOptions) {
@@ -108,13 +116,23 @@ export class ActivityCapture extends EventEmitter {
     let opened = 0;
     for (const device of eventDevices) {
       try {
+        await access(device, constants.R_OK);
         const stream = createReadStream(device, { highWaterMark: 24 * 32 });
         const onData = (chunk: string | Buffer) => {
           if (Buffer.isBuffer(chunk)) this.handleEvdevChunk(chunk, options);
         };
         stream.on("data", onData);
-        stream.on("error", () => undefined);
-        this.cleanupFns.push(() => stream.destroy());
+        stream.on("error", (error) => {
+          if (isPermissionError(error)) {
+            this.permissionHint =
+              "Linux global capture lost permission to read /dev/input/event*. Add your user to the input group, then log out/in: sudo usermod -aG input $USER";
+          }
+        });
+        this.cleanupFns.push(() => {
+          stream.off("data", onData);
+          stream.removeAllListeners("error");
+          stream.destroy();
+        });
         opened += 1;
       } catch (error) {
         if (isPermissionError(error)) {
@@ -155,7 +173,7 @@ export class ActivityCapture extends EventEmitter {
         continue;
       }
 
-      if (options.keyboard) {
+      if (options.keyboard && isKeyboardKeyCode(code)) {
         this.emit("activity", { kind: "keyboard", at: Date.now() } satisfies LocalActivityEvent);
       }
     }
@@ -176,11 +194,12 @@ export class ActivityCapture extends EventEmitter {
 
       const withoutMouse = text.replace(/\x1b\[<(\d+);(\d+);(\d+)([mM])/g, (_match, code, _x, _y, action) => {
         if (options.mouse && action === "M") {
-          const button = Number(code) & 3;
+          const button = terminalMouseButton(Number(code));
+          if (!button) return "";
           this.emit("activity", {
             kind: "mouse",
             at: Date.now(),
-            button: buttonName(button + 1)
+            button
           } satisfies LocalActivityEvent);
         }
         return "";
@@ -242,14 +261,25 @@ function buttonName(button?: number): "left" | "right" | "middle" | "unknown" {
 }
 
 function isMouseButtonCode(code: number) {
-  return code >= 0x110 && code <= 0x116;
+  return code === BTN_LEFT || code === BTN_RIGHT;
+}
+
+function isKeyboardKeyCode(code: number) {
+  return code >= KEY_MIN && code <= KEY_MAX;
 }
 
 function mouseButtonFromEvdevCode(code: number): "left" | "right" | "middle" | "unknown" {
-  if (code === 0x110) return "left";
-  if (code === 0x111) return "right";
-  if (code === 0x112) return "middle";
+  if (code === BTN_LEFT) return "left";
+  if (code === BTN_RIGHT) return "right";
   return "unknown";
+}
+
+function terminalMouseButton(code: number): "left" | "right" | undefined {
+  if (code & 32 || code & 64) return undefined;
+  const button = code & 3;
+  if (button === 0) return "left";
+  if (button === 2) return "right";
+  return undefined;
 }
 
 function isPermissionError(error: unknown) {

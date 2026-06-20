@@ -34,6 +34,18 @@ export async function startSession(
   let captureMode = "starting";
   let permissionHint: string | undefined;
   let ownPeerId: string | undefined;
+  let quipTimer: NodeJS.Timeout | undefined;
+  let cleanedUp = false;
+  let localCapturedEvents = 0;
+  let localSentEvents = 0;
+
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (quipTimer) clearInterval(quipTimer);
+    batcher.flush();
+    capture.stop();
+  };
 
   ws.on("open", () => {
     ws.send(
@@ -52,12 +64,12 @@ export async function startSession(
       ownPeerId = message.peerId;
       activeCount = message.activeCount;
       teamName = message.team?.name ?? teamCode;
-      renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
+      renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
     }
     if (message.type === "presence") {
       activeCount = message.activeCount;
       audio.updatePeers(message.peers ?? [], ownPeerId);
-      renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
+      renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
     }
     if (message.type === "peer_activity_batch") {
       audio.scheduleBatch(message.peerId, message.events);
@@ -68,18 +80,24 @@ export async function startSession(
   });
 
   ws.on("close", () => {
+    cleanup();
     console.log("\nDisconnected from Cliks.");
     process.exit(0);
   });
 
   ws.on("error", (error) => {
+    cleanup();
     console.error(`\nCould not connect to Cliks: ${error.message}`);
     process.exit(1);
   });
 
-  capture.on("activity", (event) => batcher.push(event));
+  capture.on("activity", (event) => {
+    localCapturedEvents += 1;
+    batcher.push(event);
+  });
   batcher.on("batch", (batch) => {
     if (ws.readyState !== WebSocket.OPEN) return;
+    localSentEvents += batch.events.length;
     ws.send(
       JSON.stringify({
         type: "activity_batch",
@@ -96,19 +114,23 @@ export async function startSession(
   const captureState = await capture.start({ ...config.sharing, mode: options.captureMode ?? "auto" });
   captureMode = captureState.mode;
   permissionHint = captureState.permissionHint;
-  renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
+  renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
 
-  const quipTimer = setInterval(() => {
+  quipTimer = setInterval(() => {
     process.stdout.write(`\n${quips[Math.floor(Math.random() * quips.length)]}\n`);
-    renderStatus(teamName, activeCount, listening.self, captureMode, permissionHint);
+    renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
   }, 18_000);
 
-  process.on("SIGINT", () => {
-    clearInterval(quipTimer);
-    batcher.flush();
-    capture.stop();
+  const stopFromSignal = () => {
+    cleanup();
     ws.close();
-  });
+    setTimeout(() => process.exit(0), 100).unref();
+  };
+
+  process.once("SIGINT", stopFromSignal);
+  process.once("SIGTERM", stopFromSignal);
+  process.once("SIGHUP", stopFromSignal);
+  process.once("exit", cleanup);
 }
 
 function renderStatus(
@@ -116,6 +138,8 @@ function renderStatus(
   activeCount: number,
   hearingSelf: boolean | undefined,
   captureMode: string,
+  localCapturedEvents: number,
+  localSentEvents: number,
   permissionHint?: string
 ) {
   process.stdout.write("\x1Bc");
@@ -128,6 +152,11 @@ function renderStatus(
   console.log("Privacy: only keyboard/mouse event type and timing are sent. Never key values.");
   console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
   console.log(`Capture: ${captureMode}`);
+  console.log(`Local captured events: ${localCapturedEvents}`);
+  console.log(`Local sent events: ${localSentEvents}`);
   if (permissionHint) console.log(`Permission: ${permissionHint}`);
+  if (captureMode !== "off" && localCapturedEvents === 0) {
+    console.log("If teammates cannot hear you, run: typ capture-test");
+  }
   console.log("Press Ctrl+C to stop.");
 }

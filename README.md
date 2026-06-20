@@ -83,6 +83,8 @@ typ start --evdev
 
 If permission is needed, `typ doctor` shows the setup command. Cliks still does not send which key was pressed.
 
+On Linux, local playback needs one common audio CLI to be available: `paplay`, `pw-play`, or `aplay`. `typ doctor` checks this, checks `/dev/input` permissions, and prints the commands to fix detected issues.
+
 For local testing where you want to hear your own typing:
 
 ```bash
@@ -113,8 +115,18 @@ typ teams
 typ switch CLIK-XXXX
 typ config
 typ sound-test
+typ capture-test
 typ doctor
 ```
+
+If teammates can hear you connect but cannot hear your keystrokes, run:
+
+```bash
+typ doctor
+typ capture-test --evdev
+```
+
+While `typ start` is running, the status screen also shows local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check the connection/backend.
 
 The CLI defaults to the hosted Cliks backend. For local development, override it with:
 
@@ -184,3 +196,7 @@ Supabase is optional.
 This is an early prototype. The website, team codes, WebSocket relay, CLI config, event batching, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
+
+## License
+
+Cliks is released under the MIT License. Bundled sound sample attribution and licensing notes are in `cli/assets/sounds/NOTICE.md`.
