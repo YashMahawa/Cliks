@@ -21,6 +21,7 @@ cd "$INSTALL_DIR"
 npm install
 npm --workspace @cliks/cli run build
 npm link --workspace @cliks/cli
+typ set api.url "$DEFAULT_BACKEND"
 
 echo ""
 echo "Cliks installed."
