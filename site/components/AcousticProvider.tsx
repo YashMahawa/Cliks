@@ -1,21 +1,11 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";
-import { AnimatePresence, motion } from "motion/react";
-
-interface Ripple {
-  id: number;
-  x: number;
-  y: number;
-}
 
 interface AcousticContextProps {
-  activeSwitch: string;
-  setActiveSwitch: (type: string) => void;
   triggerSound: () => void;
   pulseActive: boolean;
-  hasEntered: boolean;
-  setHasEntered: (val: boolean) => void;
+  triggerPulse: () => void;
 }
 
 const AcousticContext = createContext<AcousticContextProps | undefined>(undefined);
@@ -29,207 +19,100 @@ export function useAcoustic() {
 }
 
 export function AcousticProvider({ children }: { children: React.ReactNode }) {
-  const [activeSwitch, setActiveSwitch] = useState<string>("base");
   const [pulseActive, setPulseActive] = useState<boolean>(false);
-  const [hasEntered, setHasEntered] = useState<boolean>(false);
-  const [ripples, setRipples] = useState<Ripple[]>([]);
+  const [buffers, setBuffers] = useState<AudioBuffer[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const buffersRef = useRef<AudioBuffer[]>([]);
 
-  // Initialize Web Audio Context on user gesture
-  const initAudio = () => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (audioCtxRef.current.state === "suspended") {
-      audioCtxRef.current.resume();
-    }
-  };
+  // Preload sound files on mount
+  useEffect(() => {
+    const loadAudio = async () => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return;
+        const ctx = new AudioContextClass();
+        audioCtxRef.current = ctx;
 
-  const createNoiseNode = (audioCtx: AudioContext, now: number, duration: number, lowPassFreq: number, highPassFreq: number) => {
-    const bufferSize = audioCtx.sampleRate * duration;
-    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buffer;
-    
-    const lp = audioCtx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.setValueAtTime(lowPassFreq, now);
-    
-    const hp = audioCtx.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.setValueAtTime(highPassFreq, now);
-    
-    noise.connect(hp);
-    hp.connect(lp);
-    return { source: noise, destination: lp };
+        const soundUrls = [
+          "/sounds/keyboard/key-01.wav",
+          "/sounds/keyboard/key-02.wav",
+          "/sounds/keyboard/key-03.wav",
+          "/sounds/keyboard/key-04.wav",
+          "/sounds/keyboard/key-05.wav",
+        ];
+
+        const loadedBuffers = await Promise.all(
+          soundUrls.map(async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error();
+            const arrayBuffer = await response.arrayBuffer();
+            return await ctx.decodeAudioData(arrayBuffer);
+          })
+        );
+
+        setBuffers(loadedBuffers);
+        buffersRef.current = loadedBuffers;
+      } catch (error) {
+        // AUDIO INTEGRITY: fail silently, do not log errors, no beeps
+      }
+    };
+
+    loadAudio();
+  }, []);
+
+  const triggerPulse = () => {
+    setPulseActive(true);
+    // Reset pulse class immediately after animation finishes to allow repeating keydowns
+    setTimeout(() => setPulseActive(false), 200);
   };
 
   const triggerSound = () => {
-    initAudio();
-    const audioCtx = audioCtxRef.current;
-    if (!audioCtx) return;
+    const ctx = audioCtxRef.current;
+    const currentBuffers = buffersRef.current;
+    if (!ctx || currentBuffers.length === 0) return;
 
-    const now = audioCtx.currentTime;
-
-    if (activeSwitch === "base") {
-      // Linear Switch Clack
-      const osc = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(750, now);
-      osc.frequency.exponentialRampToValueAtTime(120, now + 0.04);
-      
-      gainNode.gain.setValueAtTime(0.12, now);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
-      
-      const noise = createNoiseNode(audioCtx, now, 0.025, 2200, 900);
-      const noiseGain = audioCtx.createGain();
-      noiseGain.gain.setValueAtTime(0.06, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.018);
-      
-      noise.destination.connect(noiseGain);
-      noiseGain.connect(audioCtx.destination);
-      noise.source.start(now);
-      
-      osc.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      osc.start(now);
-      osc.stop(now + 0.05);
-
-    } else if (activeSwitch === "model_m") {
-      // Heavy Buckling Spring metallic ping + snap
-      const osc1 = audioCtx.createOscillator();
-      const osc2 = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      osc1.type = "sine";
-      osc1.frequency.setValueAtTime(2900, now);
-      osc1.frequency.setValueAtTime(2600, now + 0.015);
-      
-      osc2.type = "triangle";
-      osc2.frequency.setValueAtTime(380, now);
-      osc2.frequency.exponentialRampToValueAtTime(70, now + 0.035);
-      
-      gainNode.gain.setValueAtTime(0.1, now);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
-      
-      const noise = createNoiseNode(audioCtx, now, 0.04, 4800, 1800);
-      const noiseGain = audioCtx.createGain();
-      noiseGain.gain.setValueAtTime(0.12, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
-      
-      noise.destination.connect(noiseGain);
-      noiseGain.connect(audioCtx.destination);
-      noise.source.start(now);
-      
-      osc1.connect(gainNode);
-      osc2.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      
-      osc1.start(now);
-      osc2.start(now);
-      osc1.stop(now + 0.12);
-      osc2.stop(now + 0.12);
-
-    } else if (activeSwitch === "library") {
-      // Muffled deep room thud
-      const osc = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(55, now + 0.05);
-      
-      gainNode.gain.setValueAtTime(0.1, now);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
-      
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(280, now);
-      
-      osc.connect(filter);
-      filter.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      
-      osc.start(now);
-      osc.stop(now + 0.06);
-
-    } else if (activeSwitch === "rain") {
-      // High-pitched rain droplet on window
-      const osc = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(4200, now);
-      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.015);
-      
-      gainNode.gain.setValueAtTime(0.06, now);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.018);
-      
-      const noise = createNoiseNode(audioCtx, now, 0.12, 750, 250);
-      const noiseGain = audioCtx.createGain();
-      noiseGain.gain.setValueAtTime(0.03, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-      
-      noise.destination.connect(noiseGain);
-      noiseGain.connect(audioCtx.destination);
-      noise.source.start(now);
-      
-      osc.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      
-      osc.start(now);
-      osc.stop(now + 0.025);
+    if (ctx.state === "suspended") {
+      ctx.resume();
     }
-  };
 
-  const handleInteraction = (clientX?: number, clientY?: number) => {
-    // 1. Play sound
-    triggerSound();
+    const now = ctx.currentTime;
+    // Select a random WAV sample
+    const buffer = currentBuffers[Math.floor(Math.random() * currentBuffers.length)];
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
 
-    // 2. Pulse accent metric
-    setPulseActive(true);
-    setTimeout(() => setPulseActive(false), 200);
+    // Gain (Volume) Modulation: 0.85 to 1.15
+    const gainNode = ctx.createGain();
+    const volumeMod = 0.85 + Math.random() * 0.3;
+    gainNode.gain.setValueAtTime(volumeMod * 0.6, now);
 
-    // 3. Add transient ripple
-    const id = Date.now() + Math.random();
-    const x = clientX !== undefined ? clientX : Math.random() * window.innerWidth;
-    const y = clientY !== undefined ? clientY : Math.random() * window.innerHeight;
+    // Playback Rate (Pitch) Modulation: 0.92 to 1.08
+    const pitchMod = 0.92 + Math.random() * 0.16;
+    source.playbackRate.setValueAtTime(pitchMod, now);
 
-    setRipples((prev) => [...prev, { id, x, y }]);
-    setTimeout(() => {
-      setRipples((prev) => prev.filter((r) => r.id !== id));
-    }, 850);
-
-    // 4. Set entered status
-    if (!hasEntered) {
-      setHasEntered(true);
-    }
+    source.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    source.start(now);
   };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Avoid triggering on modifier keys or standard typing if form is active
+      // Ignore if user is writing in input fields
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       ) {
-        // Still play sound for tactile feel but don't intercept standard form keys for navigation
+        // Still play tactile sound but don't pulse the central hero dot or block key defaults
         triggerSound();
-        setPulseActive(true);
-        setTimeout(() => setPulseActive(false), 200);
         return;
       }
-      handleInteraction();
+      
+      triggerSound();
+      triggerPulse();
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Exclude clicks on form inputs to prevent double triggering or input issues
+      // Ignore interactive HTML elements to avoid double click sound / focus sound
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -237,11 +120,11 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
         e.target instanceof HTMLAnchorElement
       ) {
         triggerSound();
-        setPulseActive(true);
-        setTimeout(() => setPulseActive(false), 200);
         return;
       }
-      handleInteraction(e.clientX, e.clientY);
+
+      triggerSound();
+      triggerPulse();
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -251,47 +134,17 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleMouseDown);
     };
-  }, [activeSwitch, hasEntered]);
+  }, []);
 
   return (
     <AcousticContext.Provider
       value={{
-        activeSwitch,
-        setActiveSwitch,
         triggerSound,
         pulseActive,
-        hasEntered,
-        setHasEntered,
+        triggerPulse,
       }}
     >
-      {/* Transient Glow ripples layer */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        <AnimatePresence>
-          {ripples.map((ripple) => (
-            <motion.div
-              key={ripple.id}
-              initial={{ opacity: 0.8, scale: 0 }}
-              animate={{ opacity: 0, scale: 4 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              style={{
-                position: "absolute",
-                left: ripple.x,
-                top: ripple.y,
-                width: "250px",
-                height: "250px",
-                transform: "translate(-50%, -50%)",
-                background: "radial-gradient(circle, rgba(34, 211, 238, 0.12) 0%, rgba(34, 211, 238, 0) 70%)",
-                borderRadius: "50%",
-              }}
-            />
-          ))}
-        </AnimatePresence>
-      </div>
-
-      <div className="relative z-10 flex min-h-[100dvh] flex-col">
-        {children}
-      </div>
+      {children}
     </AcousticContext.Provider>
   );
 }

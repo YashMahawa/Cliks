@@ -1,72 +1,69 @@
 @import "tailwindcss";
 
 @theme {
-  --color-accent: #22d3ee;
-  --font-sans: "Geist", sans-serif;
-  --font-mono: "Geist Mono", monospace;
+  --color-bg-desk: #11100f;
+  --color-surface-desk: #1a1918;
+  --color-text-primary: #eae5d9;
+  --color-text-muted: #8b867c;
+  --color-accent-ember: #d97746;
 }
 
-/* Custom base styles */
 html, body {
-  background-color: #09090b; /* True off-black */
-  color: #f4f4f5; /* text-zinc-100 */
+  background-color: #11100f;
+  color: #eae5d9;
   overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
 ::selection {
-  background-color: rgba(34, 211, 238, 0.2);
-  color: #22d3ee;
+  background-color: rgba(217, 119, 70, 0.15);
+  color: #d97746;
 }
 
-/* Custom scrollbar for darkrecording studio aesthetic */
+/* Scrollbar for Warm Desk theme */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #09090b;
+  background: #11100f;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #2a2826;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: #3a3835;
 }
 
-/* Transient keystroke ripple style */
-.keystroke-ripple {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(34, 211, 238, 0.15) 0%, rgba(34, 211, 238, 0) 70%);
-  transform: translate(-50%, -50%);
-  z-index: 10;
-}
-
-/* Pulse animation for active audio states */
-@keyframes audio-pulse {
-  0%, 100% {
-    text-shadow: 0 0 0 rgba(34, 211, 238, 0);
-    color: #f4f4f5;
+/* Glow pulse animation for the central ember dot */
+@keyframes dot-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 6px rgba(217, 119, 70, 0.4);
+    opacity: 0.8;
   }
   50% {
-    text-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
-    color: #22d3ee;
+    transform: scale(1.6);
+    box-shadow: 0 0 24px rgba(217, 119, 70, 0.9);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 6px rgba(217, 119, 70, 0.4);
+    opacity: 0.8;
   }
 }
 
-.audio-active-pulse {
-  animation: audio-pulse 0.2s ease-out;
+.ember-pulse {
+  animation: dot-pulse 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Blinking cursor */
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-.blinking-cursor {
-  animation: blink 1s step-end infinite;
+/* Custom styles for inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #eae5d9;
+  -webkit-box-shadow: 0 0 0px 1000px #1a1918 inset;
+  transition: background-color 5000s ease-in-out 0s;
 }
