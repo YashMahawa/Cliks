@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-desk: #11100f;
-  --color-surface-desk: #1a1918;
-  --color-text-primary: #eae5d9;
-  --color-text-muted: #8b867c;
+  --color-bg-desk: #0a0a0a;
+  --color-surface-desk: #121212;
+  --color-text-primary: #f5f5f5;
+  --color-text-muted: #888888;
   --color-accent-ember: #d97746;
-  --font-sans: var(--font-inter), sans-serif;
+  --font-sans: var(--font-geist), sans-serif;
   --font-mono: var(--font-geist-mono), monospace;
 }
 
 html, body {
-  background-color: #11100f;
-  color: #eae5d9;
+  background-color: #0a0a0a;
+  color: #f5f5f5;
   font-family: var(--font-sans);
   overflow-x: hidden;
   scroll-behavior: smooth;
@@ -24,20 +24,20 @@ html, body {
   color: #d97746;
 }
 
-/* Scrollbar for Warm Desk theme */
+/* Scrollbar for Dark Tech theme */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #11100f;
+  background: #0a0a0a;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2826;
+  background: #222222;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3835;
+  background: #333333;
 }
 
 /* Glow pulse animation for the central ember dot */
@@ -77,7 +77,7 @@ html, body {
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus {
-  -webkit-text-fill-color: #eae5d9;
-  -webkit-box-shadow: 0 0 0px 1000px #1a1918 inset;
+  -webkit-text-fill-color: #f5f5f5;
+  -webkit-box-shadow: 0 0 0px 1000px #121212 inset;
   transition: background-color 5000s ease-in-out 0s;
 }
