@@ -31,9 +31,9 @@ runcmd:
       git clone --depth 1 https://github.com/YashMahawa/Cliks.git /opt/cliks
       chown -R cliks:cliks /opt/cliks
 
-      cd /opt/cliks
-      npm ci
-      npm --workspace @cliks/server run build
+      cd /opt/cliks/server
+      npm install
+      npm run build
 
       cat >/etc/cliks-api.env <<'EOF'
       NODE_ENV=production
@@ -51,9 +51,9 @@ runcmd:
       Type=simple
       User=cliks
       Group=cliks
-      WorkingDirectory=/opt/cliks
+      WorkingDirectory=/opt/cliks/server
       EnvironmentFile=/etc/cliks-api.env
-      ExecStart=/usr/bin/npm --workspace @cliks/server start
+      ExecStart=/usr/bin/npm start
       Restart=always
       RestartSec=5
 
