@@ -43,7 +43,7 @@ Example:
 ```json
 {
   "type": "activity_batch",
-  "teamCode": "CLIK-842K",
+  "teamCode": "CLIK-842KQ9",
   "batchStartedAt": 1780000000000,
   "events": [
     { "kind": "keyboard", "offsetMs": 0 },
@@ -57,7 +57,7 @@ The server only validates and relays these events. It does not assign 3D positio
 
 ## Team Codes And Data
 
-Team codes use the `CLIK-XXXX` shape.
+Team codes use the `CLIK-XXXXXX` shape for newly created rooms. The in-memory local test room remains `CLIK-LOCAL`.
 
 Stored data:
 
@@ -82,6 +82,7 @@ Each listener locally assigns positions to teammates relative to themselves. The
 When people leave, the local listener recomputes the arrangement, so far users move inward to fill gaps. Placement is deterministic per listener using peer ids as jitter seeds, but it is listener-relative and not a shared server truth.
 
 Current audio playback only uses distance as volume attenuation and stores pan/distance in placement. More realistic 3D processing is future work.
+Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded queue and caps concurrent player processes to avoid process storms during dense batches.
 
 ## Sound
 
@@ -119,6 +120,8 @@ Important platform reality:
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state.
 - Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `typ fix-terminal`.
 - The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
+- Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
+- `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
 
 ## Commands
 
@@ -150,6 +153,10 @@ Current production site alias is `https://site-kappa-six-64.vercel.app`. An atte
 
 The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
 
+The public `/health` route must stay unauthenticated for uptime checks, but it must not expose team codes, team names, peer ids, nicknames, or per-room snapshots. It returns only `ok`, `totalRooms`, and `totalPeers`.
+
+Room creation and deletion routes have lightweight in-process per-IP rate limits before expensive bcrypt work. Delete attempts must run a dummy bcrypt comparison when a code is missing so timing does not reveal whether a room exists.
+
 Security posture for the live Droplet:
 
 - the DigitalOcean API token is not in the repo, website bundle, CLI, installer, or Droplet app env
@@ -173,7 +180,7 @@ Supabase should run `supabase/schema.sql`.
 
 - `npm audit --omit=dev` currently reports moderate advisories through Next/PostCSS dependency metadata. Do not force downgrade to old Next; wait for a patched compatible release or reassess if Next dependency graph changes.
 - Global capture is not production-ready across every OS yet.
-- The `CLIKS_GAIN` and `CLIKS_PAN` environment values are not used by the current basic audio players; they are placeholders for a later player/mixer that can apply real gain/pan.
+- Real pan is still future work for the current basic audio players. Distance-based gain is applied only on players with supported volume flags.
 - The command is still `typ`; product name is Cliks.
 
 ## README Policy

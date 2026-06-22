@@ -17,7 +17,8 @@ export type TeamStore = {
   deleteTeam(input: { code: string; deletePassword: string }): Promise<boolean>;
 };
 
-const makeSuffix = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 4);
+const makeSuffix = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+const dummyDeletePasswordHash = "$2b$12$mMCOaGsqrw5HVe4PboZEdeKqkZZSrer3p4/KmwcbXB0YraVftIwf.";
 
 function makeCode() {
   return `CLIK-${makeSuffix()}`;
@@ -138,8 +139,8 @@ class PostgresTeamStore implements TeamStore {
     );
     const row = rows[0] as { id: string; delete_password_hash: string } | undefined;
 
+    const ok = await bcrypt.compare(input.deletePassword, row?.delete_password_hash ?? dummyDeletePasswordHash);
     if (!row) return false;
-    const ok = await bcrypt.compare(input.deletePassword, row.delete_password_hash);
     if (!ok) return false;
 
     await this.pool.query("update cliks_teams set deleted_at = now() where id = $1", [row.id]);
@@ -185,8 +186,8 @@ class MemoryTeamStore implements TeamStore {
 
   async deleteTeam(input: { code: string; deletePassword: string }): Promise<boolean> {
     const team = this.teams.get(input.code.toUpperCase());
+    const ok = await bcrypt.compare(input.deletePassword, team && !team.deletedAt ? team.deletePasswordHash : dummyDeletePasswordHash);
     if (!team || team.deletedAt) return false;
-    const ok = await bcrypt.compare(input.deletePassword, team.deletePasswordHash);
     if (!ok) return false;
     team.deletedAt = new Date().toISOString();
     return true;
@@ -241,9 +242,9 @@ class SupabaseTeamStore implements TeamStore {
       .maybeSingle();
 
     if (error) throw new Error(error.message);
-    if (!data) return false;
 
-    const ok = await bcrypt.compare(input.deletePassword, data.delete_password_hash);
+    const ok = await bcrypt.compare(input.deletePassword, data?.delete_password_hash ?? dummyDeletePasswordHash);
+    if (!data) return false;
     if (!ok) return false;
 
     const { error: updateError } = await this.supabase

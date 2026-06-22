@@ -29,12 +29,28 @@ type ListeningConfig = {
   volume: number;
 };
 
+type DetectedPlayer = {
+  command: string;
+  args: string[];
+  volumeArgs?: (gain: number) => string[];
+};
+
+type PlaybackJob = {
+  file: string;
+  gain: number;
+};
+
+const maxConcurrentPlayback = 4;
+const maxQueuedPlayback = 96;
+
 export class AudioEngine {
   private placements = new Map<string, PeerPlacement>();
   private player = detectPlayer();
   private warnedUnavailable = false;
   private keyboardSamples: string[] | undefined;
   private mouseSamples: string[] | undefined;
+  private playbackQueue: PlaybackJob[] = [];
+  private activePlayback = 0;
 
   constructor(private listening: ListeningConfig) {}
 
@@ -86,20 +102,49 @@ export class AudioEngine {
 
     const samples = event.kind === "keyboard" ? await this.getKeyboardSamples() : await this.getMouseSamples();
     const file = samples[Math.floor(Math.random() * samples.length)];
-    const child = spawn(this.player.command, [...this.player.args, file], {
+    this.enqueuePlayback({
+      file,
+      gain: clamp(this.listening.volume * (1 / placement.distance), 0, 1)
+    });
+  }
+
+  private enqueuePlayback(job: PlaybackJob) {
+    if (this.playbackQueue.length >= maxQueuedPlayback) {
+      this.playbackQueue.shift();
+    }
+
+    this.playbackQueue.push(job);
+    this.drainPlaybackQueue();
+  }
+
+  private drainPlaybackQueue() {
+    if (!this.player) return;
+
+    while (this.activePlayback < maxConcurrentPlayback && this.playbackQueue.length > 0) {
+      const job = this.playbackQueue.shift();
+      if (!job) return;
+      this.spawnPlayback(job);
+    }
+  }
+
+  private spawnPlayback(job: PlaybackJob) {
+    if (!this.player) return;
+    const player = this.player;
+    this.activePlayback += 1;
+
+    const child = spawn(player.command, [...player.args, ...(player.volumeArgs?.(job.gain) ?? []), job.file], {
       stdio: "ignore",
-      detached: true,
-      env: {
-        ...process.env,
-        CLIKS_GAIN: String(this.listening.volume * (1 / placement.distance)),
-        CLIKS_PAN: String(placement.pan)
-      }
+      detached: false,
+      env: process.env
     });
     child.on("error", () => {
       this.player = null;
       this.warnUnavailableOnce();
     });
-    child.unref();
+    child.on("close", () => {
+      this.activePlayback = Math.max(0, this.activePlayback - 1);
+      this.drainPlaybackQueue();
+    });
   }
 
   private warnUnavailableOnce() {
@@ -178,8 +223,15 @@ async function loadSamples(kind: "keyboard" | "mouse") {
   return files;
 }
 
-function detectPlayer(): { command: string; args: string[] } | null {
-  if (process.platform === "darwin") return { command: "afplay", args: [] };
+function detectPlayer(): DetectedPlayer | null {
+  if (process.platform === "darwin") {
+    return {
+      command: "afplay",
+      args: [],
+      volumeArgs: (gain) => ["-v", String(clamp(gain, 0, 1))]
+    };
+  }
+
   if (process.platform === "win32") {
     return {
       command: "powershell.exe",
@@ -187,8 +239,24 @@ function detectPlayer(): { command: string; args: string[] } | null {
     };
   }
 
-  for (const command of ["paplay", "pw-play", "aplay"]) {
-    if (findExecutable(command)) return { command, args: [] };
+  if (findExecutable("paplay")) {
+    return {
+      command: "paplay",
+      args: [],
+      volumeArgs: (gain) => ["--volume", String(Math.round(clamp(gain, 0, 1) * 65536))]
+    };
+  }
+
+  if (findExecutable("pw-play")) {
+    return {
+      command: "pw-play",
+      args: [],
+      volumeArgs: (gain) => ["--volume", String(clamp(gain, 0, 1))]
+    };
+  }
+
+  if (findExecutable("aplay")) {
+    return { command: "aplay", args: [] };
   }
 
   return null;
@@ -268,4 +336,8 @@ function seeded(text: string) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }

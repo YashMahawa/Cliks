@@ -122,6 +122,18 @@ export class RoomHub {
     }));
   }
 
+  aggregateSnapshot() {
+    let totalPeers = 0;
+    for (const room of this.rooms.values()) {
+      totalPeers += room.peers.size;
+    }
+
+    return {
+      totalRooms: this.rooms.size,
+      totalPeers
+    };
+  }
+
   private getOrCreateRoom(team: Team) {
     const existing = this.rooms.get(team.code);
     if (existing) return existing;

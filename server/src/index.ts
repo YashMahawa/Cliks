@@ -12,6 +12,14 @@ const server = Fastify({ logger: true });
 const store = createTeamStoreFromEnv();
 const hub = new RoomHub(store);
 const makePeerId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 12);
+const createTeamLimiter = createRateLimiter({
+  windowMs: 5 * 60_000,
+  maxRequests: 20
+});
+const deleteTeamLimiter = createRateLimiter({
+  windowMs: 5 * 60_000,
+  maxRequests: 30
+});
 
 const createTeamSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -55,10 +63,14 @@ await server.register(websocket);
 
 server.get("/health", async () => ({
   ok: true,
-  rooms: hub.snapshot()
+  ...hub.aggregateSnapshot()
 }));
 
 server.post("/api/teams", async (request, reply) => {
+  if (!createTeamLimiter.allow(rateLimitKey(request))) {
+    return reply.code(429).send({ error: "Too many team creation requests. Please wait a moment and try again." });
+  }
+
   const parsed = createTeamSchema.safeParse(request.body);
   if (!parsed.success) {
     return reply.code(400).send({ error: "Please provide a team name and a delete password." });
@@ -76,6 +88,10 @@ server.get("/api/teams/:code", async (request, reply) => {
 });
 
 server.delete("/api/teams/:code", async (request, reply) => {
+  if (!deleteTeamLimiter.allow(rateLimitKey(request))) {
+    return reply.code(429).send({ error: "Too many delete attempts. Please wait a moment and try again." });
+  }
+
   const parsed = deleteTeamSchema.safeParse({
     ...(request.body as object),
     code: (request.params as { code: string }).code
@@ -138,3 +154,31 @@ server.listen({ port, host: "0.0.0.0" }).catch((error) => {
   server.log.error(error);
   process.exit(1);
 });
+
+function rateLimitKey(request: { headers: Record<string, string | string[] | undefined>; ip: string }) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const firstForwarded = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+  return (firstForwarded?.split(",")[0]?.trim() || request.ip || "unknown").slice(0, 128);
+}
+
+function createRateLimiter(input: { windowMs: number; maxRequests: number }) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+
+  return {
+    allow(key: string) {
+      const now = Date.now();
+      for (const [storedKey, value] of hits) {
+        if (value.resetAt <= now) hits.delete(storedKey);
+      }
+
+      const current = hits.get(key);
+      if (!current || current.resetAt <= now) {
+        hits.set(key, { count: 1, resetAt: now + input.windowMs });
+        return true;
+      }
+
+      current.count += 1;
+      return current.count <= input.maxRequests;
+    }
+  };
+}

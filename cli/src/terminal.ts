@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 
+const trackedTerminalStates = new Set<string | undefined>();
+
 export function captureTerminalState() {
   if (process.platform === "win32" || !process.stdin.isTTY) return undefined;
   const result = spawnSync("stty", ["-g"], {
@@ -7,6 +9,25 @@ export function captureTerminalState() {
     encoding: "utf8"
   });
   return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
+export function trackTerminalState(state?: string) {
+  trackedTerminalStates.add(state);
+  return () => {
+    trackedTerminalStates.delete(state);
+  };
+}
+
+export function restoreTrackedTerminalStates() {
+  if (trackedTerminalStates.size === 0) {
+    disableTerminalMouseReporting();
+    return;
+  }
+
+  for (const state of [...trackedTerminalStates].reverse()) {
+    restoreTerminalState(state);
+  }
+  trackedTerminalStates.clear();
 }
 
 export function restoreTerminalState(state?: string) {

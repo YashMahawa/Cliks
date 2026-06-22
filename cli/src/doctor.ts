@@ -65,7 +65,7 @@ export async function runDoctor() {
     issues.push({
       title: "Join a team",
       detail: "Cliks does not have a selected team code.",
-      commands: ["typ join CLIK-XXXX"]
+      commands: ["typ join CLIK-XXXXXX"]
     });
   }
 

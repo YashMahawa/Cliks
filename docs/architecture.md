@@ -41,6 +41,20 @@ Example:
 
 The receiving CLI schedules local sound playback using those offsets. That means the server sees only tiny JSON pulses, while the receiver still hears a natural rhythm.
 
+## Team codes and public status
+
+New team codes use the `CLIK-XXXXXX` shape. Older or local test codes such as `CLIK-LOCAL` can still be joined because API validation accepts longer code strings.
+
+The public `/health` endpoint is intentionally safe for unauthenticated uptime checks. It returns only:
+
+- `ok`
+- `totalRooms`
+- `totalPeers`
+
+It must not return room codes, team names, peer ids, nicknames, or per-room snapshots. Detailed live room state should stay internal unless a future authenticated admin route is added.
+
+Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists.
+
 ## Scaling notes
 
 Load is dominated by live fanout, not storage.
@@ -56,14 +70,22 @@ Current defaults:
 - no stored event history
 - rooms exist only while at least one client is connected
 - Supabase stores only team records
+- relay health metrics are aggregate-only
 
 Good next optimizations:
 
-- per-room rate limits
 - adaptive batch window for large rooms
 - binary WebSocket frames after the JSON prototype
 - Redis presence if the backend scales beyond one Render instance
 - static sound pack files instead of generated temp WAVs
+
+## CLI reliability and audio
+
+`typ start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, retries with exponential backoff, and resumes joining the selected team when the backend is reachable again. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
+
+Terminal mode registers the captured `stty` state with a process-wide cleanup registry. Normal stops, top-level command failures, uncaught exceptions, unhandled rejections, and process exit all restore tracked terminal state and disable terminal mouse reporting.
+
+The current audio engine still uses system players, but it caps concurrent playback processes and queues a bounded number of events so dense batches do not create unbounded process storms. Distance-based gain reaches `afplay`, `paplay`, and `pw-play` through native volume flags. Real stereo pan remains future work for a mixer/player backend that supports it.
 
 ## Free-tier expectation
 

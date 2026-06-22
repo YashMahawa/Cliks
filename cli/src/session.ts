@@ -17,10 +17,9 @@ export async function startSession(
 ) {
   const teamCode = config.currentTeamCode;
   if (!teamCode) {
-    throw new Error("No team selected. Run: typ join CLIK-XXXX");
+    throw new Error("No team selected. Run: typ join CLIK-XXXXXX");
   }
 
-  const ws = new WebSocket(config.wsUrl);
   const capture = new ActivityCapture();
   const batcher = new ActivityBatcher(config.batchWindowMs);
   const listening = {
@@ -32,71 +31,114 @@ export async function startSession(
   let activeCount = 1;
   let teamName = teamCode;
   let captureMode = "starting";
+  let connectionStatus = "connecting";
   let permissionHint: string | undefined;
   let ownPeerId: string | undefined;
   let quipTimer: NodeJS.Timeout | undefined;
+  let reconnectTimer: NodeJS.Timeout | undefined;
   let cleanedUp = false;
+  let stopped = false;
   let localCapturedEvents = 0;
   let localSentEvents = 0;
+  let reconnectAttempt = 0;
+  let ws: WebSocket | undefined;
 
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    stopped = true;
     if (quipTimer) clearInterval(quipTimer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     batcher.flush();
     capture.stop();
+    ws?.close();
   };
 
-  ws.on("open", () => {
-    ws.send(
-      JSON.stringify({
-        type: "join",
-        teamCode,
-        nickname: config.nickname,
-        client: { name: "typ", version: "0.1.0" }
-      })
+  const render = () => {
+    renderStatus(
+      teamName,
+      activeCount,
+      listening.self,
+      captureMode,
+      connectionStatus,
+      localCapturedEvents,
+      localSentEvents,
+      permissionHint
     );
-  });
+  };
 
-  ws.on("message", (raw) => {
-    const message = JSON.parse(raw.toString());
-    if (message.type === "welcome") {
-      ownPeerId = message.peerId;
-      activeCount = message.activeCount;
-      teamName = message.team?.name ?? teamCode;
-      renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
-    }
-    if (message.type === "presence") {
-      activeCount = message.activeCount;
-      audio.updatePeers(message.peers ?? [], ownPeerId);
-      renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
-    }
-    if (message.type === "peer_activity_batch") {
-      audio.scheduleBatch(message.peerId, message.events);
-    }
-    if (message.type === "error") {
-      console.error(`\nCliks server: ${message.message}`);
-    }
-  });
+  const connect = () => {
+    if (stopped) return;
+    connectionStatus = reconnectAttempt === 0 ? "connecting" : `reconnecting (${reconnectAttempt})`;
+    render();
 
-  ws.on("close", () => {
-    cleanup();
-    console.log("\nDisconnected from Cliks.");
-    process.exit(0);
-  });
+    const socket = new WebSocket(config.wsUrl);
+    ws = socket;
 
-  ws.on("error", (error) => {
-    cleanup();
-    console.error(`\nCould not connect to Cliks: ${error.message}`);
-    process.exit(1);
-  });
+    socket.on("open", () => {
+      if (stopped || ws !== socket) return;
+      reconnectAttempt = 0;
+      connectionStatus = "connected";
+      socket.send(
+        JSON.stringify({
+          type: "join",
+          teamCode,
+          nickname: config.nickname,
+          client: { name: "typ", version: "0.1.0" }
+        })
+      );
+      render();
+    });
+
+    socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "welcome") {
+        ownPeerId = message.peerId;
+        activeCount = message.activeCount;
+        teamName = message.team?.name ?? teamCode;
+        render();
+      }
+      if (message.type === "presence") {
+        activeCount = message.activeCount;
+        audio.updatePeers(message.peers ?? [], ownPeerId);
+        render();
+      }
+      if (message.type === "peer_activity_batch") {
+        audio.scheduleBatch(message.peerId, message.events);
+      }
+      if (message.type === "error") {
+        console.error(`\nCliks server: ${message.message}`);
+      }
+    });
+
+    socket.on("close", () => {
+      if (stopped || ws !== socket) return;
+      scheduleReconnect();
+    });
+
+    socket.on("error", (error) => {
+      if (stopped || ws !== socket) return;
+      connectionStatus = `connection error: ${error.message}`;
+      render();
+      socket.close();
+    });
+  };
+
+  const scheduleReconnect = () => {
+    if (stopped) return;
+    reconnectAttempt += 1;
+    const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt - 1, 5));
+    connectionStatus = `disconnected; retrying in ${Math.round(delayMs / 1000)}s`;
+    render();
+    reconnectTimer = setTimeout(connect, delayMs);
+  };
 
   capture.on("activity", (event) => {
     localCapturedEvents += 1;
     batcher.push(event);
   });
   batcher.on("batch", (batch) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws?.readyState !== WebSocket.OPEN) return;
     localSentEvents += batch.events.length;
     ws.send(
       JSON.stringify({
@@ -114,16 +156,17 @@ export async function startSession(
   const captureState = await capture.start({ ...config.sharing, mode: options.captureMode ?? "auto" });
   captureMode = captureState.mode;
   permissionHint = captureState.permissionHint;
-  renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
+  render();
+  connect();
 
   quipTimer = setInterval(() => {
     process.stdout.write(`\n${quips[Math.floor(Math.random() * quips.length)]}\n`);
-    renderStatus(teamName, activeCount, listening.self, captureMode, localCapturedEvents, localSentEvents, permissionHint);
+    render();
   }, 18_000);
 
   const stopFromSignal = () => {
     cleanup();
-    ws.close();
+    ws?.close();
     setTimeout(() => process.exit(0), 100).unref();
   };
 
@@ -138,6 +181,7 @@ function renderStatus(
   activeCount: number,
   hearingSelf: boolean | undefined,
   captureMode: string,
+  connectionStatus: string,
   localCapturedEvents: number,
   localSentEvents: number,
   permissionHint?: string
@@ -151,6 +195,7 @@ function renderStatus(
   console.log("Sharing exact activity pulses in 500ms batches.");
   console.log("Privacy: only keyboard/mouse event type and timing are sent. Never key values.");
   console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
+  console.log(`Connection: ${connectionStatus}`);
   console.log(`Capture: ${captureMode}`);
   if (captureMode === "terminal") {
     console.log("Terminal mode: affects this terminal only. If input gets weird, run: typ fix-terminal");

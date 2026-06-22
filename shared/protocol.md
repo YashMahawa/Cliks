@@ -9,7 +9,7 @@ Cliks uses tiny JSON messages over WebSocket.
 ```json
 {
   "type": "join",
-  "teamCode": "CLIK-842K",
+  "teamCode": "CLIK-842KQ9",
   "nickname": "local optional name",
   "client": {
     "name": "typ",
@@ -25,7 +25,7 @@ The CLI sends one batch every `batchWindowMs`, currently 500ms. Each event keeps
 ```json
 {
   "type": "activity_batch",
-  "teamCode": "CLIK-842K",
+  "teamCode": "CLIK-842KQ9",
   "batchStartedAt": 1780000000000,
   "events": [
     { "kind": "keyboard", "offsetMs": 0 },
@@ -46,7 +46,7 @@ No key values, coordinates, windows, text, or app names are sent.
   "type": "welcome",
   "peerId": "peer_abc123",
   "team": {
-    "code": "CLIK-842K",
+    "code": "CLIK-842KQ9",
     "name": "Design Lab"
   },
   "activeCount": 4
@@ -58,7 +58,7 @@ No key values, coordinates, windows, text, or app names are sent.
 ```json
 {
   "type": "presence",
-  "teamCode": "CLIK-842K",
+  "teamCode": "CLIK-842KQ9",
   "activeCount": 4,
   "peers": [
     { "peerId": "peer_abc123", "nickname": "Mira" }
@@ -71,7 +71,7 @@ No key values, coordinates, windows, text, or app names are sent.
 ```json
 {
   "type": "peer_activity_batch",
-  "teamCode": "CLIK-842K",
+  "teamCode": "CLIK-842KQ9",
   "peerId": "peer_xyz987",
   "nickname": "Aarav",
   "batchStartedAt": 1780000000000,

@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.s
 Then join a room:
 
 ```bash
-typ join CLIK-XXXX
+typ join CLIK-XXXXXX
 typ start
 ```
 
@@ -70,7 +70,7 @@ npm run dev:site
 Open the site, create a team, then join it from the CLI:
 
 ```bash
-typ join CLIK-XXXX
+typ join CLIK-XXXXXX
 typ start
 ```
 
@@ -109,10 +109,10 @@ typ
 Useful commands:
 
 ```bash
-typ join CLIK-XXXX
+typ join CLIK-XXXXXX
 typ start
 typ teams
-typ switch CLIK-XXXX
+typ switch CLIK-XXXXXX
 typ config
 typ sound-test
 typ capture-test
@@ -127,7 +127,9 @@ typ doctor
 typ capture-test --evdev
 ```
 
-While `typ start` is running, the status screen also shows local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check the connection/backend.
+While `typ start` is running, the status screen also shows connection state plus local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check whether the CLI is reconnecting to the backend.
+
+If the WebSocket drops during a server restart or short network outage, `typ start` stays open and retries automatically with backoff. Activity captured while offline is best-effort and may be dropped until the connection is restored.
 
 If a terminal tab feels stuck in a strange input mode after terminal-only testing, run:
 
@@ -200,9 +202,11 @@ Supabase is optional.
 
 ## Current Status
 
-This is an early prototype. The website, team codes, WebSocket relay, CLI config, event batching, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, WebSocket relay, CLI config, event batching, reconnect loop, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
+
+The hosted backend keeps `/health` public for uptime checks, but it returns only anonymous aggregate counts. It does not expose team codes, team names, or per-room snapshots.
 
 ## License
 

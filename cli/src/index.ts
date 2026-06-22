@@ -4,7 +4,7 @@ import { AudioEngine } from "./audio.js";
 import { runCaptureTest } from "./captureTest.js";
 import { runDoctor } from "./doctor.js";
 import { startSession } from "./session.js";
-import { repairTerminal } from "./terminal.js";
+import { repairTerminal, restoreTrackedTerminalStates } from "./terminal.js";
 
 const program = new Command();
 
@@ -90,7 +90,7 @@ program
   .action(async () => {
     const config = await loadConfig();
     if (config.teams.length === 0) {
-      console.log("No teams saved yet. Run: typ join CLIK-XXXX");
+      console.log("No teams saved yet. Run: typ join CLIK-XXXXXX");
       return;
     }
     for (const team of config.teams) {
@@ -147,7 +147,24 @@ program
     console.log("Saved.");
   });
 
+process.once("uncaughtException", (error) => {
+  restoreTrackedTerminalStates();
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});
+
+process.once("unhandledRejection", (reason) => {
+  restoreTrackedTerminalStates();
+  console.error(reason instanceof Error ? reason.message : reason);
+  process.exit(1);
+});
+
+process.once("exit", () => {
+  restoreTrackedTerminalStates();
+});
+
 program.parseAsync().catch((error) => {
+  restoreTrackedTerminalStates();
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });

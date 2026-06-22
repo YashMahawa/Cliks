@@ -50,5 +50,5 @@ fi
 
 echo ""
 echo "Create a team on the Cliks website, then run:"
-echo "  typ join CLIK-XXXX"
+echo "  typ join CLIK-XXXXXX"
 echo "  typ start"
