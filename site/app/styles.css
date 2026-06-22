@@ -74,6 +74,40 @@ html, body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
+/* Hero desk photo: dim + greyscale until hovered, then the lamp turns on.
+   On touch devices (no hover) it stays lit so mobile isn't stuck grey. */
+.desk-photo img {
+  filter: grayscale(1) brightness(0.6) saturate(0.5);
+  transition: filter 1100ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.desk-photo:hover img {
+  filter: grayscale(0) brightness(1) saturate(1);
+}
+.desk-photo .bloom {
+  opacity: 0;
+  transition: opacity 1100ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.desk-photo:hover .bloom {
+  opacity: 1;
+}
+.desk-photo .hint {
+  transition: opacity 500ms ease;
+}
+.desk-photo:hover .hint {
+  opacity: 0;
+}
+@media (hover: none) {
+  .desk-photo img {
+    filter: none;
+  }
+  .desk-photo .bloom {
+    opacity: 1;
+  }
+  .desk-photo .hint {
+    display: none;
+  }
+}
+
 /* Warm autofill */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,

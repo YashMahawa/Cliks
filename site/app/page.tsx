@@ -45,7 +45,7 @@ function Reveal({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 22 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.4 }}
       transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
@@ -56,6 +56,96 @@ function Reveal({
   );
 }
 
+/** Self-contained copy button — manages its own "copied" state and plays a keystroke. */
+function CopyButton({
+  value,
+  className = "",
+  ariaLabel,
+  withLabel = true,
+}: {
+  value: string;
+  className?: string;
+  ariaLabel?: string;
+  withLabel?: boolean;
+}) {
+  const { triggerSound } = useAcoustic();
+  const [done, setDone] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      /* clipboard unavailable — fail quietly */
+    }
+    triggerSound();
+    setDone(true);
+    window.setTimeout(() => setDone(false), 1600);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={ariaLabel ?? "Copy command"}
+      className={`flex shrink-0 items-center gap-1.5 font-mono text-xs transition-all active:scale-90 ${className}`}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {done ? (
+          <motion.span
+            key="done"
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.7 }}
+            transition={{ duration: 0.18 }}
+            className="flex items-center gap-1.5 text-[#d97746]"
+          >
+            <Check className="h-3.5 w-3.5" />
+            {withLabel && "copied"}
+          </motion.span>
+        ) : (
+          <motion.span
+            key="copy"
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.7 }}
+            transition={{ duration: 0.18 }}
+            className="flex items-center gap-1.5"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            {withLabel && "copy"}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+}
+
+/** A `$ command` line with a built-in copy button. `display` lets us show a short label while copying the full command. */
+function CommandLine({
+  value,
+  display,
+  className = "",
+}: {
+  value: string;
+  display?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-3 rounded-xl border border-[#2a2826] bg-[#1a1918] p-1.5 pl-4 transition-colors hover:border-[#3a3733] ${className}`}
+    >
+      <span className="select-none font-mono text-sm text-[#d97746]">$</span>
+      <code className="scrollbar-none flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-[#cdc6b8] sm:text-sm">
+        {display ?? value}
+      </code>
+      <CopyButton
+        value={value}
+        className="h-9 rounded-lg bg-[#211f1d] px-3 text-[#cdc6b8] hover:bg-[#2a2826]"
+      />
+    </div>
+  );
+}
+
 export default function HomePage() {
   const { triggerSound, pulseActive } = useAcoustic();
 
@@ -63,7 +153,6 @@ export default function HomePage() {
   const [deletePassword, setDeletePassword] = useState("");
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState<"install" | "code" | "command" | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const joinCommand = useMemo(
@@ -93,13 +182,6 @@ export default function HomePage() {
     }
   }
 
-  async function copyText(value: string, kind: "install" | "code" | "command") {
-    await navigator.clipboard.writeText(value);
-    setCopied(kind);
-    triggerSound();
-    window.setTimeout(() => setCopied(null), 1600);
-  }
-
   return (
     <div className="relative w-full text-[#eae5d9]">
       {/* warm ambient light pooling from the top, like a desk lamp */}
@@ -113,24 +195,23 @@ export default function HomePage() {
 
       <div className="relative z-10 mx-auto w-full max-w-6xl px-6 md:px-10">
         {/* ─── Nav ─── */}
-        <header className="flex h-[72px] items-center justify-between">
-          <a href="#top" className="flex items-center gap-2.5" aria-label="Cliks home">
+        <header className="flex h-32 items-center justify-between md:h-36">
+          <a href="#top" className="group flex items-center" aria-label="Cliks home">
             <Image
               src="/images/cliks-keycap.png"
               alt="Cliks"
-              width={44}
-              height={24}
-              className="h-7 w-auto drop-shadow-[0_2px_8px_rgba(0,0,0,0.4)]"
+              width={360}
+              height={196}
+              className="h-20 w-auto drop-shadow-[0_8px_22px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:-translate-y-1 group-hover:rotate-[-3deg] md:h-28"
               priority
             />
-            <span className="font-mono text-sm tracking-wide text-[#eae5d9]">cliks</span>
           </a>
           <nav className="flex items-center gap-1">
             <a
               href={repoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-9 items-center gap-2 rounded-full border border-[#2a2826] px-3.5 text-sm text-[#8b867c] transition-colors hover:border-[#3a3733] hover:text-[#eae5d9]"
+              className="flex h-9 items-center gap-2 rounded-full border border-[#2a2826] px-3.5 text-sm text-[#8b867c] transition-all hover:-translate-y-0.5 hover:border-[#3a3733] hover:text-[#eae5d9]"
             >
               <GitHubIcon className="w-4 h-4" />
               <span className="hidden sm:inline">GitHub</span>
@@ -140,7 +221,7 @@ export default function HomePage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Follow on X"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-[#8b867c] transition-colors hover:text-[#eae5d9]"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-[#8b867c] transition-all hover:-translate-y-0.5 hover:text-[#eae5d9]"
             >
               <XIcon className="w-4 h-4" />
             </a>
@@ -150,7 +231,12 @@ export default function HomePage() {
         <main id="top">
           {/* ─── Hero ─── */}
           <section className="grid grid-cols-1 items-center gap-12 pt-10 pb-20 md:pt-16 md:pb-28 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
-            <div className="flex flex-col items-start">
+            <motion.div
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+              className="flex flex-col items-start"
+            >
               <div className="mb-7 flex items-center gap-3">
                 <motion.span
                   animate={{
@@ -180,37 +266,20 @@ export default function HomePage() {
 
               {/* install command */}
               <div className="mt-9 w-full max-w-md">
-                <div className="flex items-center gap-3 rounded-xl border border-[#2a2826] bg-[#1a1918] p-1.5 pl-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <span className="select-none font-mono text-sm text-[#d97746]">$</span>
-                  <code className="scrollbar-none flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-[#cdc6b8] sm:text-sm">
-                    {installCommand}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => copyText(installCommand, "install")}
-                    className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#211f1d] px-3 font-mono text-xs text-[#cdc6b8] transition-all hover:bg-[#2a2826] active:scale-95"
-                    aria-label="Copy install command"
-                  >
-                    {copied === "install" ? (
-                      <>
-                        <Check className="h-3.5 w-3.5 text-[#d97746]" /> copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3.5 w-3.5" /> copy
-                      </>
-                    )}
-                  </button>
-                </div>
+                <CommandLine value={installCommand} />
                 <p className="mt-3 pl-1 font-mono text-xs text-[#5c574e]">
                   Press any key on this page to hear how it sounds.
                 </p>
               </div>
-            </div>
+            </motion.div>
 
-            {/* hero visual: the warm desk, with sound rippling on keystroke */}
-            <Reveal className="relative" delay={0.1}>
-              <div className="relative aspect-[4/5] w-full overflow-hidden rounded-2xl border border-[#2a2826] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:aspect-[4/3] lg:aspect-[5/6]">
+            {/* hero visual: the warm desk. greyscale until you hover — then the lamp turns on. */}
+            <Reveal className="relative" delay={0.15}>
+              <motion.div
+                whileHover={{ y: -6 }}
+                transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                className="desk-photo group relative aspect-[4/5] w-full cursor-pointer overflow-hidden rounded-2xl border border-[#2a2826] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] sm:aspect-[4/3] lg:aspect-[5/6]"
+              >
                 <Image
                   src="/images/warm_desk_workspace.png"
                   alt="A mechanical keyboard on a warm wooden desk, lit by a brass lamp"
@@ -219,37 +288,26 @@ export default function HomePage() {
                   className="object-cover"
                   priority
                 />
+
+                {/* warm light bloom from the lamp — fades in on hover, "torch turns on" */}
+                <div
+                  className="bloom pointer-events-none absolute inset-0"
+                  style={{
+                    background:
+                      "radial-gradient(22rem 22rem at 30% 22%, rgba(255,176,92,0.45), rgba(217,119,70,0.12) 38%, transparent 62%)",
+                    mixBlendMode: "screen",
+                  }}
+                />
+
+                {/* keep the bottom anchored to the page background */}
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#11100f] via-transparent to-transparent" />
 
-                {/* acoustic rings ripple from over the keyboard on each keystroke */}
-                <div className="pointer-events-none absolute bottom-[34%] left-1/2 -translate-x-1/2">
-                  {[0, 1, 2].map((ring) => (
-                    <motion.span
-                      key={ring}
-                      className="absolute left-1/2 top-1/2 rounded-full border border-[#d97746]"
-                      style={{
-                        width: 64 + ring * 64,
-                        height: 64 + ring * 64,
-                        marginLeft: -(32 + ring * 32),
-                        marginTop: -(32 + ring * 32),
-                      }}
-                      animate={{
-                        scale: pulseActive ? 1.18 : 1,
-                        opacity: pulseActive ? 0.5 / (ring + 1) : 0.12 / (ring + 1),
-                      }}
-                      transition={{ type: "spring", stiffness: 220, damping: 22 }}
-                    />
-                  ))}
+                {/* hint that fades away once the desk is lit */}
+                <div className="hint pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-[#2a2826] bg-[#11100f]/70 px-3 py-1.5 backdrop-blur-sm">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#d97746]" />
+                  <span className="font-mono text-[11px] text-[#a8a298]">hover to light the desk</span>
                 </div>
-
-                <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-[#2a2826] bg-[#11100f]/70 px-3 py-1.5 backdrop-blur-sm">
-                  <motion.span
-                    animate={{ opacity: pulseActive ? 1 : 0.6 }}
-                    className="h-1.5 w-1.5 rounded-full bg-[#d97746]"
-                  />
-                  <span className="font-mono text-[11px] text-[#a8a298]">live presence</span>
-                </div>
-              </div>
+              </motion.div>
             </Reveal>
           </section>
 
@@ -268,7 +326,10 @@ export default function HomePage() {
             </Reveal>
 
             {/* privacy, as quiet editorial lines — not boxes */}
-            <Reveal delay={0.1} className="mx-auto mt-16 max-w-2xl divide-y divide-[#2a2826] border-y border-[#2a2826]">
+            <Reveal
+              delay={0.1}
+              className="mx-auto mt-16 max-w-2xl divide-y divide-[#2a2826] border-y border-[#2a2826]"
+            >
               {[
                 {
                   k: "Timing only",
@@ -283,8 +344,13 @@ export default function HomePage() {
                   v: "Pulses are batched to save bandwidth; rooms vanish when everyone leaves.",
                 },
               ].map((row) => (
-                <div key={row.k} className="grid grid-cols-1 gap-1 py-5 sm:grid-cols-[180px_1fr] sm:gap-6 sm:py-6">
-                  <span className="font-mono text-sm text-[#d97746]">{row.k}</span>
+                <div
+                  key={row.k}
+                  className="group grid grid-cols-1 gap-1 py-5 transition-colors sm:grid-cols-[180px_1fr] sm:gap-6 sm:py-6"
+                >
+                  <span className="font-mono text-sm text-[#d97746] transition-transform duration-300 group-hover:translate-x-1">
+                    {row.k}
+                  </span>
                   <span className="text-[#a8a298]">{row.v}</span>
                 </div>
               ))}
@@ -303,37 +369,36 @@ export default function HomePage() {
               </p>
             </Reveal>
 
-            <div className="mt-14 flex flex-col gap-12">
+            <div className="mt-14 flex flex-col gap-10">
               {[
                 {
                   n: "01",
                   title: "Install the CLI",
                   body: "One curl. Works on macOS, Linux, and Windows.",
-                  cmd: "curl -fsSL …/install.sh | bash",
+                  value: installCommand,
+                  display: "curl -fsSL …/install.sh | bash",
                 },
                 {
                   n: "02",
                   title: "Create or join a room",
                   body: "Generate a code below and share it, or paste a teammate's.",
-                  cmd: "typ join 7K2P9",
+                  value: "typ join 7K2P9",
                 },
                 {
                   n: "03",
                   title: "Start listening",
                   body: "The room comes alive. Hear everyone working, in their own space.",
-                  cmd: "typ start",
+                  value: "typ start",
                 },
               ].map((step, i) => (
                 <Reveal key={step.n} delay={i * 0.08}>
-                  <div className="grid grid-cols-1 items-baseline gap-2 sm:grid-cols-[64px_1fr_auto] sm:gap-8">
+                  <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[56px_1fr_minmax(0,22rem)] sm:gap-8">
                     <span className="font-mono text-sm text-[#5c574e]">{step.n}</span>
                     <div>
                       <h3 className="text-xl font-medium text-[#eae5d9]">{step.title}</h3>
                       <p className="mt-1 max-w-[42ch] text-[#8b867c]">{step.body}</p>
                     </div>
-                    <code className="mt-2 inline-block w-fit rounded-lg border border-[#2a2826] bg-[#1a1918] px-3 py-1.5 font-mono text-xs text-[#cdc6b8] sm:mt-0">
-                      {step.cmd}
-                    </code>
+                    <CommandLine value={step.value} display={step.display} className="w-full" />
                   </div>
                 </Reveal>
               ))}
@@ -355,7 +420,7 @@ export default function HomePage() {
               </Reveal>
 
               <Reveal delay={0.1}>
-                <div className="rounded-2xl border border-[#2a2826] bg-[#1a1918] p-7 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.8)] md:p-9">
+                <div className="rounded-2xl border border-[#2a2826] bg-[#1a1918] p-7 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.8)] transition-colors hover:border-[#3a3733] md:p-9">
                   <form onSubmit={createTeam} className="flex flex-col gap-8">
                     <div className="flex flex-col gap-2">
                       <label htmlFor="team-name" className="font-mono text-xs text-[#8b867c]">
@@ -390,13 +455,14 @@ export default function HomePage() {
                       />
                     </div>
 
-                    <button
+                    <motion.button
                       type="submit"
                       disabled={isCreating}
-                      className="mt-2 flex h-12 items-center justify-center rounded-lg bg-[#d97746] font-medium text-[#11100f] transition-all hover:bg-[#e0855a] active:scale-[0.98] disabled:opacity-60"
+                      whileTap={{ scale: 0.98 }}
+                      className="mt-2 flex h-12 items-center justify-center rounded-lg bg-[#d97746] font-medium text-[#11100f] transition-colors hover:bg-[#e0855a] disabled:opacity-60"
                     >
                       {isCreating ? "Generating…" : "Generate room code"}
-                    </button>
+                    </motion.button>
                   </form>
 
                   <AnimatePresence>
@@ -418,6 +484,7 @@ export default function HomePage() {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                         className="mt-8 overflow-hidden border-t border-[#2a2826] pt-8"
                       >
                         <p className="font-mono text-xs text-[#8b867c]">
@@ -429,41 +496,24 @@ export default function HomePage() {
                             <div className="font-mono text-[11px] uppercase tracking-widest text-[#5c574e]">
                               room code
                             </div>
-                            <div className="font-mono text-4xl font-bold tracking-[0.15em] text-[#d97746] md:text-5xl">
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: 0.15, type: "spring", stiffness: 220, damping: 16 }}
+                              className="font-mono text-4xl font-bold tracking-[0.15em] text-[#d97746] md:text-5xl"
+                            >
                               {createdTeam.code}
-                            </div>
+                            </motion.div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => copyText(createdTeam.code, "code")}
-                            className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2a2826] px-3 font-mono text-xs text-[#cdc6b8] transition-colors hover:border-[#3a3733] active:scale-95"
-                          >
-                            {copied === "code" ? (
-                              <Check className="h-3.5 w-3.5 text-[#d97746]" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                            {copied === "code" ? "copied" : "copy"}
-                          </button>
+                          <CopyButton
+                            value={createdTeam.code}
+                            ariaLabel="Copy room code"
+                            className="h-9 rounded-lg border border-[#2a2826] px-3 text-[#cdc6b8] hover:border-[#3a3733]"
+                          />
                         </div>
 
-                        <div className="mt-6 flex items-center gap-2 rounded-lg border border-[#2a2826] bg-[#11100f] p-1.5 pl-3">
-                          <span className="select-none font-mono text-xs text-[#d97746]">$</span>
-                          <code className="scrollbar-none flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-[#cdc6b8]">
-                            {joinCommand}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => copyText(joinCommand, "command")}
-                            className="flex h-8 shrink-0 items-center justify-center rounded-md px-2.5 text-[#8b867c] transition-colors hover:text-[#eae5d9]"
-                            aria-label="Copy join command"
-                          >
-                            {copied === "command" ? (
-                              <Check className="h-4 w-4 text-[#d97746]" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </button>
+                        <div className="mt-6">
+                          <CommandLine value={joinCommand} className="bg-[#11100f]" />
                         </div>
                       </motion.div>
                     )}
@@ -486,36 +536,38 @@ export default function HomePage() {
               </p>
 
               <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <a
+                <motion.a
                   href={sponsorUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#d97746] px-6 font-medium text-[#11100f] transition-all hover:bg-[#e0855a] active:scale-[0.98] sm:w-auto"
+                  whileTap={{ scale: 0.98 }}
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#d97746] px-6 font-medium text-[#11100f] transition-all hover:-translate-y-0.5 hover:bg-[#e0855a] sm:w-auto"
                 >
                   Sponsor on GitHub
-                </a>
-                <a
+                </motion.a>
+                <motion.a
                   href={repoUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[#2a2826] px-6 font-medium text-[#eae5d9] transition-colors hover:border-[#3a3733] sm:w-auto"
+                  whileTap={{ scale: 0.98 }}
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[#2a2826] px-6 font-medium text-[#eae5d9] transition-all hover:-translate-y-0.5 hover:border-[#3a3733] sm:w-auto"
                 >
                   <GitHubIcon className="w-4 h-4" />
                   Star the repo
-                </a>
+                </motion.a>
               </div>
             </Reveal>
           </section>
 
           {/* ─── Footer ─── */}
           <footer className="flex flex-col items-center justify-between gap-4 border-t border-[#2a2826] py-10 sm:flex-row">
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-3">
               <Image
                 src="/images/cliks-keycap.png"
                 alt="Cliks"
-                width={36}
-                height={20}
-                className="h-5 w-auto opacity-80"
+                width={60}
+                height={33}
+                className="h-8 w-auto opacity-80"
               />
               <span className="font-mono text-xs text-[#5c574e]">
                 © {new Date().getFullYear()} · MIT licensed
