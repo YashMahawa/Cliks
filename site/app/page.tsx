@@ -68,7 +68,6 @@ function CopyButton({
   ariaLabel?: string;
   withLabel?: boolean;
 }) {
-  const { triggerSound } = useAcoustic();
   const [done, setDone] = useState(false);
 
   async function copy() {
@@ -77,7 +76,7 @@ function CopyButton({
     } catch {
       /* clipboard unavailable — fail quietly */
     }
-    triggerSound();
+    // The global mousedown listener already plays the click sound.
     setDone(true);
     window.setTimeout(() => setDone(false), 1600);
   }

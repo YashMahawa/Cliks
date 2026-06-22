@@ -17,12 +17,11 @@ These prototype samples are bundled so the CLI can use real recorded clicks inst
 
 ## Mouse
 
-- Source: Programmatically generated for Cliks
-- Author: Yash Mahawa / Cliks
-- License: MIT, same as this repository
+Real recorded mouse-click samples, sourced from Pixabay and trimmed to roughly
+match the keyboard sample length (trailing near-silence removed).
+
+- Source: Pixabay (https://pixabay.com)
+- License: Pixabay Content License (free for commercial use, attribution not required)
 - Files used:
-  - `mouse/mouse-01.wav`
-  - `mouse/mouse-02.wav`
-  - `mouse/mouse-03.wav`
-  - `mouse/mouse-04.wav`
-  - `mouse/mouse-05.wav`
+  - `mouse/mouse-01.wav` — "mouse-click" by matthewvakaliuk73627 (Pixabay #290204)
+  - `mouse/mouse-02.wav` — "mouse-click" by dragon-studio (Pixabay #405462)

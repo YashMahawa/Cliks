@@ -91,9 +91,9 @@ The CLI uses bundled real WAV samples, not generated placeholder clicks.
 Current pack:
 
 - 5 keyboard samples in `cli/assets/sounds/keyboard`
-- 5 mouse samples in `cli/assets/sounds/mouse`
+- 2 mouse samples in `cli/assets/sounds/mouse` (real recorded clicks from Pixabay, trimmed to ~0.25s to match keyboard length)
 
-The audio engine randomly picks one sample per event. Mouse samples are generated short click/thock sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`.
+The audio engine randomly picks one sample per event. Mouse samples are real recorded click sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`. The website mirror in `site/public/sounds/` must stay in sync with both packs.
 
 On Linux, audio playback auto-detects `paplay`, `pw-play`, or `aplay`. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash.
 

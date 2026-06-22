@@ -4,10 +4,9 @@ import React, { createContext, useContext, useEffect, useState, useRef } from "r
 
 interface AcousticContextProps {
   triggerSound: () => void;
+  triggerMouseSound: () => void;
   pulseActive: boolean;
   triggerPulse: () => void;
-  typingProgress: number;
-  setTypingProgress: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const AcousticContext = createContext<AcousticContextProps | undefined>(undefined);
@@ -20,12 +19,21 @@ export function useAcoustic() {
   return context;
 }
 
+const keyboardUrls = [
+  "/sounds/keyboard/key-01.wav",
+  "/sounds/keyboard/key-02.wav",
+  "/sounds/keyboard/key-03.wav",
+  "/sounds/keyboard/key-04.wav",
+  "/sounds/keyboard/key-05.wav",
+];
+
+const mouseUrls = ["/sounds/mouse/mouse-01.wav", "/sounds/mouse/mouse-02.wav"];
+
 export function AcousticProvider({ children }: { children: React.ReactNode }) {
   const [pulseActive, setPulseActive] = useState<boolean>(false);
-  const [typingProgress, setTypingProgress] = useState<number>(0);
-  const [buffers, setBuffers] = useState<AudioBuffer[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const buffersRef = useRef<AudioBuffer[]>([]);
+  const keyboardBuffersRef = useRef<AudioBuffer[]>([]);
+  const mouseBuffersRef = useRef<AudioBuffer[]>([]);
 
   // Preload sound files on mount
   useEffect(() => {
@@ -36,27 +44,22 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
         const ctx = new AudioContextClass();
         audioCtxRef.current = ctx;
 
-        const soundUrls = [
-          "/sounds/keyboard/key-01.wav",
-          "/sounds/keyboard/key-02.wav",
-          "/sounds/keyboard/key-03.wav",
-          "/sounds/keyboard/key-04.wav",
-          "/sounds/keyboard/key-05.wav",
-        ];
+        const decode = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error();
+          return ctx.decodeAudioData(await response.arrayBuffer());
+        };
 
-        const loadedBuffers = await Promise.all(
-          soundUrls.map(async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error();
-            const arrayBuffer = await response.arrayBuffer();
-            return await ctx.decodeAudioData(arrayBuffer);
-          })
-        );
+        // Load both packs independently so a failure in one fails silently.
+        const [keyboard, mouse] = await Promise.all([
+          Promise.all(keyboardUrls.map(decode)).catch(() => [] as AudioBuffer[]),
+          Promise.all(mouseUrls.map(decode)).catch(() => [] as AudioBuffer[]),
+        ]);
 
-        setBuffers(loadedBuffers);
-        buffersRef.current = loadedBuffers;
+        keyboardBuffersRef.current = keyboard;
+        mouseBuffersRef.current = mouse;
       } catch (error) {
-        // AUDIO INTEGRITY: fail silently
+        // AUDIO INTEGRITY: fail silently, never fall back to synthesized beeps.
       }
     };
 
@@ -68,28 +71,25 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => setPulseActive(false), 200);
   };
 
-  const triggerSound = () => {
+  // Play a random sample from a pack with organic gain/pitch jitter, like cli/src/audio.ts.
+  const play = (buffers: AudioBuffer[]) => {
     const ctx = audioCtxRef.current;
-    const currentBuffers = buffersRef.current;
-    if (!ctx || currentBuffers.length === 0) return;
+    if (!ctx || buffers.length === 0) return;
 
     if (ctx.state === "suspended") {
       ctx.resume();
     }
 
     const now = ctx.currentTime;
-    // Select a random WAV sample
-    const buffer = currentBuffers[Math.floor(Math.random() * currentBuffers.length)];
+    const buffer = buffers[Math.floor(Math.random() * buffers.length)];
     const source = ctx.createBufferSource();
     source.buffer = buffer;
 
-    // Gain (Volume) Modulation: 0.85 to 1.15
     const gainNode = ctx.createGain();
-    const volumeMod = 0.85 + Math.random() * 0.3;
+    const volumeMod = 0.85 + Math.random() * 0.3; // 0.85–1.15
     gainNode.gain.setValueAtTime(volumeMod * 0.6, now);
 
-    // Playback Rate (Pitch) Modulation: 0.92 to 1.08
-    const pitchMod = 0.92 + Math.random() * 0.16;
+    const pitchMod = 0.92 + Math.random() * 0.16; // 0.92–1.08
     source.playbackRate.setValueAtTime(pitchMod, now);
 
     source.connect(gainNode);
@@ -97,46 +97,21 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
     source.start(now);
   };
 
+  const triggerSound = () => play(keyboardBuffersRef.current);
+  const triggerMouseSound = () => play(mouseBuffersRef.current);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is writing in input fields
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        triggerSound();
-        return;
-      }
-
       // Ignore standard modifier keys
       if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
         return;
       }
-      
       triggerSound();
       triggerPulse();
-
-      setTypingProgress((prev) => {
-        if (prev < 10) {
-          return prev + 1;
-        }
-        return prev;
-      });
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      // Ignore interactive HTML elements
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLButtonElement ||
-        e.target instanceof HTMLAnchorElement
-      ) {
-        triggerSound();
-        return;
-      }
-
-      triggerSound();
+    const handleMouseDown = () => {
+      triggerMouseSound();
       triggerPulse();
     };
 
@@ -153,10 +128,9 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
     <AcousticContext.Provider
       value={{
         triggerSound,
+        triggerMouseSound,
         pulseActive,
         triggerPulse,
-        typingProgress,
-        setTypingProgress,
       }}
     >
       {children}
