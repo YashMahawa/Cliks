@@ -25,7 +25,7 @@ Core promise:
 
 ## Current Structure
 
-- `site`: Next.js app intended for Vercel. It creates teams and displays copyable join commands.
+- `site`: Next.js app intended for Vercel. It creates teams and displays copyable join/install commands. The landing page uses the "Warm Desk" design system (warm stone palette `#11100f`/`#1a1918`, bone text `#eae5d9`, ember accent `#d97746`; Geist + Geist Mono) and doubles as a live in-browser demo of the CLI ambience (see Sound). Brand assets: `site/public/images/cliks-keycap.png` (keycap logo/favicon) and `site/public/images/warm_desk_workspace.png` (hero photo).
 - `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
 - `cli`: `typ` command. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
@@ -96,6 +96,8 @@ Current pack:
 The audio engine randomly picks one sample per event. Mouse samples are generated short click/thock sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`.
 
 On Linux, audio playback auto-detects `paplay`, `pw-play`, or `aplay`. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash.
+
+The website mirrors this on the web. `site/components/AcousticProvider.tsx` preloads the keyboard WAVs from `site/public/sounds/keyboard/` (a copy of the CLI pack) via the Web Audio API and plays a random sample on every `keydown`/`mousedown`, with randomized gain and playback-rate jitter to match the CLI's organic feel. Audio integrity rule: if the WAVs fail to load it must fail silently — never fall back to a synthesized oscillator beep. Keep `site/public/sounds/keyboard/*` in sync with `cli/assets/sounds/keyboard/*`.
 
 ## Capture
 

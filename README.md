@@ -12,6 +12,8 @@ Open the Cliks website, create a team code, and copy the install or join command
 
 [https://site-kappa-six-64.vercel.app](https://site-kappa-six-64.vercel.app)
 
+The site is also a live preview: press any key on the page and it plays the exact same keyboard samples the CLI uses, so you can hear the ambience before you install anything.
+
 Install the CLI:
 
 ```bash
