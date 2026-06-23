@@ -68,6 +68,8 @@ Stored data:
 
 Live presence is in memory. Rooms disappear from memory when empty. There is no membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
 
+Deleting a team requires its delete password. A successful delete marks the stored team row deleted and closes any live in-memory room for that team so connected peers cannot keep using a deleted code.
+
 ## Client-Side Placement
 
 Do not move placement logic to the server.
@@ -105,9 +107,12 @@ Current modes:
 - `typ start`: on Linux, tries `/dev/input` evdev capture first; otherwise tries `uiohook-napi` native/global capture.
 - `typ start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `typ start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
+- Running bare `typ`/`typ start` before joining a room prints first-run setup steps instead of a raw error.
 - `typ sound-test`: plays sample sounds without joining a room.
 - `typ capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `typ doctor`: explains privacy, checks Node/audio/input-device readiness, and prints detected fix commands.
+- `typ preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
+- `typ autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
 - `typ fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
 - `cli/install.sh`: installs the CLI through a user-local wrapper, runs `typ doctor`, gives macOS/Windows/Linux setup hints, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
 
@@ -123,6 +128,8 @@ Important platform reality:
 - The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
+- `typ start` has interactive controls when stdin is a TTY: Up/Down volume, `[`/`]` density, `m` mute, `s` spatial toggle, and `f` fatigue fade toggle. These settings are persisted.
+- Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands
 
@@ -132,6 +139,8 @@ Useful local commands:
 npm install
 npm run check
 npm run build
+npm run smoke:server
+npm run load:server
 npm run dev:server
 npm run dev:site
 typ sound-test
@@ -140,7 +149,11 @@ typ fix-terminal
 typ join CLIK-LOCAL
 typ start --terminal --self
 typ set hear.self off
+typ preset deep
+typ autostart status
 ```
+
+CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, live room closure on delete, deleted-room lookup behavior, and 50ms timing quantization. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
 
 ## Deploy
 
@@ -156,7 +169,7 @@ The current DigitalOcean backend is a Droplet running `cliks-api` under systemd 
 
 The public `/health` route must stay unauthenticated for uptime checks, but it must not expose team codes, team names, peer ids, nicknames, or per-room snapshots. It returns only `ok`, `totalRooms`, and `totalPeers`.
 
-Room creation and deletion routes have lightweight in-process per-IP rate limits before expensive bcrypt work. Delete attempts must run a dummy bcrypt comparison when a code is missing so timing does not reveal whether a room exists. Database uniqueness should apply only to active team codes (`deleted_at is null`) so soft-deleted rows do not permanently burn code namespace.
+Room creation and deletion routes have lightweight in-process per-IP rate limits before expensive bcrypt work. Delete attempts must run a dummy bcrypt comparison when a code is missing so timing does not reveal whether a room exists. Database uniqueness should apply only to active team codes (`deleted_at is null`) so soft-deleted rows do not permanently burn code namespace. Successful deletes should also close the live room if it is currently occupied.
 
 Security posture for the live Droplet:
 

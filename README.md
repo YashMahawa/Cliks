@@ -27,6 +27,8 @@ typ join CLIK-XXXXXX
 typ start
 ```
 
+If you run `typ` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+
 ## What It Sends
 
 Cliks sends only tiny activity pulses:
@@ -115,13 +117,26 @@ Useful commands:
 ```bash
 typ join CLIK-XXXXXX
 typ start
+typ preset deep
 typ teams
 typ switch CLIK-XXXXXX
 typ config
+typ autostart enable
 typ sound-test
 typ capture-test
 typ fix-terminal
 typ doctor
+```
+
+While `typ start` is open, use `Up/Down` to adjust volume, `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Changes are saved automatically.
+
+Listening presets:
+
+```bash
+typ preset deep
+typ preset balanced
+typ preset social
+typ preset quiet
 ```
 
 If teammates can hear you connect but cannot hear your keystrokes, run:
@@ -145,6 +160,14 @@ The CLI defaults to the hosted Cliks backend. For local development, override it
 
 ```bash
 CLIKS_API_URL=http://localhost:8787 typ start
+```
+
+To reconnect automatically when you sign in:
+
+```bash
+typ autostart enable
+typ autostart status
+typ autostart disable
 ```
 
 ## Install Script
@@ -204,9 +227,38 @@ CLIKS_LOCAL_POSTGRES=true
 
 Supabase is optional.
 
+## Testing
+
+Run the same checks used by CI:
+
+```bash
+npm run check
+npm run build
+npm run smoke:server
+```
+
+Run a safe live backend load test:
+
+```bash
+npm run load:server
+```
+
+For a larger explicit ramp:
+
+```bash
+CLIKS_LOAD_ROOMS=4 CLIKS_LOAD_PEERS=8 CLIKS_LOAD_BATCHES=10 npm run load:server
+```
+
+Docker backend smoke:
+
+```bash
+docker build -t cliks-server .
+docker compose up
+```
+
 ## Current Status
 
-This is an early prototype. The website, longer team codes, WebSocket relay, CLI config, event batching, reconnect loop, spatial-capable CLI playback, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, CLI config, event batching, reconnect loop, interactive controls, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 

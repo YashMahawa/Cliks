@@ -14,7 +14,9 @@
     "dev:site": "npm --workspace @cliks/site run dev",
     "dev:cli": "npm --workspace @cliks/cli run dev",
     "build": "npm --workspace @cliks/server run build && npm --workspace @cliks/site run build && npm --workspace @cliks/cli run build",
-    "check": "npm --workspace @cliks/server run check && npm --workspace @cliks/site run check && npm --workspace @cliks/cli run check"
+    "check": "npm --workspace @cliks/server run check && npm --workspace @cliks/site run check && npm --workspace @cliks/cli run check",
+    "smoke:server": "node scripts/smoke-server.mjs",
+    "load:server": "node scripts/load-test.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

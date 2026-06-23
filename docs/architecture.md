@@ -55,7 +55,7 @@ The public `/health` endpoint is intentionally safe for unauthenticated uptime c
 
 It must not return room codes, team names, peer ids, nicknames, or per-room snapshots. Detailed live room state should stay internal unless a future authenticated admin route is added.
 
-Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists.
+Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists. When deletion succeeds, the relay closes any live room for that team and disconnects connected peers with a local error message.
 
 Soft-deleted team rows are retained for history, but code uniqueness is scoped to active rows only. Postgres and Supabase both use a partial unique index on `(code) where deleted_at is null`, so deleting a room does not permanently consume its code.
 
@@ -82,7 +82,7 @@ Good next optimizations:
 - adaptive batch window for large rooms
 - binary WebSocket frames after the JSON prototype
 - Redis presence if the backend scales beyond one Render instance
-- static sound pack files instead of generated temp WAVs
+- additional themed sound packs once the launch-critical setup/capture path is stable
 
 ## CLI reliability and audio
 
@@ -91,6 +91,31 @@ Good next optimizations:
 Terminal mode registers the captured `stty` state with a process-wide cleanup registry. Normal stops, top-level command failures, uncaught exceptions, unhandled rejections, and process exit all restore tracked terminal state and disable terminal mouse reporting.
 
 The current audio engine still uses system players, but it caps concurrent playback processes and queues a bounded number of events so dense batches do not create unbounded process storms. Player priority is spatial-first: `ffplay` gets stereo pan plus gain through an FFmpeg audio filter, `mpv` gets stereo pan plus volume flags, `afplay`/`paplay`/`pw-play` get distance volume, and `aplay`/Windows `Media.SoundPlayer` remain basic fallback playback. A future native mixer could reduce process overhead further, but pan and distance now reach capable CLI players.
+
+Interactive controls are local-only and persist to the config file:
+
+- Up/Down: volume
+- `[`/`]`: ambience density
+- `m`: mute
+- `s`: spatial on/off
+- `f`: fatigue fade on/off
+
+Fatigue fade attenuates dense local playback after sustained bursts. Density thins local playback only; it does not change capture or relay privacy behavior.
+
+`typ autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM` and runs `typ start`.
+
+Running `typ` before a team is selected prints a short first-run setup checklist with `typ join`, `typ start`, `typ doctor`, `typ sound-test`, and `typ capture-test` rather than surfacing an internal missing-team error.
+
+## Test and release gates
+
+Required local checks before pushing:
+
+- `npm run check`
+- `npm run build`
+- `npm run smoke:server`
+- `bash -n cli/install.sh`
+
+CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, delete lookup behavior, and live-room closure on delete. `scripts/load-test.mjs` provides controlled relay load tests; keep default settings safe for the live Droplet and use explicit `CLIKS_LOAD_*` env vars for larger ramps.
 
 ## Free-tier expectation
 

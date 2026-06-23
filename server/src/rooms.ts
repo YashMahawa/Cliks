@@ -78,6 +78,19 @@ export class RoomHub {
     }
   }
 
+  closeRoom(teamCode: string, message: string) {
+    const room = this.rooms.get(teamCode.toUpperCase());
+    if (!room) return;
+
+    const payload = JSON.stringify({ type: "error", message });
+    for (const peer of room.peers.values()) {
+      if (peer.socket.readyState !== 1) continue;
+      peer.socket.send(payload);
+      peer.socket.close();
+    }
+    this.rooms.delete(room.team.code);
+  }
+
   forwardActivity(input: {
     peerId: string;
     teamCode: string;

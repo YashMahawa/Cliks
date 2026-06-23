@@ -1,0 +1,9 @@
+services:
+  cliks-server:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      CORS_ORIGIN: "http://localhost:3000"
+    restart: unless-stopped

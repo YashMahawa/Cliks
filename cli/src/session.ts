@@ -1,7 +1,8 @@
 import WebSocket from "ws";
 import { ActivityBatcher, ActivityCapture, type CaptureMode } from "./activity.js";
 import { AudioEngine } from "./audio.js";
-import type { CliksConfig } from "./config.js";
+import { saveConfig, type CliksConfig } from "./config.js";
+import { captureTerminalState, restoreTerminalState, trackTerminalState } from "./terminal.js";
 
 const quips = [
   "Remote office volume: cozy focus.",
@@ -45,6 +46,9 @@ export async function startSession(
   let reconnectAttempt = 0;
   let ws: WebSocket | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
+  let controlCleanup: (() => void) | undefined;
+  let saveTimer: NodeJS.Timeout | undefined;
+  let listeningSaveInFlight: Promise<void> | undefined;
 
   const cleanup = () => {
     if (cleanedUp) return;
@@ -53,6 +57,12 @@ export async function startSession(
     if (quipTimer) clearInterval(quipTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = undefined;
+      void persistListening();
+    }
+    controlCleanup?.();
     batcher.flush();
     capture.stop();
     ws?.close();
@@ -63,12 +73,59 @@ export async function startSession(
       teamName,
       activeCount,
       listening.self,
+      listening,
       captureMode,
       connectionStatus,
       localCapturedEvents,
       localSentEvents,
       permissionHint
     );
+  };
+
+  const persistListening = () => {
+    config.listening = {
+      ...config.listening,
+      keyboard: listening.keyboard,
+      mouse: listening.mouse,
+      self: Boolean(listening.self),
+      volume: listening.volume,
+      muted: Boolean(listening.muted),
+      spatial: listening.spatial !== false,
+      fatigueProtection: listening.fatigueProtection !== false,
+      density: listening.density ?? 1
+    };
+    listeningSaveInFlight = saveConfig(config).catch(() => undefined);
+    return listeningSaveInFlight;
+  };
+
+  const saveListeningSoon = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined;
+      void persistListening();
+    }, 250);
+    saveTimer.unref();
+  };
+
+  const adjustVolume = (delta: number) => {
+    listening.volume = clamp(listening.volume + delta, 0, 1);
+    if (listening.volume > 0) listening.muted = false;
+    saveListeningSoon();
+    render();
+  };
+
+  const adjustDensity = (delta: number) => {
+    listening.density = clamp((listening.density ?? 1) + delta, 0.15, 1);
+    saveListeningSoon();
+    render();
+  };
+
+  const toggle = (key: "muted" | "spatial" | "fatigueProtection") => {
+    if (key === "muted") listening.muted = !listening.muted;
+    if (key === "spatial") listening.spatial = listening.spatial === false;
+    if (key === "fatigueProtection") listening.fatigueProtection = listening.fatigueProtection === false;
+    saveListeningSoon();
+    render();
   };
 
   const connect = () => {
@@ -207,6 +264,11 @@ export async function startSession(
   const captureState = await capture.start({ ...config.sharing, mode: options.captureMode ?? "auto" });
   captureMode = captureState.mode;
   permissionHint = captureState.permissionHint;
+  controlCleanup = setupInteractiveControls({
+    adjustVolume,
+    adjustDensity,
+    toggle
+  });
   render();
   connect();
 
@@ -218,7 +280,12 @@ export async function startSession(
   const stopFromSignal = () => {
     cleanup();
     ws?.close();
-    setTimeout(() => process.exit(0), 100).unref();
+    const exitSoon = () => setTimeout(() => process.exit(0), 100).unref();
+    if (listeningSaveInFlight) {
+      void listeningSaveInFlight.finally(exitSoon);
+    } else {
+      exitSoon();
+    }
   };
 
   process.once("SIGINT", stopFromSignal);
@@ -231,6 +298,13 @@ function renderStatus(
   teamName: string,
   activeCount: number,
   hearingSelf: boolean | undefined,
+  listening: {
+    volume: number;
+    muted?: boolean;
+    spatial?: boolean;
+    fatigueProtection?: boolean;
+    density?: number;
+  },
   captureMode: string,
   connectionStatus: string,
   localCapturedEvents: number,
@@ -243,9 +317,10 @@ function renderStatus(
   console.log(`Team: ${teamName}`);
   console.log(`Active now: ${activeCount}`);
   console.log("");
-  console.log("Sharing exact activity pulses in 500ms batches.");
-  console.log("Privacy: only keyboard/mouse event type and timing are sent. Never key values.");
+  console.log("Sharing coarse activity pulses in 500ms batches.");
+  console.log("Privacy: only keyboard/mouse event type and coarse timing are sent. Never key values.");
   console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
+  console.log(`Listen: ${listening.muted ? "muted" : `${Math.round(listening.volume * 100)}%`} | density ${Math.round((listening.density ?? 1) * 100)}% | spatial ${listening.spatial === false ? "off" : "on"} | fade ${listening.fatigueProtection === false ? "off" : "on"}`);
   console.log(`Connection: ${connectionStatus}`);
   console.log(`Capture: ${captureMode}`);
   if (captureMode === "terminal") {
@@ -257,5 +332,51 @@ function renderStatus(
   if (captureMode !== "off" && localCapturedEvents === 0) {
     console.log("If teammates cannot hear you, run: typ capture-test");
   }
-  console.log("Press Ctrl+C to stop.");
+  console.log("Controls: Up/Down volume, [/ ] density, m mute, s spatial, f fade, Ctrl+C stop.");
+}
+
+function setupInteractiveControls(input: {
+  adjustVolume(delta: number): void;
+  adjustDensity(delta: number): void;
+  toggle(key: "muted" | "spatial" | "fatigueProtection"): void;
+}) {
+  if (!process.stdin.isTTY) return undefined;
+
+  const terminalState = captureTerminalState();
+  const untrack = trackTerminalState(terminalState);
+
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  } catch {
+    untrack();
+    return undefined;
+  }
+
+  const onData = (chunk: Buffer) => {
+    const text = chunk.toString("utf8");
+    if (text === "\u0003") {
+      process.emit("SIGINT");
+      return;
+    }
+    if (text === "\x1b[A") input.adjustVolume(0.05);
+    else if (text === "\x1b[B") input.adjustVolume(-0.05);
+    else if (text === "]" || text === "}") input.adjustDensity(0.1);
+    else if (text === "[" || text === "{") input.adjustDensity(-0.1);
+    else if (text === "m" || text === "M") input.toggle("muted");
+    else if (text === "s" || text === "S") input.toggle("spatial");
+    else if (text === "f" || text === "F") input.toggle("fatigueProtection");
+  };
+
+  process.stdin.on("data", onData);
+
+  return () => {
+    process.stdin.off("data", onData);
+    restoreTerminalState(terminalState);
+    untrack();
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }

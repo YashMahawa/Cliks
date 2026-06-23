@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { loadConfig, rememberTeam, saveConfig, toWsUrl } from "./config.js";
 import { AudioEngine } from "./audio.js";
+import { runAutostart } from "./autostart.js";
 import { runCaptureTest } from "./captureTest.js";
 import { runDoctor } from "./doctor.js";
 import { startSession } from "./session.js";
@@ -35,6 +36,13 @@ program
   .description("start the selected team ambience")
   .action(async (options: { evdev?: boolean; terminal?: boolean; self?: boolean }) => {
     const config = await loadConfig();
+    if (process.env.CLIKS_AUTOSTART_TEAM) {
+      config.currentTeamCode = process.env.CLIKS_AUTOSTART_TEAM.toUpperCase();
+    }
+    if (!config.currentTeamCode) {
+      printFirstRunHelp();
+      return;
+    }
     await startSession(config, {
       captureMode: options.terminal ? "terminal" : options.evdev ? "evdev" : "auto",
       selfMonitor: options.self
@@ -123,6 +131,70 @@ program
   });
 
 program
+  .command("preset")
+  .argument("<name>", "deep, balanced, social, or quiet")
+  .description("apply a listening preset")
+  .action(async (name: string) => {
+    const config = await loadConfig();
+    const preset = name.toLowerCase();
+    if (preset === "deep") {
+      config.listening.volume = 0.45;
+      config.listening.density = 0.45;
+      config.listening.fatigueProtection = true;
+      config.listening.spatial = true;
+      config.listening.muted = false;
+    } else if (preset === "balanced") {
+      config.listening.volume = 0.65;
+      config.listening.density = 0.75;
+      config.listening.fatigueProtection = true;
+      config.listening.spatial = true;
+      config.listening.muted = false;
+    } else if (preset === "social") {
+      config.listening.volume = 0.8;
+      config.listening.density = 1;
+      config.listening.fatigueProtection = false;
+      config.listening.spatial = true;
+      config.listening.muted = false;
+    } else if (preset === "quiet") {
+      config.listening.volume = 0.3;
+      config.listening.density = 0.3;
+      config.listening.fatigueProtection = true;
+      config.listening.spatial = true;
+      config.listening.muted = false;
+    } else {
+      throw new Error("Unknown preset. Use: deep, balanced, social, or quiet");
+    }
+    await saveConfig(config);
+    console.log(`Applied ${preset} preset.`);
+  });
+
+const autostart = program
+  .command("autostart")
+  .description("manage background autoconnect on login");
+
+autostart
+  .command("enable")
+  .argument("[code]", "team code; defaults to current team")
+  .description("start typ automatically when you sign in")
+  .action(async (code?: string) => {
+    await runAutostart("enable", await loadConfig(), code);
+  });
+
+autostart
+  .command("disable")
+  .description("disable automatic typ startup")
+  .action(async () => {
+    await runAutostart("disable", await loadConfig());
+  });
+
+autostart
+  .command("status")
+  .description("show autostart status")
+  .action(async () => {
+    await runAutostart("status", await loadConfig());
+  });
+
+program
   .command("set")
   .argument("<key>", "setting key")
   .argument("<value>", "setting value")
@@ -135,7 +207,11 @@ program
     else if (key === "hear.keyboard") config.listening.keyboard = bool;
     else if (key === "hear.mouse") config.listening.mouse = bool;
     else if (key === "hear.self") config.listening.self = bool;
+    else if (key === "hear.muted") config.listening.muted = bool;
+    else if (key === "hear.spatial") config.listening.spatial = bool;
+    else if (key === "hear.fade") config.listening.fatigueProtection = bool;
     else if (key === "volume") config.listening.volume = Math.max(0, Math.min(1, Number(value)));
+    else if (key === "density") config.listening.density = Math.max(0.15, Math.min(1, Number(value)));
     else if (key === "batch.ms") config.batchWindowMs = Math.max(100, Math.min(2_000, Number(value)));
     else if (key === "api.url") {
       config.apiUrl = value.replace(/\/$/, "");
@@ -168,3 +244,18 @@ program.parseAsync().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+function printFirstRunHelp() {
+  console.log("Cliks is installed.");
+  console.log("");
+  console.log("1. Create or get a team code from the Cliks website.");
+  console.log("2. Join it here:");
+  console.log("   typ join CLIK-XXXXXX");
+  console.log("3. Start the room:");
+  console.log("   typ start");
+  console.log("");
+  console.log("Useful checks:");
+  console.log("   typ doctor");
+  console.log("   typ sound-test");
+  console.log("   typ capture-test");
+}

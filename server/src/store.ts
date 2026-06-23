@@ -167,7 +167,7 @@ class MemoryTeamStore implements TeamStore {
   async createTeam(input: { name: string; deletePassword: string }): Promise<Team> {
     const hash = await bcrypt.hash(input.deletePassword, 12);
     let code = makeCode();
-    while (this.teams.has(code)) code = makeCode();
+    while (this.teams.has(code) && !this.teams.get(code)?.deletedAt) code = makeCode();
     const team = {
       id: randomUUID(),
       code,

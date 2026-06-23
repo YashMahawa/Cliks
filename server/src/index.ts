@@ -105,6 +105,7 @@ server.delete("/api/teams/:code", async (request, reply) => {
 
   const deleted = await store.deleteTeam(parsed.data);
   if (!deleted) return reply.code(403).send({ error: "Could not delete that team." });
+  hub.closeRoom(parsed.data.code, "This team was deleted.");
   return { ok: true };
 });
 

@@ -17,6 +17,10 @@ export type CliksConfig = {
     mouse: boolean;
     self: boolean;
     volume: number;
+    muted: boolean;
+    spatial: boolean;
+    fatigueProtection: boolean;
+    density: number;
   };
   batchWindowMs: number;
 };
@@ -42,7 +46,11 @@ export function defaultConfig(): CliksConfig {
       keyboard: true,
       mouse: true,
       self: false,
-      volume: 0.7
+      volume: 0.7,
+      muted: false,
+      spatial: true,
+      fatigueProtection: true,
+      density: 0.8
     },
     batchWindowMs: 500
   };

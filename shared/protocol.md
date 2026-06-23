@@ -86,3 +86,13 @@ Raw client-side offsets are not forwarded as-is.
 ## Connection health
 
 The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out.
+
+## Team deletion
+
+When a team is deleted successfully, the relay closes any live room for that code. Connected peers receive:
+
+```json
+{ "type": "error", "message": "This team was deleted." }
+```
+
+The socket is then closed and future lookups for that team code return 404.

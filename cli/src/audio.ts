@@ -27,6 +27,10 @@ type ListeningConfig = {
   mouse: boolean;
   self?: boolean;
   volume: number;
+  muted?: boolean;
+  spatial?: boolean;
+  fatigueProtection?: boolean;
+  density?: number;
 };
 
 type DetectedPlayer = {
@@ -43,6 +47,8 @@ type PlaybackJob = {
 
 const maxConcurrentPlayback = 4;
 const maxQueuedPlayback = 96;
+const fatigueWindowMs = 5_000;
+const fatigueSoftLimit = 24;
 
 export class AudioEngine {
   private placements = new Map<string, PeerPlacement>();
@@ -52,6 +58,7 @@ export class AudioEngine {
   private mouseSamples: string[] | undefined;
   private playbackQueue: PlaybackJob[] = [];
   private activePlayback = 0;
+  private recentPlaybackTimes: number[] = [];
 
   constructor(private listening: ListeningConfig) {}
 
@@ -59,9 +66,11 @@ export class AudioEngine {
     const placement = this.placements.get(peerId) ?? this.assignFallbackPlacement(peerId);
 
     for (const event of events) {
+      if (this.listening.muted) continue;
       if (event.kind === "keyboard" && !this.listening.keyboard) continue;
       if (event.kind === "mouse" && !this.listening.mouse) continue;
       if (event.kind === "mouse" && !isPlayableMouseButton(event.button)) continue;
+      if (!shouldPlayForDensity(this.listening.density ?? 1)) continue;
       setTimeout(() => void this.play(event, placement), Math.max(0, event.offsetMs));
     }
   }
@@ -103,10 +112,11 @@ export class AudioEngine {
 
     const samples = event.kind === "keyboard" ? await this.getKeyboardSamples() : await this.getMouseSamples();
     const file = samples[Math.floor(Math.random() * samples.length)];
+    const fatigueGain = this.listening.fatigueProtection === false ? 1 : this.recordAndGetFatigueGain();
     this.enqueuePlayback({
       file,
-      gain: clamp(this.listening.volume * (1 / placement.distance), 0, 1),
-      pan: placement.pan
+      gain: clamp(this.listening.volume * (1 / placement.distance) * fatigueGain, 0, 1),
+      pan: this.listening.spatial === false ? 0 : placement.pan
     });
   }
 
@@ -169,6 +179,15 @@ export class AudioEngine {
     const placement = placementForIndex(this.placements.size, peerId);
     this.placements.set(peerId, placement);
     return placement;
+  }
+
+  private recordAndGetFatigueGain() {
+    const now = Date.now();
+    this.recentPlaybackTimes = this.recentPlaybackTimes.filter((time) => now - time <= fatigueWindowMs);
+    this.recentPlaybackTimes.push(now);
+
+    const overload = Math.max(0, this.recentPlaybackTimes.length - fatigueSoftLimit);
+    return clamp(1 - overload * 0.035, 0.35, 1);
   }
 }
 
@@ -363,6 +382,10 @@ function spatialInstallCommands() {
 
 function isPlayableMouseButton(button?: RemoteActivityEvent["button"]) {
   return button === "left" || button === "right";
+}
+
+function shouldPlayForDensity(density: number) {
+  return Math.random() <= clamp(density, 0.15, 1);
 }
 
 function seeded(text: string) {
