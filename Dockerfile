@@ -8,7 +8,7 @@ COPY cli/package.json cli/package.json
 RUN npm ci --omit=optional --no-audit --no-fund
 
 COPY . .
-RUN npm run build
+RUN npm --workspace @cliks/server run build
 
 FROM node:20-bookworm-slim AS runtime
 
