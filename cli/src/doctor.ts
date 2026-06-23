@@ -26,7 +26,7 @@ export async function runDoctor() {
   console.log("");
   console.log("Privacy:");
   console.log("- Cliks sends only event kind: keyboard or mouse.");
-  console.log("- Cliks sends timing offsets inside each 500ms batch.");
+  console.log("- Cliks relays coarse timing offsets inside each 500ms batch.");
   console.log("- Cliks does not send key values, key codes, words, coordinates, windows, or app names.");
   console.log("");
   console.log("System:");
@@ -47,6 +47,11 @@ export async function runDoctor() {
   const audio = getAudioPlayerStatus();
   if (audio.player) {
     console.log(`- Audio player: ok (${audio.player})`);
+    console.log(`- Spatial audio: ${audio.spatial ? "stereo pan + distance" : "distance volume only"}`);
+    if (!audio.spatial) {
+      console.log("  For stereo panning, install ffplay or mpv:");
+      for (const command of audio.spatialCommands) console.log(`  ${command}`);
+    }
   } else {
     console.log("- Audio player: missing");
     issues.push({

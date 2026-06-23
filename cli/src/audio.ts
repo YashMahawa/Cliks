@@ -31,13 +31,14 @@ type ListeningConfig = {
 
 type DetectedPlayer = {
   command: string;
-  args: string[];
-  volumeArgs?: (gain: number) => string[];
+  spatial: boolean;
+  argsFor: (job: PlaybackJob) => string[];
 };
 
 type PlaybackJob = {
   file: string;
   gain: number;
+  pan: number;
 };
 
 const maxConcurrentPlayback = 4;
@@ -104,7 +105,8 @@ export class AudioEngine {
     const file = samples[Math.floor(Math.random() * samples.length)];
     this.enqueuePlayback({
       file,
-      gain: clamp(this.listening.volume * (1 / placement.distance), 0, 1)
+      gain: clamp(this.listening.volume * (1 / placement.distance), 0, 1),
+      pan: placement.pan
     });
   }
 
@@ -132,7 +134,7 @@ export class AudioEngine {
     const player = this.player;
     this.activePlayback += 1;
 
-    const child = spawn(player.command, [...player.args, ...(player.volumeArgs?.(job.gain) ?? []), job.file], {
+    const child = spawn(player.command, player.argsFor(job), {
       stdio: "ignore",
       detached: false,
       env: process.env
@@ -224,39 +226,71 @@ async function loadSamples(kind: "keyboard" | "mouse") {
 }
 
 function detectPlayer(): DetectedPlayer | null {
+  if (findExecutable("ffplay")) {
+    return {
+      command: "ffplay",
+      spatial: true,
+      argsFor: (job) => [
+        "-nodisp",
+        "-autoexit",
+        "-loglevel",
+        "quiet",
+        "-af",
+        ffmpegSpatialFilter(job.gain, job.pan),
+        job.file
+      ]
+    };
+  }
+
+  if (findExecutable("mpv")) {
+    return {
+      command: "mpv",
+      spatial: true,
+      argsFor: (job) => [
+        "--no-video",
+        "--really-quiet",
+        "--no-terminal",
+        `--volume=${Math.round(clamp(job.gain, 0, 1) * 100)}`,
+        `--audio-pan=${clamp(job.pan, -1, 1).toFixed(3)}`,
+        job.file
+      ]
+    };
+  }
+
   if (process.platform === "darwin") {
     return {
       command: "afplay",
-      args: [],
-      volumeArgs: (gain) => ["-v", String(clamp(gain, 0, 1))]
+      spatial: false,
+      argsFor: (job) => ["-v", String(clamp(job.gain, 0, 1)), job.file]
     };
   }
 
   if (process.platform === "win32") {
     return {
       command: "powershell.exe",
-      args: ["-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();"]
+      spatial: false,
+      argsFor: (job) => ["-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();", job.file]
     };
   }
 
   if (findExecutable("paplay")) {
     return {
       command: "paplay",
-      args: [],
-      volumeArgs: (gain) => ["--volume", String(Math.round(clamp(gain, 0, 1) * 65536))]
+      spatial: false,
+      argsFor: (job) => ["--volume", String(Math.round(clamp(job.gain, 0, 1) * 65536)), job.file]
     };
   }
 
   if (findExecutable("pw-play")) {
     return {
       command: "pw-play",
-      args: [],
-      volumeArgs: (gain) => ["--volume", String(clamp(gain, 0, 1))]
+      spatial: false,
+      argsFor: (job) => ["--volume", String(clamp(job.gain, 0, 1)), job.file]
     };
   }
 
   if (findExecutable("aplay")) {
-    return { command: "aplay", args: [] };
+    return { command: "aplay", spatial: false, argsFor: (job) => [job.file] };
   }
 
   return null;
@@ -266,6 +300,8 @@ export function getAudioPlayerStatus() {
   const player = detectPlayer();
   return {
     player: player?.command,
+    spatial: Boolean(player?.spatial),
+    spatialCommands: spatialInstallCommands(),
     hint: player ? undefined : audioInstallHint(),
     commands: player ? [] : audioInstallCommands()
   };
@@ -313,6 +349,18 @@ function audioInstallCommands() {
   ];
 }
 
+function spatialInstallCommands() {
+  if (findExecutable("ffplay") || findExecutable("mpv")) return [];
+  if (process.platform === "darwin") return ["brew install ffmpeg", "typ sound-test"];
+  if (process.platform === "win32") return ["Install mpv or FFmpeg, then make mpv.exe or ffplay.exe available on PATH", "typ sound-test"];
+  if (findExecutable("pacman")) return ["sudo pacman -S --needed ffmpeg", "typ sound-test"];
+  if (findExecutable("apt")) return ["sudo apt update", "sudo apt install -y ffmpeg", "typ sound-test"];
+  if (findExecutable("dnf")) return ["sudo dnf install -y ffmpeg", "typ sound-test"];
+  if (findExecutable("zypper")) return ["sudo zypper install ffmpeg", "typ sound-test"];
+  if (findExecutable("apk")) return ["sudo apk add ffmpeg", "typ sound-test"];
+  return ["Install ffplay/FFmpeg or mpv with your package manager", "typ sound-test"];
+}
+
 function isPlayableMouseButton(button?: RemoteActivityEvent["button"]) {
   return button === "left" || button === "right";
 }
@@ -340,4 +388,20 @@ function sleep(ms: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function ffmpegSpatialFilter(gain: number, pan: number) {
+  const { left, right } = stereoGains(gain, pan);
+  return `pan=stereo|c0=${left.toFixed(3)}*c0|c1=${right.toFixed(3)}*c0`;
+}
+
+function stereoGains(gain: number, pan: number) {
+  const normalizedPan = clamp(pan, -1, 1);
+  const angle = ((normalizedPan + 1) * Math.PI) / 4;
+  const clampedGain = clamp(gain, 0, 1);
+
+  return {
+    left: Math.cos(angle) * clampedGain,
+    right: Math.sin(angle) * clampedGain
+  };
 }

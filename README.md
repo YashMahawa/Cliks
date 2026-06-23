@@ -87,7 +87,7 @@ typ start --evdev
 
 If permission is needed, `typ doctor` shows the setup command. Cliks still does not send which key was pressed.
 
-On Linux, local playback needs one common audio CLI to be available: `paplay`, `pw-play`, or `aplay`. `typ doctor` checks this, checks `/dev/input` permissions, and prints the commands to fix detected issues.
+Local playback uses common system audio tools. `typ doctor` checks playback, reports whether full stereo spatial audio is available, checks `/dev/input` permissions on Linux, and prints commands to fix detected issues. For the best spatial sound, install `ffplay`/FFmpeg or `mpv`; otherwise Cliks falls back to volume-aware native players where available.
 
 For local testing where you want to hear your own typing:
 
@@ -155,7 +155,7 @@ Install the CLI with:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer points `typ` at the hosted Cliks backend by default. On Linux it also checks whether global input capture needs permission and shows the relevant setup step.
+The installer points `typ` at the hosted Cliks backend by default and installs a user-local command wrapper instead of requiring global npm permissions. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed.
 
 ## Self-Hosting
 
@@ -206,7 +206,7 @@ Supabase is optional.
 
 ## Current Status
 
-This is an early prototype. The website, longer team codes, WebSocket relay, CLI config, event batching, reconnect loop, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, WebSocket relay, CLI config, event batching, reconnect loop, spatial-capable CLI playback, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 

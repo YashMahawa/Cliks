@@ -90,7 +90,7 @@ Good next optimizations:
 
 Terminal mode registers the captured `stty` state with a process-wide cleanup registry. Normal stops, top-level command failures, uncaught exceptions, unhandled rejections, and process exit all restore tracked terminal state and disable terminal mouse reporting.
 
-The current audio engine still uses system players, but it caps concurrent playback processes and queues a bounded number of events so dense batches do not create unbounded process storms. Distance-based gain reaches `afplay`, `paplay`, and `pw-play` through native volume flags. Real stereo pan remains future work for a mixer/player backend that supports it.
+The current audio engine still uses system players, but it caps concurrent playback processes and queues a bounded number of events so dense batches do not create unbounded process storms. Player priority is spatial-first: `ffplay` gets stereo pan plus gain through an FFmpeg audio filter, `mpv` gets stereo pan plus volume flags, `afplay`/`paplay`/`pw-play` get distance volume, and `aplay`/Windows `Media.SoundPlayer` remain basic fallback playback. A future native mixer could reduce process overhead further, but pan and distance now reach capable CLI players.
 
 ## Free-tier expectation
 

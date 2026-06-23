@@ -81,8 +81,7 @@ Each listener locally assigns positions to teammates relative to themselves. The
 
 When people leave, the local listener recomputes the arrangement, so far users move inward to fill gaps. Placement is deterministic per listener using peer ids as jitter seeds, but it is listener-relative and not a shared server truth.
 
-Current audio playback only uses distance as volume attenuation and stores pan/distance in placement. More realistic 3D processing is future work.
-Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded queue and caps concurrent player processes to avoid process storms during dense batches.
+Current audio playback stores pan/distance in placement and applies those values when the selected player supports them. `ffplay` is preferred for full stereo pan plus distance gain, then `mpv` for stereo pan plus volume, then native/basic players. Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded queue and caps concurrent player processes to avoid process storms during dense batches.
 
 ## Sound
 
@@ -95,7 +94,7 @@ Current pack:
 
 The audio engine randomly picks one sample per event. Mouse samples are real recorded click sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`. The website mirror in `site/public/sounds/` must stay in sync with both packs.
 
-On Linux, audio playback auto-detects `paplay`, `pw-play`, or `aplay`. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash.
+Audio playback auto-detects `ffplay`, `mpv`, `afplay`, `paplay`, `pw-play`, `aplay`, or Windows `Media.SoundPlayer` through PowerShell. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash. `typ doctor` should show whether the active player has full stereo spatial support or only distance/basic playback.
 
 The website mirrors this on the web. `site/components/AcousticProvider.tsx` preloads the keyboard WAVs from `site/public/sounds/keyboard/` (a copy of the CLI pack) via the Web Audio API and plays a random sample on every `keydown`/`mousedown`, with randomized gain and playback-rate jitter to match the CLI's organic feel. Audio integrity rule: if the WAVs fail to load it must fail silently — never fall back to a synthesized oscillator beep. Keep `site/public/sounds/keyboard/*` in sync with `cli/assets/sounds/keyboard/*`.
 
@@ -110,7 +109,7 @@ Current modes:
 - `typ capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `typ doctor`: explains privacy, checks Node/audio/input-device readiness, and prints detected fix commands.
 - `typ fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
-- `cli/install.sh`: installs the CLI, runs `typ doctor`, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
+- `cli/install.sh`: installs the CLI through a user-local wrapper, runs `typ doctor`, gives macOS/Windows/Linux setup hints, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
 
 Important platform reality:
 
@@ -182,7 +181,7 @@ Supabase should run `supabase/schema.sql`.
 
 - `npm audit --omit=dev` currently reports moderate advisories through Next/PostCSS dependency metadata. Do not force downgrade to old Next; wait for a patched compatible release or reassess if Next dependency graph changes.
 - Global capture is not production-ready across every OS yet.
-- Real pan is still future work for the current basic audio players. Distance-based gain is applied only on players with supported volume flags.
+- Full stereo pan requires `ffplay` or `mpv` on PATH. Basic/native players may only support distance-based gain or unspatialized playback.
 - The command is still `typ`; product name is Cliks.
 
 ## README Policy
