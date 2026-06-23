@@ -10,7 +10,7 @@ No login. No chat. No microphone. No keystrokes sent.
 
 Open the Cliks website, create a team code, and copy the install or join command from the page:
 
-[https://site-kappa-six-64.vercel.app](https://site-kappa-six-64.vercel.app)
+[cliks.agichaos.dev](https://cliks.agichaos.dev)
 
 The site is also a live preview: press any key on the page and it plays the exact same keyboard samples the CLI uses, so you can hear the ambience before you install anything.
 
