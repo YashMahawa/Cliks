@@ -1,0 +1,16 @@
+{
+  "title": "Cliks Documentation",
+  "description": "Cited answers generated from project markdown files.",
+  "sources": [
+    "."
+  ],
+  "ignore": ["node_modules", ".git", ".answerloom", "dist", ".venv", "venv", "build"],
+  "questions": [
+    "What does this project do?",
+    "How do I install it?",
+    "How is it different?"
+  ],
+  "site": {
+    "accent": "#0f766e"
+  }
+}
