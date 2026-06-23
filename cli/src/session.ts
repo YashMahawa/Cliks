@@ -10,6 +10,8 @@ const quips = [
   "Tiny taps, big momentum.",
   "Focus is doing its little drum solo."
 ];
+const heartbeatIntervalMs = 25_000;
+const heartbeatGraceMs = 10_000;
 
 export async function startSession(
   config: CliksConfig,
@@ -42,6 +44,7 @@ export async function startSession(
   let localSentEvents = 0;
   let reconnectAttempt = 0;
   let ws: WebSocket | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
 
   const cleanup = () => {
     if (cleanedUp) return;
@@ -49,6 +52,7 @@ export async function startSession(
     stopped = true;
     if (quipTimer) clearInterval(quipTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
     batcher.flush();
     capture.stop();
     ws?.close();
@@ -69,6 +73,14 @@ export async function startSession(
 
   const connect = () => {
     if (stopped) return;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+    }
     connectionStatus = reconnectAttempt === 0 ? "connecting" : `reconnecting (${reconnectAttempt})`;
     render();
 
@@ -79,6 +91,7 @@ export async function startSession(
       if (stopped || ws !== socket) return;
       reconnectAttempt = 0;
       connectionStatus = "connected";
+      startHeartbeat(socket);
       socket.send(
         JSON.stringify({
           type: "join",
@@ -91,6 +104,7 @@ export async function startSession(
     });
 
     socket.on("message", (raw) => {
+      if (stopped || ws !== socket) return;
       const message = JSON.parse(raw.toString());
       if (message.type === "welcome") {
         ownPeerId = message.peerId;
@@ -113,6 +127,10 @@ export async function startSession(
 
     socket.on("close", () => {
       if (stopped || ws !== socket) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
       scheduleReconnect();
     });
 
@@ -126,11 +144,44 @@ export async function startSession(
 
   const scheduleReconnect = () => {
     if (stopped) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectAttempt += 1;
     const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt - 1, 5));
     connectionStatus = `disconnected; retrying in ${Math.round(delayMs / 1000)}s`;
     render();
     reconnectTimer = setTimeout(connect, delayMs);
+  };
+
+  const startHeartbeat = (socket: WebSocket) => {
+    let awaitingPong = false;
+
+    socket.on("pong", () => {
+      if (ws !== socket) return;
+      awaitingPong = false;
+    });
+
+    heartbeatTimer = setInterval(() => {
+      if (stopped || ws !== socket) return;
+      if (socket.readyState !== WebSocket.OPEN) return;
+
+      if (awaitingPong) {
+        connectionStatus = "heartbeat missed; reconnecting";
+        render();
+        socket.terminate();
+        return;
+      }
+
+      awaitingPong = true;
+      socket.ping();
+      setTimeout(() => {
+        if (!stopped && ws === socket && awaitingPong && socket.readyState === WebSocket.OPEN) {
+          connectionStatus = "heartbeat timed out; reconnecting";
+          render();
+          socket.terminate();
+        }
+      }, heartbeatGraceMs).unref();
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
   };
 
   capture.on("activity", (event) => {

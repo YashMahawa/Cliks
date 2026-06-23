@@ -9,7 +9,7 @@ The CLI records only activity shape:
 - `keyboard`
 - `mouse`
 - mouse button when available
-- millisecond interval offsets inside a 500ms batch
+- coarse interval offsets inside a 500ms batch
 
 It must not send:
 
@@ -24,6 +24,8 @@ It must not send:
 
 The CLI batches for 500ms by default. This keeps Render/WebSocket load lower while preserving the timing feel.
 
+Clients may send local millisecond offsets to the relay, but the server rounds offsets into 50ms buckets before forwarding activity to teammates. This limits keystroke-rhythm fingerprinting while preserving enough timing to sound natural.
+
 Example:
 
 ```json
@@ -32,9 +34,9 @@ Example:
   "batchStartedAt": 1780000000000,
   "events": [
     { "kind": "keyboard", "offsetMs": 0 },
-    { "kind": "keyboard", "offsetMs": 93 },
-    { "kind": "mouse", "button": "left", "offsetMs": 288 },
-    { "kind": "keyboard", "offsetMs": 491 }
+    { "kind": "keyboard", "offsetMs": 100 },
+    { "kind": "mouse", "button": "left", "offsetMs": 300 },
+    { "kind": "keyboard", "offsetMs": 500 }
   ]
 }
 ```
@@ -55,6 +57,8 @@ It must not return room codes, team names, peer ids, nicknames, or per-room snap
 
 Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists.
 
+Soft-deleted team rows are retained for history, but code uniqueness is scoped to active rows only. Postgres and Supabase both use a partial unique index on `(code) where deleted_at is null`, so deleting a room does not permanently consume its code.
+
 ## Scaling notes
 
 Load is dominated by live fanout, not storage.
@@ -71,6 +75,7 @@ Current defaults:
 - rooms exist only while at least one client is connected
 - Supabase stores only team records
 - relay health metrics are aggregate-only
+- server and CLI WebSocket heartbeats clean up half-open sessions
 
 Good next optimizations:
 
@@ -81,7 +86,7 @@ Good next optimizations:
 
 ## CLI reliability and audio
 
-`typ start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, retries with exponential backoff, and resumes joining the selected team when the backend is reachable again. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
+`typ start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, sends pings, terminates heartbeat timeouts, retries with exponential backoff, and resumes joining the selected team when the backend is reachable again. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
 
 Terminal mode registers the captured `stty` state with a process-wide cleanup registry. Normal stops, top-level command failures, uncaught exceptions, unhandled rejections, and process exit all restore tracked terminal state and disable terminal mouse reporting.
 

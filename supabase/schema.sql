@@ -1,13 +1,15 @@
 create table if not exists public.cliks_teams (
   id uuid primary key default gen_random_uuid(),
-  code text not null unique,
+  code text not null,
   name text not null,
   delete_password_hash text not null,
   created_at timestamptz not null default now(),
   deleted_at timestamptz
 );
 
-create index if not exists cliks_teams_code_active_idx
+alter table public.cliks_teams drop constraint if exists cliks_teams_code_key;
+
+create unique index if not exists cliks_teams_code_active_idx
   on public.cliks_teams (code)
   where deleted_at is null;
 

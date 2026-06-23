@@ -7,6 +7,8 @@ export type ActivityEvent = {
   button?: "left" | "right" | "middle" | "unknown";
 };
 
+const timingBucketMs = 50;
+
 type Peer = {
   id: string;
   nickname?: string;
@@ -92,7 +94,7 @@ export class RoomHub {
       .slice(0, 128)
       .map((event) => ({
         kind: event.kind,
-        offsetMs: clamp(Math.round(event.offsetMs), 0, 2_000),
+        offsetMs: quantizeOffset(event.offsetMs),
         ...(event.kind === "mouse" ? { button: event.button ?? "unknown" } : {})
       }))
       .filter((event) => event.kind === "keyboard" || event.kind === "mouse");
@@ -162,4 +164,8 @@ export class RoomHub {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function quantizeOffset(offsetMs: number) {
+  return clamp(Math.round(offsetMs / timingBucketMs) * timingBucketMs, 0, 2_000);
 }

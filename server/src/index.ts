@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { customAlphabet } from "nanoid";
+import type { WebSocket } from "ws";
 import { z } from "zod";
 import { RoomHub } from "./rooms.js";
 import { createTeamStoreFromEnv } from "./store.js";
@@ -20,6 +21,10 @@ const deleteTeamLimiter = createRateLimiter({
   windowMs: 5 * 60_000,
   maxRequests: 30
 });
+const liveSockets = new Set<HeartbeatSocket>();
+const heartbeatIntervalMs = 30_000;
+
+type HeartbeatSocket = WebSocket & { isAlive?: boolean; peerId?: string };
 
 const createTeamSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -104,10 +109,18 @@ server.delete("/api/teams/:code", async (request, reply) => {
 });
 
 server.get("/ws", { websocket: true }, (socket) => {
+  const heartbeatSocket = socket as HeartbeatSocket;
   const peerId = `peer_${makePeerId()}`;
+  heartbeatSocket.isAlive = true;
+  heartbeatSocket.peerId = peerId;
+  liveSockets.add(heartbeatSocket);
   let joinedCode: string | undefined;
 
-  socket.on("message", async (raw) => {
+  heartbeatSocket.on("pong", () => {
+    heartbeatSocket.isAlive = true;
+  });
+
+  heartbeatSocket.on("message", async (raw) => {
     try {
       const json = JSON.parse(raw.toString());
 
@@ -117,7 +130,7 @@ server.get("/ws", { websocket: true }, (socket) => {
         await hub.join({
           teamCode: joinedCode,
           nickname: parsed.nickname,
-          socket,
+          socket: heartbeatSocket,
           peerId
         });
         return;
@@ -134,9 +147,9 @@ server.get("/ws", { websocket: true }, (socket) => {
         return;
       }
 
-      socket.send(JSON.stringify({ type: "error", message: "Join a team before sending activity." }));
+      heartbeatSocket.send(JSON.stringify({ type: "error", message: "Join a team before sending activity." }));
     } catch (error) {
-      socket.send(
+      heartbeatSocket.send(
         JSON.stringify({
           type: "error",
           message: error instanceof Error ? error.message : "Invalid message."
@@ -145,10 +158,26 @@ server.get("/ws", { websocket: true }, (socket) => {
     }
   });
 
-  socket.on("close", () => {
+  heartbeatSocket.on("close", () => {
+    liveSockets.delete(heartbeatSocket);
     hub.leave(peerId);
   });
 });
+
+const heartbeatTimer = setInterval(() => {
+  for (const socket of liveSockets) {
+    if (socket.isAlive === false) {
+      liveSockets.delete(socket);
+      if (socket.peerId) hub.leave(socket.peerId);
+      socket.terminate();
+      continue;
+    }
+
+    socket.isAlive = false;
+    socket.ping();
+  }
+}, heartbeatIntervalMs);
+heartbeatTimer.unref();
 
 server.listen({ port, host: "0.0.0.0" }).catch((error) => {
   server.log.error(error);

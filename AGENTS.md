@@ -21,7 +21,7 @@ Core promise:
 - create a team code on the website
 - join from the CLI
 - no actual keystrokes, key codes, mouse coordinates, app names, window names, text, screenshots, clipboard data, microphone audio, or screen data are sent
-- only activity event kind plus timing offsets are sent
+- only activity event kind plus coarse timing offsets are sent
 
 ## Current Structure
 
@@ -36,7 +36,7 @@ Core promise:
 
 ## Protocol
 
-Activity batches preserve exact event kind and timing offsets inside a 500ms window.
+Activity batches preserve event kind and coarse timing offsets inside a 500ms window. Clients may send local millisecond offsets, but the relay rounds offsets into 50ms buckets before forwarding them to teammates. Do not reintroduce raw millisecond relay timing; it weakens the privacy promise by making keystroke rhythm fingerprinting easier.
 
 Example:
 
@@ -47,8 +47,8 @@ Example:
   "batchStartedAt": 1780000000000,
   "events": [
     { "kind": "keyboard", "offsetMs": 0 },
-    { "kind": "mouse", "button": "left", "offsetMs": 173 },
-    { "kind": "keyboard", "offsetMs": 499 }
+    { "kind": "mouse", "button": "left", "offsetMs": 150 },
+    { "kind": "keyboard", "offsetMs": 500 }
   ]
 }
 ```
@@ -66,7 +66,7 @@ Stored data:
 - delete password hash
 - timestamps
 
-Live presence is in memory. Rooms disappear from memory when empty. There is no membership list and no stored total member count.
+Live presence is in memory. Rooms disappear from memory when empty. There is no membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
 
 ## Client-Side Placement
 
@@ -117,13 +117,13 @@ Important platform reality:
 - Windows can use low-level hooks.
 - macOS can use Event Tap APIs with Accessibility permission.
 - Linux Xorg can use XRecord/XInput/native hooks.
-- Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and timing.
+- Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and coarse timing.
 - Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, multi-finger gestures, or touchpad tool/finger events.
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state.
 - Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `typ fix-terminal`.
 - The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
-- `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
+- `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
 
 ## Commands
 
@@ -157,7 +157,7 @@ The current DigitalOcean backend is a Droplet running `cliks-api` under systemd 
 
 The public `/health` route must stay unauthenticated for uptime checks, but it must not expose team codes, team names, peer ids, nicknames, or per-room snapshots. It returns only `ok`, `totalRooms`, and `totalPeers`.
 
-Room creation and deletion routes have lightweight in-process per-IP rate limits before expensive bcrypt work. Delete attempts must run a dummy bcrypt comparison when a code is missing so timing does not reveal whether a room exists.
+Room creation and deletion routes have lightweight in-process per-IP rate limits before expensive bcrypt work. Delete attempts must run a dummy bcrypt comparison when a code is missing so timing does not reveal whether a room exists. Database uniqueness should apply only to active team codes (`deleted_at is null`) so soft-deleted rows do not permanently burn code namespace.
 
 Security posture for the live Droplet:
 

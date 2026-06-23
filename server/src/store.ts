@@ -77,15 +77,16 @@ class PostgresTeamStore implements TeamStore {
     await this.pool.query(
       `create table if not exists cliks_teams (
         id uuid primary key,
-        code text not null unique,
+        code text not null,
         name text not null,
         delete_password_hash text not null,
         created_at timestamptz not null default now(),
         deleted_at timestamptz
       )`
     );
+    await this.pool.query("alter table cliks_teams drop constraint if exists cliks_teams_code_key");
     await this.pool.query(
-      `create index if not exists cliks_teams_code_active_idx
+      `create unique index if not exists cliks_teams_code_active_idx
         on cliks_teams (code)
         where deleted_at is null`
     );

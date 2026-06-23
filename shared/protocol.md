@@ -20,7 +20,7 @@ Cliks uses tiny JSON messages over WebSocket.
 
 ### Activity batch
 
-The CLI sends one batch every `batchWindowMs`, currently 500ms. Each event keeps its millisecond offset from the first event in that batch.
+The CLI sends one batch every `batchWindowMs`, currently 500ms. Local events include offsets from the first event in that batch. Before relaying to teammates, the server rounds offsets into 50ms buckets.
 
 ```json
 {
@@ -36,6 +36,7 @@ The CLI sends one batch every `batchWindowMs`, currently 500ms. Each event keeps
 ```
 
 No key values, coordinates, windows, text, or app names are sent.
+Raw client-side offsets are not forwarded as-is.
 
 ## Server to client
 
@@ -77,7 +78,11 @@ No key values, coordinates, windows, text, or app names are sent.
   "batchStartedAt": 1780000000000,
   "events": [
     { "kind": "keyboard", "offsetMs": 0 },
-    { "kind": "mouse", "button": "left", "offsetMs": 188 }
+    { "kind": "mouse", "button": "left", "offsetMs": 200 }
   ]
 }
 ```
+
+## Connection health
+
+The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out.

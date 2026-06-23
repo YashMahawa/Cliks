@@ -33,7 +33,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -d /dev/input ]; then
   if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
     echo ""
     echo "Linux global capture needs permission to read input-device events."
-    echo "Cliks still sends only event type and timing, never key values."
+    echo "Cliks still sends only event type and coarse timing, never key values."
     printf "Add your user to the input group now? [y/N] "
     read -r answer
     case "$answer" in

@@ -21,4 +21,4 @@ Terminal mode captures and restores the original terminal state and disables mou
   - future portal support if a standard global-input portal becomes available,
   - or terminal/app-specific capture as a limited mode.
 
-The privacy promise remains the same regardless of backend: never send key values, coordinates, window names, or typed content. Only send event kind plus timing offsets.
+The privacy promise remains the same regardless of backend: never send key values, coordinates, window names, or typed content. Only send event kind plus coarse timing offsets.

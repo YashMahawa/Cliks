@@ -33,7 +33,7 @@ Cliks sends only tiny activity pulses:
 
 - keyboard activity happened
 - mouse click happened
-- timing between those activity pulses
+- coarse timing between those activity pulses
 
 Cliks does **not** send:
 
@@ -45,6 +45,8 @@ Cliks does **not** send:
 - clipboard data
 - screenshots
 - microphone audio
+
+Remote timing is rounded into 50ms buckets by the relay before teammates receive it. This keeps the ambience rhythmic without exposing raw millisecond keystroke patterns.
 
 ## Quick Start
 
@@ -131,7 +133,7 @@ typ capture-test --evdev
 
 While `typ start` is running, the status screen also shows connection state plus local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check whether the CLI is reconnecting to the backend.
 
-If the WebSocket drops during a server restart or short network outage, `typ start` stays open and retries automatically with backoff. Activity captured while offline is best-effort and may be dropped until the connection is restored.
+If the WebSocket drops during a server restart or short network outage, `typ start` stays open and retries automatically with backoff. The CLI and relay exchange heartbeats so half-open connections are cleaned up instead of leaving stale teammates in the room. Activity captured while offline is best-effort and may be dropped until the connection is restored.
 
 If a terminal tab feels stuck in a strange input mode after terminal-only testing, run:
 
