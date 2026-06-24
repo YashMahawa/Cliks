@@ -8,7 +8,10 @@ import { RoomHub } from "./rooms.js";
 import { createTeamStoreFromEnv } from "./store.js";
 
 const port = Number(process.env.PORT ?? process.env.DO_APP_PORT ?? 8787);
-const corsOrigin = process.env.CORS_ORIGIN ?? true;
+const corsOriginSetting = process.env.CORS_ORIGIN;
+const corsOrigin: any = corsOriginSetting
+  ? (corsOriginSetting.includes(",") ? corsOriginSetting.split(",").map(o => o.trim()) : corsOriginSetting)
+  : true;
 const server = Fastify({ logger: true });
 const store = createTeamStoreFromEnv();
 const hub = new RoomHub(store);
