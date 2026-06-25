@@ -167,6 +167,16 @@ func normalizeConfig(cfg *CliksConfig) {
 	if cfg.Listening.Density > 1 {
 		cfg.Listening.Density = 1
 	}
+	cfg.Nickname = sanitizeNickname(cfg.Nickname)
+}
+
+func sanitizeNickname(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len([]rune(value)) <= 32 {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:32])
 }
 
 func toWSURL(apiURL string) string {

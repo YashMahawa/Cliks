@@ -18,6 +18,8 @@ Cliks uses tiny JSON messages over WebSocket.
 }
 ```
 
+`nickname` is an explicit optional display name. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles.
+
 ### Activity batch
 
 The CLI sends one batch every `batchWindowMs`, currently 500ms. Local events include offsets from the first event in that batch. Before relaying to teammates, the server rounds offsets into 50ms buckets.
@@ -62,7 +64,7 @@ Raw client-side offsets are not forwarded as-is.
   "teamCode": "CLIK-842KQ9",
   "activeCount": 4,
   "peers": [
-    { "peerId": "peer_abc123", "nickname": "Mira" }
+    { "peerId": "peer_abc123", "nickname": "Mira", "joinedAt": 1780000000000 }
   ]
 }
 ```

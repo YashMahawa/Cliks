@@ -42,7 +42,12 @@ const deleteTeamSchema = z.object({
 const joinSchema = z.object({
   type: z.literal("join"),
   teamCode: z.string().trim().min(4).max(16),
-  nickname: z.string().trim().max(32).optional(),
+  nickname: z
+    .string()
+    .trim()
+    .max(32)
+    .transform((value) => normalizeNickname(value))
+    .optional(),
   client: z
     .object({
       name: z.string().optional(),
@@ -214,4 +219,9 @@ function createRateLimiter(input: { windowMs: number; maxRequests: number }) {
       return current.count <= input.maxRequests;
     }
   };
+}
+
+function normalizeNickname(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized === "" ? undefined : normalized;
 }

@@ -109,15 +109,16 @@ async function websocketRelaySmoke(url, teamCode) {
   const a = new WebSocket(url);
   const b = new WebSocket(url);
   const batches = [];
+  const presences = [];
 
   await Promise.all([once(a, "open"), once(b, "open")]);
-  a.send(JSON.stringify({ type: "join", teamCode, nickname: "a" }));
-  b.send(JSON.stringify({ type: "join", teamCode, nickname: "b" }));
-
   b.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
+    if (message.type === "presence") presences.push(message);
     if (message.type === "peer_activity_batch") batches.push(message);
   });
+  a.send(JSON.stringify({ type: "join", teamCode, nickname: "a" }));
+  b.send(JSON.stringify({ type: "join", teamCode, nickname: "b" }));
 
   await sleep(250);
   a.send(
@@ -138,6 +139,16 @@ async function websocketRelaySmoke(url, teamCode) {
 
   if (batches.length !== 1) {
     throw new Error(`Expected one relayed batch, got ${batches.length}`);
+  }
+  if (batches[0].nickname !== "a") {
+    throw new Error(`Expected relayed activity nickname "a", got ${JSON.stringify(batches[0].nickname)}`);
+  }
+  const sawNamedPresence = presences.some((message) => {
+    const names = new Set((message.peers ?? []).map((peer) => peer.nickname));
+    return names.has("a") && names.has("b");
+  });
+  if (!sawNamedPresence) {
+    throw new Error(`Expected named presence for both peers, got ${JSON.stringify(presences)}`);
   }
 
   return {

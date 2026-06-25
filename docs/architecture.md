@@ -75,6 +75,7 @@ Current defaults:
 - max 128 events per batch
 - no stored event history
 - rooms exist only while at least one client is connected
+- live peer nicknames exist only in memory and are relayed in presence/activity
 - Supabase stores only team records
 - relay health metrics are aggregate-only
 - server and CLI WebSocket heartbeats clean up half-open sessions
@@ -107,11 +108,13 @@ Fatigue fade attenuates dense local playback after sustained bursts. Density thi
 
 `cliks background start` starts `cliks start` detached from the current terminal for the selected team and writes a pid/log under the user state directory. `cliks background status` reports running/stale/stopped and `cliks background stop` kills that detached process. This is separate from boot login behavior.
 
-All local run modes share a single-session guard. `cliks start`, `cliks background start`, and boot autostart acquire `session.lock` under the user state directory and update `session.json` with pid, team, mode, connection status, active count, and local counters. A second local start must refuse to connect while that pid is alive. This prevents one device from joining the same team twice and playing the user's own activity back as a teammate. Stale locks are removed when the pid is gone.
+All local run modes share a single-session guard. `cliks start`, `cliks background start`, and boot autostart acquire `session.lock` under the user state directory and update `session.json` with pid, team, mode, connection status, active count, and local counters. A second local start must refuse to connect while that pid is alive. This prevents one device from joining the same team twice and playing the user's own activity back as a teammate. Stale locks are removed when the pid is gone. The Go CLI also scans for older same-executable `cliks start` processes that were launched before the lock existed; those are treated as active local sessions, and the TUI cleans up duplicate copies when a managed session is already active.
 
 `cliks autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM`, sets `CLIKS_RUN_MODE=boot`, and runs `cliks start`.
 
-Running bare `cliks` opens the Bubble Tea control screen. The home view stays intentionally small: greeting, selected team, active local connection state, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. More contains Preferences, Team, Connection, and Diagnostics. TUI actions should run in-place whenever possible, and mouse hover should move the highlighted row. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
+Running bare `cliks` opens the Bubble Tea control screen. The home view stays intentionally small: greeting, selected team, active local connection state, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. More contains Preferences, Team, Connection, and Diagnostics. TUI actions should run in-place whenever possible, and mouse all-motion hover should move the highlighted row with hit-testing that accounts for the title, panel border, and padding. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
+
+`cliks nickname [NAME]` and the Team > Nickname TUI form configure an explicit display name. The server keeps that name only in live peer presence and relays it with peer activity so small-room dashboards can show names and "X, Y are typing." Larger rooms should show only total people and typing counts. When a connection is already active, turning Keep Running off should schedule it to stop when the control screen closes; use the separate Stop action for immediate disconnect.
 
 Linux evdev mouse capture is click-only. It emits physical `BTN_LEFT` and `BTN_RIGHT` directly and uses a conservative touchpad tap detector for devices that do not emit button codes for tap-to-click: short stationary one-finger tap maps to left click, short stationary two-finger tap maps to right click, long holds/movement/three-or-more-finger gestures are ignored, and physical button activity suppresses duplicate tap output. The CLI must never send coordinates or pointer movement.
 

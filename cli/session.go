@@ -22,6 +22,7 @@ type StartOptions struct {
 type SessionViewState struct {
 	TeamName            string
 	TeamCode            string
+	OwnPeerID           string
 	ActiveCount         int
 	ConnectionStatus    string
 	CaptureMode         string
@@ -32,6 +33,13 @@ type SessionViewState struct {
 	HearingSelf         bool
 	Notice              string
 	Peers               []PeerPresence
+	RecentPeerActivity  []PeerActivityStatus
+}
+
+type PeerActivityStatus struct {
+	PeerID         string
+	Nickname       string
+	LastActivityAt time.Time
 }
 
 type sessionController struct {
@@ -63,7 +71,7 @@ func startSession(cfg CliksConfig, opts StartOptions) error {
 	}
 	defer controller.stop()
 	if term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
-		program := tea.NewProgram(newSessionModel(controller), tea.WithAltScreen(), tea.WithMouseCellMotion())
+		program := tea.NewProgram(newSessionModel(controller), tea.WithAltScreen(), tea.WithMouseAllMotion())
 		_, err := program.Run()
 		return err
 	}
@@ -319,7 +327,7 @@ func (s *sessionController) connectLoop() {
 		_ = conn.WriteJSON(map[string]any{
 			"type":     "join",
 			"teamCode": s.cfg.CurrentTeamCode,
-			"nickname": s.cfg.Nickname,
+			"nickname": sanitizeNickname(s.cfg.Nickname),
 			"client":   map[string]string{"name": "cliks", "version": version},
 		})
 		s.set(func(state *SessionViewState) { state.ConnectionStatus = "connected" })
@@ -393,6 +401,7 @@ func (s *sessionController) readLoop(conn *websocket.Conn) {
 			}
 			s.set(func(state *SessionViewState) {
 				state.TeamName = teamName
+				state.OwnPeerID = envelope.PeerID
 				state.ActiveCount = envelope.ActiveCount
 			})
 		case "presence":
@@ -400,8 +409,12 @@ func (s *sessionController) readLoop(conn *websocket.Conn) {
 			s.set(func(state *SessionViewState) {
 				state.ActiveCount = envelope.ActiveCount
 				state.Peers = envelope.Peers
+				state.OwnPeerID = s.ownPeerID
 			})
 		case "peer_activity_batch":
+			s.set(func(state *SessionViewState) {
+				state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.PeerID, envelope.Nickname, time.Now())
+			})
 			s.audio.scheduleBatch(envelope.PeerID, envelope.Events)
 		case "error":
 			s.set(func(state *SessionViewState) {
@@ -409,6 +422,31 @@ func (s *sessionController) readLoop(conn *websocket.Conn) {
 			})
 		}
 	}
+}
+
+func markPeerActive(current []PeerActivityStatus, peerID string, nickname string, at time.Time) []PeerActivityStatus {
+	if peerID == "" {
+		return current
+	}
+	nickname = sanitizeNickname(nickname)
+	next := make([]PeerActivityStatus, 0, len(current)+1)
+	updated := false
+	cutoff := at.Add(-5 * time.Second)
+	for _, item := range current {
+		if item.LastActivityAt.Before(cutoff) {
+			continue
+		}
+		if item.PeerID == peerID {
+			item.Nickname = nickname
+			item.LastActivityAt = at
+			updated = true
+		}
+		next = append(next, item)
+	}
+	if !updated {
+		next = append(next, PeerActivityStatus{PeerID: peerID, Nickname: nickname, LastActivityAt: at})
+	}
+	return next
 }
 
 func reconnectDelay(attempt int) time.Duration {

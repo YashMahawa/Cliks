@@ -44,7 +44,7 @@ export class RoomHub {
     const room = this.getOrCreateRoom(team);
     const peer: Peer = {
       id: input.peerId,
-      nickname: input.nickname?.slice(0, 32),
+      nickname: normalizeNickname(input.nickname),
       socket: input.socket,
       team,
       joinedAt: Date.now(),
@@ -181,4 +181,9 @@ function clamp(value: number, min: number, max: number) {
 
 function quantizeOffset(offsetMs: number) {
   return clamp(Math.round(offsetMs / timingBucketMs) * timingBucketMs, 0, 2_000);
+}
+
+function normalizeNickname(value: string | undefined) {
+  const normalized = value?.replace(/\s+/g, " ").trim().slice(0, 32);
+  return normalized || undefined;
 }

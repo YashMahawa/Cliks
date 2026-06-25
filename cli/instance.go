@@ -13,6 +13,7 @@ const (
 	runModeForeground = "foreground"
 	runModeBackground = "background"
 	runModeBoot       = "boot"
+	runModeExisting   = "existing"
 )
 
 type ActiveSessionState struct {
@@ -27,6 +28,7 @@ type ActiveSessionState struct {
 	LocalSentEvents     int    `json:"localSentEvents,omitempty"`
 	StartedAt           string `json:"startedAt"`
 	UpdatedAt           string `json:"updatedAt"`
+	DuplicateLocalPIDs  []int  `json:"-"`
 }
 
 type sessionInstance struct {
@@ -40,7 +42,7 @@ type alreadyRunningError struct {
 }
 
 func (e alreadyRunningError) Error() string {
-	return fmt.Sprintf("Cliks is already running for %s (%s, pid %d). Use `cliks background status` or `cliks background stop`.", e.state.TeamCode, modeLabel(e.state.Mode), e.state.PID)
+	return fmt.Sprintf("Cliks is already running for %s (%s, pid %d). Use `cliks background status` or `cliks background stop`.", valuePlain(e.state.TeamCode, "a team"), modeLabel(e.state.Mode), e.state.PID)
 }
 
 func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, error) {
@@ -155,6 +157,7 @@ func activeSession() (ActiveSessionState, bool) {
 			if state.TeamCode == "" {
 				state.TeamCode = lock.TeamCode
 			}
+			state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(lock.PID))
 			return state, true
 		}
 		cleanupStaleSession()
@@ -167,6 +170,21 @@ func activeSession() (ActiveSessionState, bool) {
 		}
 		if state.ConnectionStatus == "" {
 			state.ConnectionStatus = "starting"
+		}
+		state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(pid))
+		return state, true
+	}
+	if siblings := findSiblingStartProcesses(); len(siblings) > 0 {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		state := ActiveSessionState{
+			PID:              siblings[0].PID,
+			Mode:             runModeExisting,
+			ConnectionStatus: "running",
+			StartedAt:        now,
+			UpdatedAt:        now,
+		}
+		if len(siblings) > 1 {
+			state.DuplicateLocalPIDs = siblingPIDs(siblings[1:])
 		}
 		return state, true
 	}
@@ -181,16 +199,16 @@ func stopActiveSession() (string, error) {
 	if active.PID == os.Getpid() {
 		return "", fmt.Errorf("this terminal owns the active Cliks session")
 	}
-	process, err := os.FindProcess(active.PID)
-	if err == nil {
-		_ = process.Kill()
-	}
+	stoppedCount := stopSessionPIDs(append([]int{active.PID}, active.DuplicateLocalPIDs...))
 	_ = os.Remove(sessionLockPath())
 	_ = os.Remove(backgroundPIDPath())
 	stopped := active
 	stopped.ConnectionStatus = "stopped"
 	stopped.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_ = writeActiveSessionState(stopped)
+	if stoppedCount > 1 {
+		return fmt.Sprintf("Stopped Cliks for %s and cleaned up %d duplicate local session(s).", valuePlain(active.TeamCode, "the current team"), stoppedCount-1), nil
+	}
 	return fmt.Sprintf("Stopped Cliks for %s.", valuePlain(active.TeamCode, "the current team")), nil
 }
 
@@ -240,7 +258,42 @@ func modeLabel(mode string) string {
 		return "launch at login"
 	case runModeForeground:
 		return "live terminal"
+	case runModeExisting:
+		return "existing session"
 	default:
 		return valuePlain(mode, "running")
 	}
+}
+
+func siblingPIDs(processes []localStartProcess) []int {
+	pids := make([]int, 0, len(processes))
+	for _, process := range processes {
+		if process.PID > 0 {
+			pids = append(pids, process.PID)
+		}
+	}
+	return pids
+}
+
+func stopDuplicateLocalSessions(active ActiveSessionState) int {
+	return stopSessionPIDs(active.DuplicateLocalPIDs)
+}
+
+func stopSessionPIDs(pids []int) int {
+	seen := map[int]bool{}
+	stopped := 0
+	for _, pid := range pids {
+		if pid <= 0 || pid == os.Getpid() || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if process.Kill() == nil {
+			stopped++
+		}
+	}
+	return stopped
 }

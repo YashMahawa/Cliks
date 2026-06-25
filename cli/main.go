@@ -40,6 +40,8 @@ func run(args []string) error {
 		return cmdCreate(rest[1:])
 	case "delete":
 		return cmdDelete(rest[1:])
+	case "nickname", "name":
+		return cmdNickname(rest[1:])
 	case "start":
 		return cmdStart(rest[1:])
 	case "settings", "ui":
@@ -181,6 +183,29 @@ func cmdDelete(args []string) error {
 	}
 	_ = saveConfig(cfg)
 	fmt.Printf("Deleted %s.\n", code)
+	return nil
+}
+
+func cmdNickname(args []string) error {
+	cfg := loadConfig()
+	name := sanitizeNickname(strings.Join(args, " "))
+	if name == "" {
+		reader := bufio.NewReader(os.Stdin)
+		line, err := readPrompt(reader, "Display name: ")
+		if err != nil {
+			return err
+		}
+		name = sanitizeNickname(line)
+	}
+	cfg.Nickname = name
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+	if name == "" {
+		fmt.Println("Nickname cleared.")
+		return nil
+	}
+	fmt.Printf("Nickname set to %s.\n", name)
 	return nil
 }
 
@@ -356,6 +381,8 @@ func cmdSet(args []string) error {
 		cfg.WSURL = toWSURL(cfg.APIURL)
 	case "ws.url":
 		cfg.WSURL = value
+	case "nickname", "name":
+		cfg.Nickname = sanitizeNickname(strings.Join(args[1:], " "))
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
@@ -456,6 +483,7 @@ Usage:
   %[1]s create           Create a team
   %[1]s delete [CODE]    Delete a team
   %[1]s join CODE        Save and select a team
+  %[1]s nickname [NAME]  Set your display name
   %[1]s start            Start coworking ambience
   %[1]s settings         Open the control screen
   %[1]s doctor           Check setup and permissions

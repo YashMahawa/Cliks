@@ -66,7 +66,7 @@ Stored data:
 - delete password hash
 - timestamps
 
-Live presence is in memory. Rooms disappear from memory when empty. There is no membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
+Live presence is in memory. Rooms disappear from memory when empty. Live peers include peer id, optional nickname/display name, joined timestamp, socket, and last-seen timestamp. There is no persisted membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
 
 Deleting a team requires its delete password. A successful delete marks the stored team row deleted and closes any live in-memory room for that team so connected peers cannot keep using a deleted code.
 
@@ -76,7 +76,7 @@ Teams can be created and deleted from the website, from `cliks create` / `cliks 
 
 Do not move placement logic to the server.
 
-Each listener locally assigns positions to teammates relative to themselves. The server sends presence with peer ids and joined timestamps; the CLI sorts peers and places them into expanding rings:
+Each listener locally assigns positions to teammates relative to themselves. The server sends presence with peer ids, optional nicknames, and joined timestamps; the CLI sorts peers and places them into expanding rings:
 
 - first ring: 2m radius, 4 people
 - second ring: 3m radius, 8 people
@@ -106,8 +106,9 @@ The website mirrors this on the web. `site/components/AcousticProvider.tsx` prel
 
 Current modes:
 
-- Bare `cliks`: opens the Bubble Tea control screen. The greeting/home view shows selected team, active local connection state, teammate count, local captured/sent counters, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. Deeper actions live under More: Preferences, Team, Connection, and Diagnostics. Avoid reintroducing a long flat home menu.
+- Bare `cliks`: opens the Bubble Tea control screen. The greeting/home view shows selected team, active local connection state, teammate count, local captured/sent counters, `Open Live`, `Keep Running`, optional `Stop`, `More`, and `Quit`. Deeper actions live under More: Preferences, Team, Connection, and Diagnostics. Avoid reintroducing a long flat home menu. If a connection is already active, toggling Keep Running off should schedule the active connection to stop when the control screen closes; use the separate Stop action for immediate disconnect.
 - `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms.
+- `cliks nickname [NAME]` / `cliks set nickname NAME`: configures the optional display name shared in live presence and peer activity. Empty names should be treated as anonymous; never infer names from the OS user, Git config, hostname, app/window title, or typed text.
 - `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
 - `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
@@ -134,10 +135,10 @@ Important platform reality:
 - The `cliks start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
-- `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, peers, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
-- Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection.
+- `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, optional display names for small rooms, a recent "X, Y are typing" summary from received activity batches, capture, connection, local counters, peers/counts, hints, and sound controls with keyboard and mouse support. Larger rooms should collapse to people/typing counts. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
+- Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection. The Go CLI also scans for older same-executable `cliks start` processes that predate the lock file and treats them as active local sessions; when a managed session is active, the TUI should clean up those duplicate local copies.
 - TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
-- Home/control TUI mouse movement should update the highlighted row on hover. Binary settings should be single toggle rows, not separate on/off menu choices.
+- Home/control TUI mouse movement should update the highlighted row on hover. Use all-motion mouse tracking and keep row hit-testing aligned with the title, panel border, and padding. Binary settings should be single toggle rows, not separate on/off menu choices.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,22 +40,24 @@ const (
 )
 
 type homeModel struct {
-	cfg            CliksConfig
-	active         ActiveSessionState
-	activeOK       bool
-	cursor         int
-	mode           string
-	message        string
-	action         homeAction
-	settingsCursor int
-	formCursor     int
-	createName     string
-	createPassword string
-	deleteCode     string
-	deletePassword string
-	busy           bool
-	width          int
-	height         int
+	cfg              CliksConfig
+	active           ActiveSessionState
+	activeOK         bool
+	cursor           int
+	mode             string
+	message          string
+	action           homeAction
+	settingsCursor   int
+	formCursor       int
+	createName       string
+	createPassword   string
+	deleteCode       string
+	deletePassword   string
+	nicknameValue    string
+	stopActiveOnExit bool
+	busy             bool
+	width            int
+	height           int
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -63,13 +66,24 @@ func runHomeTUI(cfg CliksConfig) error {
 		return nil
 	}
 	active, activeOK := activeSession()
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: welcomeMessage(cfg)}
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	message := welcomeMessage(cfg)
+	if activeOK {
+		message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
+		if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
+			message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
+			active, activeOK = activeSession()
+		}
+	}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message}
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	finalModel, err := program.Run()
 	if err != nil {
 		return err
 	}
 	result, _ := finalModel.(homeModel)
+	if result.stopActiveOnExit {
+		_, _ = stopActiveSession()
+	}
 	switch result.action {
 	case actionStart:
 		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
@@ -134,7 +148,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.MouseMsg:
-		if m.mode == "create" || m.mode == "delete" {
+		if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
 			return m, nil
 		}
 		if msg.Type == tea.MouseWheelUp {
@@ -154,7 +168,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case tea.KeyMsg:
-		if m.mode == "create" || m.mode == "delete" {
+		if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
 			return m.updateForm(msg)
 		}
 		switch msg.String() {
@@ -195,7 +209,7 @@ func (m homeModel) View() string {
 	var body string
 	if m.mode == "preferences" {
 		body = m.preferencesView()
-	} else if m.mode == "create" || m.mode == "delete" {
+	} else if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
 		body = m.formView()
 	} else {
 		body = m.itemView()
@@ -227,7 +241,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.activeOK {
-			m.message = fmt.Sprintf("Already running for %s (%s). Stop it before starting another local connection.", valuePlain(m.active.TeamCode, m.cfg.CurrentTeamCode), modeLabel(m.active.Mode))
+			m.message = fmt.Sprintf("Already running as %s. Use Stop to disconnect first.", modeLabel(m.active.Mode))
 			return m, nil
 		}
 		m.action = actionStart
@@ -250,6 +264,11 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.deleteCode = m.cfg.CurrentTeamCode
 		m.deletePassword = ""
 		m.message = "Delete closes the live room for everyone using this code."
+	case "nickname":
+		m.mode = "nickname"
+		m.formCursor = 0
+		m.nicknameValue = m.cfg.Nickname
+		m.message = "Set the name teammates see in the live room."
 	case "preferences":
 		m.mode = "preferences"
 		m.settingsCursor = 0
@@ -279,9 +298,22 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.message = "Playing test sounds..."
 		return m, soundTestCmd()
 	case "background-toggle":
+		if m.activeOK {
+			m.stopActiveOnExit = !m.stopActiveOnExit
+			if m.stopActiveOnExit {
+				m.message = "Keep Running is off. This connection will stop when this control screen closes."
+			} else {
+				m.message = "Keep Running is on. This connection will stay alive after this screen closes."
+			}
+			return m, nil
+		}
 		m.busy = true
 		m.message = "Updating keep-running mode..."
 		return m, toggleBackgroundCmd(m.cfg.CurrentTeamCode, m.active, m.activeOK)
+	case "stop-connection":
+		m.busy = true
+		m.message = "Stopping this device's connection..."
+		return m, stopConnectionCmd(m.active, m.activeOK)
 	case "autostart-toggle":
 		m.busy = true
 		m.message = "Updating launch-at-login..."
@@ -387,6 +419,7 @@ func (m homeModel) items() []homeItem {
 		}
 	case "team":
 		return []homeItem{
+			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set your display name")},
 			{key: "create", label: "Create", help: "make a new team code"},
 			{key: "delete", label: "Delete", help: "delete the selected team with its password"},
 			{key: "switch-team", label: "Switch", help: "cycle through saved teams"},
@@ -395,6 +428,7 @@ func (m homeModel) items() []homeItem {
 	case "connection":
 		return []homeItem{
 			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
+			{key: "stop-connection", label: "Stop", help: m.stopConnectionHelp()},
 			{key: "autostart-toggle", label: "Launch Login", help: autostartToggleHelp()},
 			{key: "autostart-status", label: "Login Status", help: "show where launch-at-login is configured"},
 			{key: "back", label: "Back", help: "return to the menu"},
@@ -406,12 +440,18 @@ func (m homeModel) items() []homeItem {
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
 	default:
-		return []homeItem{
+		items := []homeItem{
 			{key: "start", label: "Open Live", help: m.startHelp()},
 			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
-			{key: "menu", label: "More", help: "teams, preferences, diagnostics, and boot options"},
-			{key: "quit", label: "Quit", help: "close this control screen"},
 		}
+		if m.activeOK {
+			items = append(items, homeItem{key: "stop-connection", label: "Stop", help: m.stopConnectionHelp()})
+		}
+		items = append(items,
+			homeItem{key: "menu", label: "More", help: "teams, preferences, diagnostics, and boot options"},
+			homeItem{key: "quit", label: "Quit", help: "close this control screen"},
+		)
+		return items
 	}
 }
 
@@ -432,7 +472,7 @@ func (m homeModel) viewHeader() (string, string) {
 
 func (m homeModel) startHelp() string {
 	if m.activeOK {
-		return fmt.Sprintf("already running as %s; no duplicate will be started", modeLabel(m.active.Mode))
+		return "already running"
 	}
 	if m.cfg.CurrentTeamCode == "" {
 		return "join or create a team first"
@@ -442,12 +482,22 @@ func (m homeModel) startHelp() string {
 
 func (m homeModel) backgroundToggleHelp() string {
 	if m.activeOK {
-		return fmt.Sprintf("on (%s); press Enter to stop", modeLabel(m.active.Mode))
+		if m.stopActiveOnExit {
+			return "off after close; press Enter to keep running"
+		}
+		return fmt.Sprintf("on (%s); use Stop to disconnect", modeLabel(m.active.Mode))
 	}
 	if m.cfg.CurrentTeamCode == "" {
 		return "select a team first"
 	}
 	return "off; press Enter to keep connected after closing the terminal"
+}
+
+func (m homeModel) stopConnectionHelp() string {
+	if !m.activeOK {
+		return "no active local connection"
+	}
+	return fmt.Sprintf("disconnect %s pid %d", modeLabel(m.active.Mode), m.active.PID)
 }
 
 func (m homeModel) connectionSummary() string {
@@ -468,7 +518,7 @@ func (m *homeModel) refreshRuntime() {
 
 func (m *homeModel) hover(y int) {
 	if m.mode == "preferences" {
-		index := y - 2
+		index := y - (panelContentStartY() + 2)
 		if index >= 0 && index < len(settingsRows(m.cfg)) {
 			m.settingsCursor = index
 		}
@@ -483,10 +533,14 @@ func (m *homeModel) hover(y int) {
 func (m homeModel) itemStartY() int {
 	if m.mode == "home" {
 		if m.activeOK {
-			return 8
+			return panelContentStartY() + 8
 		}
-		return 6
+		return panelContentStartY() + 6
 	}
+	return panelContentStartY() + 3
+}
+
+func panelContentStartY() int {
 	return 3
 }
 
@@ -507,6 +561,115 @@ func peopleSummary(activeCount int) string {
 		return "just you"
 	}
 	return fmt.Sprintf("you + %d teammate(s)", activeCount-1)
+}
+
+func roomPeopleSummary(state SessionViewState) string {
+	if state.ActiveCount <= 1 {
+		return "just you"
+	}
+	if state.ActiveCount > 6 {
+		return fmt.Sprintf("%d people here", state.ActiveCount)
+	}
+	names := peerDisplayNames(state)
+	if len(names) == 0 {
+		return peopleSummary(state.ActiveCount)
+	}
+	return joinNames(append([]string{"you"}, names...))
+}
+
+func typingSummary(state SessionViewState, now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	nameByPeer := peerDisplayNameMap(state)
+	var names []string
+	for _, item := range state.RecentPeerActivity {
+		if now.Sub(item.LastActivityAt) > 1800*time.Millisecond {
+			continue
+		}
+		name := sanitizeNickname(item.Nickname)
+		if name == "" {
+			name = nameByPeer[item.PeerID]
+		}
+		if name == "" {
+			name = "Someone"
+		}
+		names = append(names, name)
+	}
+	names = uniqueStrings(names)
+	if len(names) == 0 {
+		return "quiet"
+	}
+	if state.ActiveCount > 6 || len(names) > 3 {
+		return fmt.Sprintf("%d people typing", len(names))
+	}
+	if len(names) == 1 {
+		return names[0] + " is typing"
+	}
+	return joinNames(names) + " are typing"
+}
+
+func peerDisplayNames(state SessionViewState) []string {
+	peers := sortedRemotePeers(state)
+	names := make([]string, 0, len(peers))
+	for index, peer := range peers {
+		name := sanitizeNickname(peer.Nickname)
+		if name == "" {
+			name = fmt.Sprintf("Teammate %d", index+1)
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func peerDisplayNameMap(state SessionViewState) map[string]string {
+	peers := sortedRemotePeers(state)
+	names := map[string]string{}
+	for index, peer := range peers {
+		name := sanitizeNickname(peer.Nickname)
+		if name == "" {
+			name = fmt.Sprintf("Teammate %d", index+1)
+		}
+		names[peer.PeerID] = name
+	}
+	return names
+}
+
+func sortedRemotePeers(state SessionViewState) []PeerPresence {
+	peers := make([]PeerPresence, 0, len(state.Peers))
+	for _, peer := range state.Peers {
+		if peer.PeerID == "" || peer.PeerID == state.OwnPeerID {
+			continue
+		}
+		peers = append(peers, peer)
+	}
+	sort.SliceStable(peers, func(i, j int) bool {
+		if peers[i].JoinedAt == peers[j].JoinedAt {
+			return peers[i].PeerID < peers[j].PeerID
+		}
+		return peers[i].JoinedAt < peers[j].JoinedAt
+	})
+	return peers
+}
+
+func joinNames(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.Join(names, ", ")
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	next := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		next = append(next, value)
+	}
+	return next
 }
 
 func autostartToggleHelp() string {
@@ -587,6 +750,17 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
+	if m.mode == "nickname" {
+		name := sanitizeNickname(m.nicknameValue)
+		m.cfg.Nickname = name
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.mode = "team"
+		m.message = fmt.Sprintf("Nickname set to %s.", valuePlain(name, "anonymous"))
+		return m, nil
+	}
 	if m.mode == "create" {
 		name := strings.TrimSpace(m.createName)
 		if name == "" {
@@ -620,6 +794,9 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
+	if m.mode == "nickname" {
+		return 1
+	}
 	return 2
 }
 
@@ -635,6 +812,8 @@ func (m homeModel) formValue() string {
 			return m.deleteCode
 		}
 		return m.deletePassword
+	case "nickname":
+		return m.nicknameValue
 	default:
 		return ""
 	}
@@ -654,6 +833,8 @@ func (m *homeModel) setFormValue(value string) {
 		} else {
 			m.deletePassword = value
 		}
+	case "nickname":
+		m.nicknameValue = sanitizeNickname(value)
 	}
 }
 
@@ -674,11 +855,16 @@ func (m homeModel) formView() string {
 			formLine("Team name", valueOr(m.createName, "Cliks Room"), m.formCursor == 0),
 			formLine("Delete password", maskSecret(m.createPassword), m.formCursor == 1),
 		}
-	} else {
+	} else if m.mode == "delete" {
 		title = "Delete Team"
 		rows = []string{
 			formLine("Team code", valueOr(m.deleteCode, "CLIK-XXXXXX"), m.formCursor == 0),
 			formLine("Delete password", maskSecret(m.deletePassword), m.formCursor == 1),
+		}
+	} else {
+		title = "Nickname"
+		rows = []string{
+			formLine("Display name", valueOr(m.nicknameValue, "anonymous"), true),
 		}
 	}
 	lines := []string{styleAccent.Render(title), ""}
@@ -726,16 +912,25 @@ func createTeamCmd(name string, password string) tea.Cmd {
 func toggleBackgroundCmd(code string, active ActiveSessionState, activeOK bool) tea.Cmd {
 	return func() tea.Msg {
 		if activeOK {
-			if active.Mode == runModeBoot {
-				_, _ = autostartAction([]string{"disable"})
-			}
-			message, err := stopActiveSession()
-			return commandDoneMsg{message: message, err: err}
+			return commandDoneMsg{message: "Keep Running is already on. Use Stop to disconnect this device."}
 		}
 		if code == "" {
 			return commandDoneMsg{err: fmt.Errorf("no team selected. Create or join a team first")}
 		}
 		message, err := startBackgroundForTeam(code)
+		return commandDoneMsg{message: message, err: err}
+	}
+}
+
+func stopConnectionCmd(active ActiveSessionState, activeOK bool) tea.Cmd {
+	return func() tea.Msg {
+		if !activeOK {
+			return commandDoneMsg{message: "No active local connection."}
+		}
+		if active.Mode == runModeBoot {
+			_, _ = autostartAction([]string{"disable"})
+		}
+		message, err := stopActiveSession()
 		return commandDoneMsg{message: message, err: err}
 	}
 }
@@ -824,6 +1019,7 @@ func cycleTeam(cfg *CliksConfig, delta int) {
 }
 
 type sessionUpdateMsg SessionViewState
+type sessionTickMsg time.Time
 
 type sessionModel struct {
 	controller     *sessionController
@@ -832,14 +1028,15 @@ type sessionModel struct {
 	settingsCursor int
 	width          int
 	height         int
+	now            time.Time
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
-	return sessionModel{controller: controller, state: controller.viewState()}
+	return sessionModel{controller: controller, state: controller.viewState(), now: time.Now()}
 }
 
 func (m sessionModel) Init() tea.Cmd {
-	return waitForSessionUpdate(m.controller)
+	return tea.Batch(waitForSessionUpdate(m.controller), sessionTick())
 }
 
 func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -850,6 +1047,10 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionUpdateMsg:
 		m.state = SessionViewState(msg)
 		return m, waitForSessionUpdate(m.controller)
+	case sessionTickMsg:
+		m.now = time.Time(msg)
+		m.state = m.controller.viewState()
+		return m, sessionTick()
 	case tea.MouseMsg:
 		if m.mode == "settings" {
 			if msg.Type == tea.MouseWheelUp {
@@ -944,8 +1145,10 @@ func (m sessionModel) View() string {
 	left := []string{
 		styleAccent.Render(state.TeamName),
 		"",
+		"You: " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
 		"Connection: " + connectionStyle(state.ConnectionStatus),
-		"People: " + peopleSummary(state.ActiveCount),
+		"People: " + roomPeopleSummary(state),
+		"Typing: " + typingSummary(state, m.now),
 		"Capture: " + state.CaptureMode,
 		"",
 		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
@@ -1024,6 +1227,12 @@ func waitForSessionUpdate(controller *sessionController) tea.Cmd {
 		}
 		return sessionUpdateMsg(state)
 	}
+}
+
+func sessionTick() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return sessionTickMsg(t)
+	})
 }
 
 func panelWidth(width int) int {
