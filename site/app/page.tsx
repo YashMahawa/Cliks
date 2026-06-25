@@ -155,7 +155,7 @@ export default function HomePage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const joinCommand = useMemo(
-    () => (createdTeam ? `typ join ${createdTeam.code} && typ start` : ""),
+    () => (createdTeam ? `cliks join ${createdTeam.code} && cliks start` : ""),
     [createdTeam]
   );
 
@@ -381,13 +381,13 @@ export default function HomePage() {
                   n: "02",
                   title: "Create or join a room",
                   body: "Generate a code below and share it, or paste a teammate's.",
-                  value: "typ join 7K2P9",
+                  value: "cliks join CLIK-7K2P9",
                 },
                 {
                   n: "03",
                   title: "Start listening",
                   body: "The room comes alive. Hear everyone working, in their own space.",
-                  value: "typ start",
+                  value: "cliks start",
                 },
               ].map((step, i) => (
                 <Reveal key={step.n} delay={i * 0.08}>
