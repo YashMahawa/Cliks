@@ -32,6 +32,8 @@ type ListeningConfig struct {
 	Spatial           bool    `json:"spatial"`
 	FatigueProtection bool    `json:"fatigueProtection"`
 	Density           float64 `json:"density"`
+	DynamicPlacement  bool    `json:"dynamicPlacement"`
+	ShuffleMinutes    int     `json:"shuffleMinutes"`
 }
 
 type CliksConfig struct {
@@ -65,6 +67,8 @@ func defaultConfig() CliksConfig {
 			Spatial:           true,
 			FatigueProtection: true,
 			Density:           0.8,
+			DynamicPlacement:  false,
+			ShuffleMinutes:    10,
 		},
 		BatchWindowMs: 500,
 	}
@@ -166,6 +170,15 @@ func normalizeConfig(cfg *CliksConfig) {
 	}
 	if cfg.Listening.Density > 1 {
 		cfg.Listening.Density = 1
+	}
+	if cfg.Listening.ShuffleMinutes == 0 {
+		cfg.Listening.ShuffleMinutes = def.Listening.ShuffleMinutes
+	}
+	if cfg.Listening.ShuffleMinutes < 1 {
+		cfg.Listening.ShuffleMinutes = 1
+	}
+	if cfg.Listening.ShuffleMinutes > 60 {
+		cfg.Listening.ShuffleMinutes = 60
 	}
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
 }

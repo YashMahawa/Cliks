@@ -56,6 +56,16 @@ const joinSchema = z.object({
     .optional()
 });
 
+const profileSchema = z.object({
+  type: z.literal("profile"),
+  nickname: z
+    .string()
+    .trim()
+    .max(32)
+    .transform((value) => normalizeNickname(value))
+    .optional()
+});
+
 const activitySchema = z.object({
   type: z.literal("activity_batch"),
   teamCode: z.string().trim().min(4).max(16),
@@ -153,6 +163,12 @@ server.get("/ws", { websocket: true }, (socket) => {
           batchStartedAt: parsed.batchStartedAt,
           events: parsed.events
         });
+        return;
+      }
+
+      if (json.type === "profile" && joinedCode) {
+        const parsed = profileSchema.parse(json);
+        hub.updatePeerProfile(peerId, parsed.nickname);
         return;
       }
 

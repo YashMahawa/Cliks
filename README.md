@@ -139,11 +139,13 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes an easy Nickname form for the display name teammates see. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, background toggle, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
+Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes an easy Nickname form for the display name teammates see. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stopping a launch-at-login connection also disables launch-at-login so the service cannot reconnect behind your back. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, background toggle, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
 While `cliks start` is open, Cliks shows a live terminal dashboard with room, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
+
+Rooms are capped at 20 live people. Spatial placement keeps 4 people in the first ring and adds 2 seats per outer ring. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally.
 
 Listening presets:
 
@@ -152,6 +154,14 @@ cliks preset deep
 cliks preset balanced
 cliks preset social
 cliks preset quiet
+```
+
+Useful settings:
+
+```bash
+cliks set nickname "Your Name"
+cliks set spatial.dynamic on
+cliks set spatial.shuffleMinutes 10
 ```
 
 If teammates can hear you connect but cannot hear your keystrokes, run:

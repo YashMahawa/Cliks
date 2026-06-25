@@ -31,6 +31,7 @@ try {
   if (relay.offsets !== "50,200") {
     throw new Error(`Expected quantized offsets 50,200, got ${relay.offsets}`);
   }
+  await websocketRoomLimitSmoke(wsUrl, team.code);
 
   const health = await fetchJson(`${apiUrl}/health`);
   if (!health.ok || "rooms" in health) {
@@ -121,6 +122,8 @@ async function websocketRelaySmoke(url, teamCode) {
   b.send(JSON.stringify({ type: "join", teamCode, nickname: "b" }));
 
   await sleep(250);
+  a.send(JSON.stringify({ type: "profile", nickname: "Alice" }));
+  await sleep(250);
   a.send(
     JSON.stringify({
       type: "activity_batch",
@@ -140,12 +143,12 @@ async function websocketRelaySmoke(url, teamCode) {
   if (batches.length !== 1) {
     throw new Error(`Expected one relayed batch, got ${batches.length}`);
   }
-  if (batches[0].nickname !== "a") {
-    throw new Error(`Expected relayed activity nickname "a", got ${JSON.stringify(batches[0].nickname)}`);
+  if (batches[0].nickname !== "Alice") {
+    throw new Error(`Expected relayed activity nickname "Alice", got ${JSON.stringify(batches[0].nickname)}`);
   }
   const sawNamedPresence = presences.some((message) => {
     const names = new Set((message.peers ?? []).map((peer) => peer.nickname));
-    return names.has("a") && names.has("b");
+    return names.has("Alice") && names.has("b");
   });
   if (!sawNamedPresence) {
     throw new Error(`Expected named presence for both peers, got ${JSON.stringify(presences)}`);
@@ -154,6 +157,42 @@ async function websocketRelaySmoke(url, teamCode) {
   return {
     offsets: batches[0].events.map((event) => event.offsetMs).join(",")
   };
+}
+
+async function websocketRoomLimitSmoke(url, teamCode) {
+  const sockets = [];
+  try {
+    for (let index = 0; index < 20; index++) {
+      const socket = new WebSocket(url);
+      sockets.push(socket);
+      await once(socket, "open");
+      socket.send(JSON.stringify({ type: "join", teamCode, nickname: `p${index}` }));
+      await sleep(20);
+    }
+
+    const overflow = new WebSocket(url);
+    sockets.push(overflow);
+    let fullMessageSeen = false;
+    overflow.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "error" && message.message.includes("room is full")) {
+        fullMessageSeen = true;
+      }
+    });
+    await once(overflow, "open");
+    overflow.send(JSON.stringify({ type: "join", teamCode, nickname: "overflow" }));
+    await onceWithTimeout(overflow, "close", 1_500);
+    if (!fullMessageSeen) {
+      throw new Error("21st room peer did not receive room-full error before close");
+    }
+  } finally {
+    for (const socket of sockets) {
+      try {
+        socket.close();
+      } catch {}
+    }
+    await sleep(100);
+  }
 }
 
 async function fetchJson(url, options) {

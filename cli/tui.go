@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ var (
 	styleOK       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("31")).Padding(1, 2)
 	styleSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("31")).Bold(true)
+	styleFocused  = lipgloss.NewStyle().Foreground(lipgloss.Color("38")).Bold(true)
 )
 
 type homeAction string
@@ -44,6 +46,7 @@ type homeModel struct {
 	active           ActiveSessionState
 	activeOK         bool
 	cursor           int
+	mouseOver        bool
 	mode             string
 	message          string
 	action           homeAction
@@ -65,16 +68,21 @@ func runHomeTUI(cfg CliksConfig) error {
 		printHelp("cliks")
 		return nil
 	}
+	stopSignals := installDeferredStopSignalHandler()
+	defer stopSignals()
+	deferredMessage := consumeDeferredStopIfNeeded()
 	active, activeOK := activeSession()
 	message := welcomeMessage(cfg)
-	if activeOK {
+	if deferredMessage != "" {
+		message = deferredMessage
+	} else if activeOK {
 		message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
 		if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
 			message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
 			active, activeOK = activeSession()
 		}
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active)}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -83,6 +91,9 @@ func runHomeTUI(cfg CliksConfig) error {
 	result, _ := finalModel.(homeModel)
 	if result.stopActiveOnExit {
 		_, _ = stopActiveSession()
+		_ = clearDeferredStop()
+	} else {
+		_ = clearDeferredStop()
 	}
 	switch result.action {
 	case actionStart:
@@ -112,6 +123,31 @@ func runHomeTUI(cfg CliksConfig) error {
 	}
 }
 
+func installDeferredStopSignalHandler() func() {
+	exitSignals := tuiExitSignals()
+	if len(exitSignals) == 0 {
+		return func() {}
+	}
+	signals := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(signals, exitSignals...)
+	go func() {
+		select {
+		case <-signals:
+			if hasDeferredStop() {
+				_, _ = stopActiveSession()
+				_ = clearDeferredStop()
+			}
+			os.Exit(0)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
+}
+
 func (m homeModel) Init() tea.Cmd { return homeTick() }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -138,6 +174,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.cfg = msg.cfg
 		m.mode = "home"
+		m.mouseOver = false
 		if msg.kind == "create" {
 			m.message = fmt.Sprintf("Created %s. Press Enter on Start when ready.", msg.code)
 		} else {
@@ -153,14 +190,21 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Type == tea.MouseWheelUp {
 			m.move(-1)
+			m.mouseOver = false
 		}
 		if msg.Type == tea.MouseWheelDown {
 			m.move(1)
+			m.mouseOver = false
 		}
-		if msg.Type == tea.MouseMotion || msg.Type == tea.MouseLeft {
-			m.hover(msg.Y)
+		if msg.Type == tea.MouseMotion {
+			m.mouseOver = m.hover(msg.Y)
 		}
 		if msg.Type == tea.MouseLeft {
+			if !m.hover(msg.Y) {
+				m.mouseOver = false
+				return m, nil
+			}
+			m.mouseOver = true
 			if m.mode == "preferences" {
 				m.changeSetting(1)
 				return m, nil
@@ -180,8 +224,10 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "up", "k":
 			m.move(-1)
+			m.mouseOver = false
 		case "down", "j":
 			m.move(1)
+			m.mouseOver = false
 		case "left", "h":
 			if m.mode == "preferences" {
 				m.changeSetting(-1)
@@ -249,41 +295,49 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 	case "menu":
 		m.mode = "menu"
 		m.cursor = 0
+		m.mouseOver = false
 		m.message = "Choose what to adjust."
 	case "back":
 		m.back()
 	case "create":
 		m.mode = "create"
 		m.formCursor = 0
+		m.mouseOver = false
 		m.createName = ""
 		m.createPassword = ""
 		m.message = "Name the room and set a delete password."
 	case "delete":
 		m.mode = "delete"
 		m.formCursor = 0
+		m.mouseOver = false
 		m.deleteCode = m.cfg.CurrentTeamCode
 		m.deletePassword = ""
 		m.message = "Delete closes the live room for everyone using this code."
 	case "nickname":
 		m.mode = "nickname"
 		m.formCursor = 0
+		m.mouseOver = false
 		m.nicknameValue = m.cfg.Nickname
 		m.message = "Set the name teammates see in the live room."
 	case "preferences":
 		m.mode = "preferences"
 		m.settingsCursor = 0
+		m.mouseOver = false
 		m.message = "Adjust with left/right. s saves. q returns."
 	case "team":
 		m.mode = "team"
 		m.cursor = 0
+		m.mouseOver = false
 		m.message = "Manage the selected team."
 	case "connection":
 		m.mode = "connection"
 		m.cursor = 0
+		m.mouseOver = false
 		m.message = "Control this device's single Cliks connection."
 	case "diagnostics":
 		m.mode = "diagnostics"
 		m.cursor = 0
+		m.mouseOver = false
 		m.message = "Check sound and setup."
 	case "switch-team":
 		cycleTeam(&m.cfg, 1)
@@ -299,10 +353,20 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		return m, soundTestCmd()
 	case "background-toggle":
 		if m.activeOK {
+			if m.active.Mode == runModeForeground {
+				m.message = "This live-terminal session already stops with its own terminal. Use Stop to disconnect it now."
+				return m, nil
+			}
 			m.stopActiveOnExit = !m.stopActiveOnExit
 			if m.stopActiveOnExit {
-				m.message = "Keep Running is off. This connection will stop when this control screen closes."
+				_ = scheduleDeferredStop(m.active.PID)
+				if m.active.Mode == runModeBoot {
+					m.message = "Keep Running is off. Launch-at-login will be disabled and this connection will stop when this screen closes."
+				} else {
+					m.message = "Keep Running is off. This connection will stop when this control screen closes."
+				}
 			} else {
+				_ = clearDeferredStop()
 				m.message = "Keep Running is on. This connection will stay alive after this screen closes."
 			}
 			return m, nil
@@ -360,7 +424,11 @@ func (m homeModel) itemView() string {
 	for i, item := range items {
 		line := fmt.Sprintf("%-12s %s", item.label, item.help)
 		if i == m.cursor {
-			line = styleSelected.Render(" " + line + " ")
+			if m.mouseOver {
+				line = styleSelected.Render(" " + line + " ")
+			} else {
+				line = styleFocused.Render("> " + line)
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -377,7 +445,11 @@ func (m homeModel) preferencesView() string {
 	for i, row := range rows {
 		line := fmt.Sprintf("%-18s %s", row.label, row.value(m.cfg))
 		if i == m.settingsCursor {
-			line = styleSelected.Render(" " + line + " ")
+			if m.mouseOver {
+				line = styleSelected.Render(" " + line + " ")
+			} else {
+				line = styleFocused.Render("> " + line)
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -482,6 +554,9 @@ func (m homeModel) startHelp() string {
 
 func (m homeModel) backgroundToggleHelp() string {
 	if m.activeOK {
+		if m.active.Mode == runModeForeground {
+			return "off (live terminal); use Stop to disconnect"
+		}
 		if m.stopActiveOnExit {
 			return "off after close; press Enter to keep running"
 		}
@@ -516,18 +591,21 @@ func (m *homeModel) refreshRuntime() {
 	m.active, m.activeOK = activeSession()
 }
 
-func (m *homeModel) hover(y int) {
+func (m *homeModel) hover(y int) bool {
 	if m.mode == "preferences" {
 		index := y - (panelContentStartY() + 2)
 		if index >= 0 && index < len(settingsRows(m.cfg)) {
 			m.settingsCursor = index
+			return true
 		}
-		return
+		return false
 	}
 	index := y - m.itemStartY()
 	if index >= 0 && index < len(m.items()) {
 		m.cursor = index
+		return true
 	}
+	return false
 }
 
 func (m homeModel) itemStartY() int {
@@ -553,6 +631,7 @@ func (m *homeModel) back() {
 		m.mode = "home"
 		m.cursor = 0
 	}
+	m.mouseOver = false
 	m.message = welcomeMessage(m.cfg)
 }
 
@@ -700,6 +779,10 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		{"Density", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
 		{"Muted", func(c CliksConfig) string { return onOff(c.Listening.Muted) }, func(c *CliksConfig, _ int) { c.Listening.Muted = !c.Listening.Muted }},
 		{"Spatial audio", func(c CliksConfig) string { return onOff(c.Listening.Spatial) }, func(c *CliksConfig, _ int) { c.Listening.Spatial = !c.Listening.Spatial }},
+		{"Dynamic circle", func(c CliksConfig) string { return onOff(c.Listening.DynamicPlacement) }, func(c *CliksConfig, _ int) { c.Listening.DynamicPlacement = !c.Listening.DynamicPlacement }},
+		{"Shuffle mins", func(c CliksConfig) string { return fmt.Sprintf("%d min", c.Listening.ShuffleMinutes) }, func(c *CliksConfig, d int) {
+			c.Listening.ShuffleMinutes = clampInt(c.Listening.ShuffleMinutes+d, 1, 60)
+		}},
 		{"Fatigue fade", func(c CliksConfig) string { return onOff(c.Listening.FatigueProtection) }, func(c *CliksConfig, _ int) { c.Listening.FatigueProtection = !c.Listening.FatigueProtection }},
 		{"Hear keyboard", func(c CliksConfig) string { return onOff(c.Listening.Keyboard) }, func(c *CliksConfig, _ int) { c.Listening.Keyboard = !c.Listening.Keyboard }},
 		{"Hear mouse", func(c CliksConfig) string { return onOff(c.Listening.Mouse) }, func(c *CliksConfig, _ int) { c.Listening.Mouse = !c.Listening.Mouse }},
@@ -722,6 +805,7 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		m.mode = "home"
+		m.mouseOver = false
 		m.message = "Cancelled."
 		return m, nil
 	case "up", "shift+tab":
@@ -758,6 +842,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode = "team"
+		m.mouseOver = false
 		m.message = fmt.Sprintf("Nickname set to %s.", valuePlain(name, "anonymous"))
 		return m, nil
 	}
@@ -927,9 +1012,6 @@ func stopConnectionCmd(active ActiveSessionState, activeOK bool) tea.Cmd {
 		if !activeOK {
 			return commandDoneMsg{message: "No active local connection."}
 		}
-		if active.Mode == runModeBoot {
-			_, _ = autostartAction([]string{"disable"})
-		}
 		message, err := stopActiveSession()
 		return commandDoneMsg{message: message, err: err}
 	}
@@ -1053,14 +1135,24 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, sessionTick()
 	case tea.MouseMsg:
 		if m.mode == "settings" {
+			rows := settingsRows(m.controller.cfg)
 			if msg.Type == tea.MouseWheelUp {
-				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(settingsRows(m.controller.cfg))-1)
+				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(rows)-1)
 			}
 			if msg.Type == tea.MouseWheelDown {
-				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(settingsRows(m.controller.cfg))-1)
+				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(rows)-1)
 			}
-			if msg.Type == tea.MouseLeft && msg.Y >= 5 {
-				m.settingsCursor = clampInt(msg.Y-5, 0, len(settingsRows(m.controller.cfg))-1)
+			if msg.Type == tea.MouseMotion {
+				if index := msg.Y - 5; index >= 0 && index < len(rows) {
+					m.settingsCursor = index
+				}
+			}
+			if msg.Type == tea.MouseLeft {
+				index := msg.Y - 5
+				if index < 0 || index >= len(rows) {
+					return m, nil
+				}
+				m.settingsCursor = index
 				m.applyLiveSetting(1)
 			}
 			return m, nil

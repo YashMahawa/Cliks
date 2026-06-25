@@ -49,6 +49,10 @@ type AudioEngine struct {
 	listening       ListeningConfig
 	player          *audioPlayer
 	placements      map[string]peerPlacement
+	peers           []PeerPresence
+	ownPeerID       string
+	activityScores  map[string]int
+	lastShuffleAt   time.Time
 	keyboardSamples []string
 	mouseSamples    []string
 	queue           chan playbackJob
@@ -59,10 +63,11 @@ type AudioEngine struct {
 
 func newAudioEngine(listening ListeningConfig) *AudioEngine {
 	engine := &AudioEngine{
-		listening:  listening,
-		player:     detectAudioPlayer(),
-		placements: map[string]peerPlacement{},
-		queue:      make(chan playbackJob, 96),
+		listening:      listening,
+		player:         detectAudioPlayer(),
+		placements:     map[string]peerPlacement{},
+		activityScores: map[string]int{},
+		queue:          make(chan playbackJob, 96),
 	}
 	for i := 0; i < 4; i++ {
 		go engine.playWorker()
@@ -73,32 +78,56 @@ func newAudioEngine(listening ListeningConfig) *AudioEngine {
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.mu.Lock()
 	a.listening = listening
+	a.recomputePlacementsLocked(false)
 	a.mu.Unlock()
 }
 
 func (a *AudioEngine) updatePeers(peers []PeerPresence, ownPeerID string) {
+	nextPeers := append([]PeerPresence(nil), peers...)
+	a.mu.Lock()
+	a.peers = nextPeers
+	a.ownPeerID = ownPeerID
+	a.recomputePlacementsLocked(false)
+	a.mu.Unlock()
+}
+
+func (a *AudioEngine) recomputePlacementsLocked(useActivity bool) {
+	peers := append([]PeerPresence(nil), a.peers...)
 	sort.SliceStable(peers, func(i, j int) bool {
 		if peers[i].JoinedAt == peers[j].JoinedAt {
 			return peers[i].PeerID < peers[j].PeerID
 		}
 		return peers[i].JoinedAt < peers[j].JoinedAt
 	})
+	if useActivity {
+		sort.SliceStable(peers, func(i, j int) bool {
+			left := a.activityScores[peers[i].PeerID]
+			right := a.activityScores[peers[j].PeerID]
+			if left == right {
+				if peers[i].JoinedAt == peers[j].JoinedAt {
+					return peers[i].PeerID < peers[j].PeerID
+				}
+				return peers[i].JoinedAt < peers[j].JoinedAt
+			}
+			return left > right
+		})
+	}
 	next := map[string]peerPlacement{}
 	index := 0
 	for _, peer := range peers {
-		if peer.PeerID == ownPeerID {
+		if peer.PeerID == a.ownPeerID {
 			continue
 		}
 		next[peer.PeerID] = placementForIndex(index, peer.PeerID)
 		index++
 	}
-	a.mu.Lock()
 	a.placements = next
-	a.mu.Unlock()
 }
 
 func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent) {
 	a.mu.Lock()
+	a.activityScores[peerID] += len(events)
+	a.maybeShufflePlacementsLocked(time.Now())
 	placement, ok := a.placements[peerID]
 	if !ok {
 		placement = placementForIndex(len(a.placements), peerID)
@@ -129,6 +158,27 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 			a.enqueue(event, placement)
 		})
 	}
+}
+
+func (a *AudioEngine) maybeShufflePlacementsLocked(now time.Time) {
+	if !a.listening.DynamicPlacement {
+		return
+	}
+	minutes := a.listening.ShuffleMinutes
+	if minutes <= 0 {
+		minutes = 10
+	}
+	interval := time.Duration(minutes) * time.Minute
+	if a.lastShuffleAt.IsZero() {
+		a.lastShuffleAt = now
+		return
+	}
+	if now.Sub(a.lastShuffleAt) < interval {
+		return
+	}
+	a.recomputePlacementsLocked(true)
+	a.activityScores = map[string]int{}
+	a.lastShuffleAt = now
 }
 
 func (a *AudioEngine) preview() error {
@@ -409,7 +459,7 @@ func ringStartIndex(ring int) int {
 }
 
 func ringCapacity(ring int) int {
-	return 4 + ring*4
+	return 4 + ring*2
 }
 
 func hashString(value string) uint32 {

@@ -40,6 +40,17 @@ The CLI sends one batch every `batchWindowMs`, currently 500ms. Local events inc
 No key values, coordinates, windows, text, or app names are sent.
 Raw client-side offsets are not forwarded as-is.
 
+### Profile update
+
+Used after join when a running CLI notices the local nickname changed.
+
+```json
+{
+  "type": "profile",
+  "nickname": "Mira"
+}
+```
+
 ## Server to client
 
 ### Welcome
@@ -98,3 +109,7 @@ When a team is deleted successfully, the relay closes any live room for that cod
 ```
 
 The socket is then closed and future lookups for that team code return 404.
+
+## Room limits
+
+Rooms are capped at 20 live peers. The 21st peer receives an error and the socket closes.

@@ -75,6 +75,7 @@ Current defaults:
 - max 128 events per batch
 - no stored event history
 - rooms exist only while at least one client is connected
+- rooms are capped at 20 live peers
 - live peer nicknames exist only in memory and are relayed in presence/activity
 - Supabase stores only team records
 - relay health metrics are aggregate-only
@@ -114,7 +115,9 @@ All local run modes share a single-session guard. `cliks start`, `cliks backgrou
 
 Running bare `cliks` opens the Bubble Tea control screen. The home view stays intentionally small: greeting, selected team, active local connection state, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. More contains Preferences, Team, Connection, and Diagnostics. TUI actions should run in-place whenever possible, and mouse all-motion hover should move the highlighted row with hit-testing that accounts for the title, panel border, and padding. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
 
-`cliks nickname [NAME]` and the Team > Nickname TUI form configure an explicit display name. The server keeps that name only in live peer presence and relays it with peer activity so small-room dashboards can show names and "X, Y are typing." Larger rooms should show only total people and typing counts. When a connection is already active, turning Keep Running off should schedule it to stop when the control screen closes; use the separate Stop action for immediate disconnect.
+`cliks nickname [NAME]` and the Team > Nickname TUI form configure an explicit display name. The server keeps that name only in live peer presence and relays it with peer activity so small-room dashboards can show names and "X, Y are typing." Larger rooms should show only total people and typing counts. When a connection is already active, turning Keep Running off should schedule it to stop when the control screen closes; use the separate Stop action for immediate disconnect. If that active connection is managed by launch-at-login, the shared stop path disables autostart first so the platform service does not immediately recreate the connection.
+
+Spatial placement remains client-side. Ring capacity is 4 seats in the first ring and then grows by 2 seats per ring. Optional dynamic placement counts recently received activity per peer and, on the configured interval, locally moves more active peers closer for that listener.
 
 Linux evdev mouse capture is click-only. It emits physical `BTN_LEFT` and `BTN_RIGHT` directly and uses a conservative touchpad tap detector for devices that do not emit button codes for tap-to-click: short stationary one-finger tap maps to left click, short stationary two-finger tap maps to right click, long holds/movement/three-or-more-finger gestures are ignored, and physical button activity suppresses duplicate tap output. The CLI must never send coordinates or pointer movement.
 

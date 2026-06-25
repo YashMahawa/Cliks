@@ -352,6 +352,8 @@ func cmdSet(args []string) error {
 		cfg.Listening.Spatial = boolValue
 	case "hear.fade":
 		cfg.Listening.FatigueProtection = boolValue
+	case "spatial.dynamic":
+		cfg.Listening.DynamicPlacement = boolValue
 	case "volume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -376,6 +378,12 @@ func cmdSet(args []string) error {
 			parsed = 2000
 		}
 		cfg.BatchWindowMs = parsed
+	case "spatial.shuffleMinutes":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		cfg.Listening.ShuffleMinutes = parsed
 	case "api.url":
 		cfg.APIURL = strings.TrimRight(value, "/")
 		cfg.WSURL = toWSURL(cfg.APIURL)

@@ -8,6 +8,7 @@ export type ActivityEvent = {
 };
 
 const timingBucketMs = 50;
+const maxPeersPerRoom = 20;
 
 type Peer = {
   id: string;
@@ -42,6 +43,11 @@ export class RoomHub {
     }
 
     const room = this.getOrCreateRoom(team);
+    if (room.peers.size >= maxPeersPerRoom) {
+      input.socket.send(JSON.stringify({ type: "error", message: "This room is full. Cliks rooms are capped at 20 people." }));
+      input.socket.close();
+      return;
+    }
     const peer: Peer = {
       id: input.peerId,
       nickname: normalizeNickname(input.nickname),
@@ -61,6 +67,17 @@ export class RoomHub {
       })
     );
     this.broadcastPresence(room);
+  }
+
+  updatePeerProfile(peerId: string, nickname: string | undefined) {
+    for (const room of this.rooms.values()) {
+      const peer = room.peers.get(peerId);
+      if (!peer) continue;
+      peer.nickname = normalizeNickname(nickname);
+      peer.lastSeenAt = Date.now();
+      this.broadcastPresence(room);
+      return;
+    }
   }
 
   leave(peerId: string) {

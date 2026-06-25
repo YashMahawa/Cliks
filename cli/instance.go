@@ -37,6 +37,11 @@ type sessionInstance struct {
 	released bool
 }
 
+type deferredStopState struct {
+	PID       int    `json:"pid"`
+	CreatedAt string `json:"createdAt"`
+}
+
 type alreadyRunningError struct {
 	state ActiveSessionState
 }
@@ -199,6 +204,9 @@ func stopActiveSession() (string, error) {
 	if active.PID == os.Getpid() {
 		return "", fmt.Errorf("this terminal owns the active Cliks session")
 	}
+	if active.Mode == runModeBoot {
+		_, _ = autostartAction([]string{"disable"})
+	}
 	stoppedCount := stopSessionPIDs(append([]int{active.PID}, active.DuplicateLocalPIDs...))
 	_ = os.Remove(sessionLockPath())
 	_ = os.Remove(backgroundPIDPath())
@@ -296,4 +304,71 @@ func stopSessionPIDs(pids []int) int {
 		}
 	}
 	return stopped
+}
+
+func scheduleDeferredStop(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return err
+	}
+	state := deferredStopState{PID: pid, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(deferredStopPath(), append(data, '\n'), 0o644)
+}
+
+func clearDeferredStop() error {
+	err := os.Remove(deferredStopPath())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func deferredStopMatches(active ActiveSessionState) bool {
+	state, ok := readDeferredStop()
+	return ok && active.PID > 0 && state.PID == active.PID
+}
+
+func consumeDeferredStopIfNeeded() string {
+	deferred, ok := readDeferredStop()
+	if !ok {
+		return ""
+	}
+	active, activeOK := activeSession()
+	if !activeOK || active.PID != deferred.PID {
+		_ = clearDeferredStop()
+		return ""
+	}
+	message, _ := stopActiveSession()
+	_ = clearDeferredStop()
+	if message == "" {
+		message = "Stopped the previous Cliks connection."
+	}
+	return message
+}
+
+func hasDeferredStop() bool {
+	_, ok := readDeferredStop()
+	return ok
+}
+
+func readDeferredStop() (deferredStopState, bool) {
+	data, err := os.ReadFile(deferredStopPath())
+	if err != nil {
+		return deferredStopState{}, false
+	}
+	var state deferredStopState
+	if json.Unmarshal(data, &state) != nil || state.PID <= 0 {
+		return deferredStopState{}, false
+	}
+	return state, true
+}
+
+func deferredStopPath() string {
+	return filepath.Join(stateDir(), "stop-on-exit.json")
 }

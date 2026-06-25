@@ -134,6 +134,7 @@ func (s *sessionController) start() error {
 	})
 	s.writeSessionState(true)
 	go s.batchLoop(s.local)
+	go s.configLoop()
 	go s.connectLoop()
 	return nil
 }
@@ -295,6 +296,44 @@ func (s *sessionController) sendBatch(startedAt time.Time, events []RemoteActivi
 	if s.viewState().HearingSelf {
 		s.audio.scheduleBatch("self", events)
 	}
+}
+
+func (s *sessionController) configLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			cfg := loadConfig()
+			nickname := sanitizeNickname(cfg.Nickname)
+			if nickname != sanitizeNickname(s.cfg.Nickname) {
+				s.cfg.Nickname = nickname
+				s.sendProfile(nickname)
+			}
+			if cfg.Listening != s.cfg.Listening {
+				s.cfg.Listening = cfg.Listening
+				s.audio.updateListening(cfg.Listening)
+				s.set(func(state *SessionViewState) {
+					state.Listening = cfg.Listening
+					state.HearingSelf = cfg.Listening.Self
+				})
+			}
+		}
+	}
+}
+
+func (s *sessionController) sendProfile(nickname string) {
+	s.wsMu.Lock()
+	conn := s.ws
+	if conn != nil {
+		_ = conn.WriteJSON(map[string]any{
+			"type":     "profile",
+			"nickname": nickname,
+		})
+	}
+	s.wsMu.Unlock()
 }
 
 func (s *sessionController) connectLoop() {

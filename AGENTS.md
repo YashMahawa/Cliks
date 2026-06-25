@@ -68,6 +68,8 @@ Stored data:
 
 Live presence is in memory. Rooms disappear from memory when empty. Live peers include peer id, optional nickname/display name, joined timestamp, socket, and last-seen timestamp. There is no persisted membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
 
+Rooms are capped at 20 live peers. A 21st peer should receive a room-full error and then be disconnected.
+
 Deleting a team requires its delete password. A successful delete marks the stored team row deleted and closes any live in-memory room for that team so connected peers cannot keep using a deleted code.
 
 Teams can be created and deleted from the website, from `cliks create` / `cliks delete`, and from the bare `cliks` Bubble Tea interface. CLI/TUI delete-password prompts must not echo the password when a real terminal is available.
@@ -79,11 +81,13 @@ Do not move placement logic to the server.
 Each listener locally assigns positions to teammates relative to themselves. The server sends presence with peer ids, optional nicknames, and joined timestamps; the CLI sorts peers and places them into expanding rings:
 
 - first ring: 2m radius, 4 people
-- second ring: 3m radius, 8 people
-- third ring: 4m radius, 12 people
-- capacity keeps growing by 4 per ring
+- second ring: 3m radius, 6 people
+- third ring: 4m radius, 8 people
+- capacity keeps growing by 2 per ring
 
 When people leave, the local listener recomputes the arrangement, so far users move inward to fill gaps. Placement is deterministic per listener using peer ids as jitter seeds, but it is listener-relative and not a shared server truth.
+
+Dynamic circle placement is optional. When enabled, the listener counts received activity per peer and, every configured interval (default 10 minutes), locally places more active peers closer than inactive peers. This remains listener-relative and must not move placement to the server.
 
 Current audio playback stores pan/distance in placement and applies those values when the selected player supports them. `ffplay` is preferred for full stereo pan plus distance gain, then `mpv` for stereo pan plus volume, then native/basic players. Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded queue and caps concurrent player processes to avoid process storms during dense batches.
 
@@ -119,7 +123,7 @@ Current modes:
 - `cliks settings` / `cliks ui`: opens the Bubble Tea control screen; the old settings concept is now named Preferences inside the TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
 - `cliks background start|stop|status [team-code]`: runs `cliks start` detached from the terminal for the selected team, reports the pid/log path/session state, or stops it. Use this for "close the terminal but keep Cliks connected" behavior; `cliks autostart` is for login-time launch.
 - `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
-- `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
+- `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder. Shared stop paths for a boot-managed session must disable launch-at-login before killing the process so systemd/launchd does not immediately restart it.
 - `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
 - `cli/install.sh`: installs the CLI through a user-local wrapper, runs `cliks doctor`, gives macOS/Windows/Linux setup hints, and on desktop Linux offers to add the current user to the `input` group. Termux is allowed as a non-supported test shell and must not be sent through sudo/input-group setup. Keep this user-facing and never request or print backend provider tokens.
 
@@ -139,6 +143,7 @@ Important platform reality:
 - Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection. The Go CLI also scans for older same-executable `cliks start` processes that predate the lock file and treats them as active local sessions; when a managed session is active, the TUI should clean up those duplicate local copies.
 - TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
 - Home/control TUI mouse movement should update the highlighted row on hover. Use all-motion mouse tracking and keep row hit-testing aligned with the title, panel border, and padding. Binary settings should be single toggle rows, not separate on/off menu choices.
+- TUI mouse clicks should activate only the row under the pointer. A keyboard-focused row may look focus-highlighted for Enter, but it must not trigger from a mouse click elsewhere.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands

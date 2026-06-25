@@ -71,10 +71,6 @@ func startBackgroundForTeam(code string) (string, error) {
 }
 
 func stopBackground() (string, error) {
-	active, ok := activeSession()
-	if ok && active.Mode == runModeBoot {
-		_, _ = autostartAction([]string{"disable"})
-	}
 	return stopActiveSession()
 }
 
