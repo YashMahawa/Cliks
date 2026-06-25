@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 const version = "0.2.0"
@@ -33,6 +36,10 @@ func run(args []string) error {
 		fmt.Println(version)
 	case "join":
 		return cmdJoin(rest[1:])
+	case "create":
+		return cmdCreate(rest[1:])
+	case "delete":
+		return cmdDelete(rest[1:])
 	case "start":
 		return cmdStart(rest[1:])
 	case "settings", "ui":
@@ -56,6 +63,8 @@ func run(args []string) error {
 		return cmdPreset(rest[1:])
 	case "autostart":
 		return cmdAutostart(rest[1:])
+	case "background":
+		return cmdBackground(rest[1:])
 	case "set":
 		return cmdSet(rest[1:])
 	default:
@@ -98,6 +107,80 @@ func cmdJoin(args []string) error {
 		}
 	}
 	fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", strings.ToUpper(code))
+	return nil
+}
+
+func cmdCreate(args []string) error {
+	reader := bufio.NewReader(os.Stdin)
+	name := strings.TrimSpace(strings.Join(args, " "))
+	if name == "" {
+		line, err := readPrompt(reader, "Team name: ")
+		if err != nil {
+			return err
+		}
+		name = line
+	}
+	if name == "" {
+		name = "Cliks Room"
+	}
+	password, err := readSecret("Delete password: ")
+	if err != nil {
+		return err
+	}
+	if len(password) < 6 {
+		return errors.New("delete password must be at least 6 characters")
+	}
+	cfg := loadConfig()
+	team, err := createTeamViaAPI(cfg, name, password)
+	if err != nil {
+		return err
+	}
+	cfg, err = rememberTeam(team.Code, team.Name)
+	if err != nil {
+		return err
+	}
+	_ = saveConfig(cfg)
+	fmt.Printf("Created %s (%s).\n", team.Code, team.Name)
+	fmt.Printf("Start now: cliks start\n")
+	return nil
+}
+
+func cmdDelete(args []string) error {
+	reader := bufio.NewReader(os.Stdin)
+	cfg := loadConfig()
+	code := cfg.CurrentTeamCode
+	if len(args) > 0 {
+		code = strings.ToUpper(args[0])
+	}
+	if code == "" {
+		line, err := readPrompt(reader, "Team code: ")
+		if err != nil {
+			return err
+		}
+		code = strings.ToUpper(strings.TrimSpace(line))
+	}
+	if code == "" {
+		return errors.New("team code is required")
+	}
+	password, err := readSecret("Delete password: ")
+	if err != nil {
+		return err
+	}
+	if password == "" {
+		return errors.New("delete password is required")
+	}
+	if err := deleteTeamViaAPI(cfg, code, password); err != nil {
+		return err
+	}
+	cfg.Teams = filterTeams(cfg.Teams, code)
+	if cfg.CurrentTeamCode == code {
+		cfg.CurrentTeamCode = ""
+		if len(cfg.Teams) > 0 {
+			cfg.CurrentTeamCode = cfg.Teams[0].Code
+		}
+	}
+	_ = saveConfig(cfg)
+	fmt.Printf("Deleted %s.\n", code)
 	return nil
 }
 
@@ -301,6 +384,43 @@ func printTeams(cfg CliksConfig) {
 	}
 }
 
+func filterTeams(teams []TeamConfig, code string) []TeamConfig {
+	var next []TeamConfig
+	for _, team := range teams {
+		if team.Code != code {
+			next = append(next, team)
+		}
+	}
+	return next
+}
+
+func readPrompt(reader *bufio.Reader, prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func readSecret(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		value, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(value)), nil
+	}
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
 func parseBool(value string) bool {
 	switch strings.ToLower(value) {
 	case "1", "true", "yes", "on", "y":
@@ -333,6 +453,8 @@ func printHelp(commandName string) {
 
 Usage:
   %[1]s                  Open the Bubble Tea interface
+  %[1]s create           Create a team
+  %[1]s delete [CODE]    Delete a team
   %[1]s join CODE        Save and select a team
   %[1]s start            Start coworking ambience
   %[1]s settings         Open settings UI
@@ -340,6 +462,7 @@ Usage:
   %[1]s sound-test       Play local sample sounds
   %[1]s capture-test     Verify local activity capture
   %[1]s autostart ...    Manage background autoconnect
+  %[1]s background ...   Start, stop, or inspect background Cliks
 
 `, commandName)
 }

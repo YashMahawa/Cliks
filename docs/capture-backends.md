@@ -10,6 +10,16 @@ Cliks should eventually use OS-native global input backends. One library is unli
 
 Terminal mode captures and restores the original terminal state and disables mouse reporting on close, error, process exit, and top-level CLI failures. If a terminal is already in a bad state, run `cliks fix-terminal`.
 
+Linux evdev mouse capture is deliberately narrow:
+
+- physical `BTN_LEFT` and `BTN_RIGHT` presses emit left/right mouse activity
+- short stationary one-finger touchpad tap emits left click
+- short stationary two-finger touchpad tap emits right click
+- long press, cursor movement, scroll/wheel, side buttons, three-or-more-finger gestures, and pointer coordinates are ignored
+- if a touch gesture also produces a physical button event, the tap heuristic suppresses its duplicate event
+
+This keeps touchpad click users working without turning ordinary cursor movement or gestures into coworking noise.
+
 ## Production direction
 
 - Windows: low-level keyboard and mouse hooks through `SetWindowsHookEx`.

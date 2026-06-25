@@ -143,7 +143,7 @@ echo "Command installed at: $BIN_DIR/cliks"
 echo ""
 "$BIN_DIR/cliks" doctor || true
 
-if [ "$(uname -s)" = "Linux" ] && [ -d /dev/input ]; then
+if [ "$(uname -s)" = "Linux" ] && ! is_termux && [ -d /dev/input ]; then
   if ! id -nG "${USER:-$(id -un)}" | tr ' ' '\n' | grep -qx input; then
     echo ""
     echo "Linux global capture needs permission to read input-device events."

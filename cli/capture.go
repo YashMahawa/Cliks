@@ -15,6 +15,25 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	evSyn = 0
+	evKey = 1
+	evAbs = 3
+
+	btnLeft       = 0x110
+	btnRight      = 0x111
+	btnTouch      = 0x14a
+	btnToolFinger = 0x145
+	btnToolDouble = 0x14d
+	btnToolTriple = 0x14e
+	btnToolQuad   = 0x14f
+
+	absX           = 0x00
+	absY           = 0x01
+	absMTPositionX = 0x35
+	absMTPositionY = 0x36
+)
+
 type LocalActivityEvent struct {
 	Kind   string
 	At     time.Time
@@ -170,6 +189,7 @@ func (c *ActivityCapture) startEvdev(ctx context.Context, sharing SharingConfig)
 func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing SharingConfig) {
 	defer file.Close()
 	buf := make([]byte, 24*32)
+	touchpad := &touchpadTapDetector{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -183,11 +203,11 @@ func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing 
 			}
 			continue
 		}
-		c.handleEvdev(buf[:n], sharing)
+		c.handleEvdev(buf[:n], sharing, touchpad)
 	}
 }
 
-func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig) {
+func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig, touchpad *touchpadTapDetector) {
 	eventSize := 0
 	if len(chunk)%24 == 0 {
 		eventSize = 24
@@ -201,7 +221,15 @@ func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig) {
 		eventType := binary.LittleEndian.Uint16(chunk[offset+eventSize-8:])
 		code := binary.LittleEndian.Uint16(chunk[offset+eventSize-6:])
 		value := int32(binary.LittleEndian.Uint32(chunk[offset+eventSize-4:]))
-		if eventType != 1 || value != 1 {
+
+		now := time.Now()
+		if sharing.Mouse && touchpad != nil {
+			if button := touchpad.handle(eventType, code, value, now); button != "" {
+				c.emit(LocalActivityEvent{Kind: "mouse", At: now, Button: button})
+			}
+		}
+
+		if eventType != evKey || value != 1 {
 			continue
 		}
 		if isMouseButtonCode(code) {
@@ -252,7 +280,7 @@ func terminalMouseButton(match string) string {
 }
 
 func isMouseButtonCode(code uint16) bool {
-	return code == 0x110 || code == 0x111
+	return code == btnLeft || code == btnRight
 }
 
 func isKeyboardKeyCode(code uint16) bool {
@@ -260,11 +288,117 @@ func isKeyboardKeyCode(code uint16) bool {
 }
 
 func mouseButtonFromEvdevCode(code uint16) string {
-	if code == 0x110 {
+	if code == btnLeft {
 		return "left"
 	}
-	if code == 0x111 {
+	if code == btnRight {
 		return "right"
 	}
 	return "unknown"
+}
+
+type touchpadTapDetector struct {
+	touching          bool
+	fingerCount       int
+	tooManyFingers    bool
+	buttonDuringTouch bool
+	startedAt         time.Time
+	startX            int32
+	startY            int32
+	x                 int32
+	y                 int32
+	havePos           bool
+}
+
+func (t *touchpadTapDetector) handle(eventType uint16, code uint16, value int32, now time.Time) string {
+	switch eventType {
+	case evAbs:
+		switch code {
+		case absX, absMTPositionX:
+			t.x = value
+			if !t.touching {
+				t.startX = value
+			}
+			t.havePos = true
+		case absY, absMTPositionY:
+			t.y = value
+			if !t.touching {
+				t.startY = value
+			}
+			t.havePos = true
+		}
+	case evKey:
+		switch code {
+		case btnLeft, btnRight:
+			if value > 0 && t.touching {
+				t.buttonDuringTouch = true
+			}
+		case btnToolDouble:
+			if value > 0 {
+				t.fingerCount = maxInt(t.fingerCount, 2)
+			}
+		case btnToolTriple, btnToolQuad:
+			if value > 0 {
+				t.tooManyFingers = true
+			}
+		case btnToolFinger:
+			if value == 1 && !t.touching {
+				t.fingerCount = maxInt(t.fingerCount, 1)
+				t.tooManyFingers = false
+				t.buttonDuringTouch = false
+			}
+		case btnTouch:
+			if value == 1 {
+				t.touching = true
+				if t.fingerCount == 0 {
+					t.fingerCount = 1
+				}
+				t.buttonDuringTouch = false
+				t.startedAt = now
+				t.startX = t.x
+				t.startY = t.y
+				return ""
+			}
+			if value == 0 && t.touching {
+				button := t.tapButton(now)
+				t.touching = false
+				t.fingerCount = 0
+				t.tooManyFingers = false
+				t.buttonDuringTouch = false
+				return button
+			}
+		}
+	}
+	return ""
+}
+
+func (t *touchpadTapDetector) tapButton(now time.Time) string {
+	if t.tooManyFingers || t.buttonDuringTouch || t.startedAt.IsZero() {
+		return ""
+	}
+	if now.Sub(t.startedAt) > 260*time.Millisecond {
+		return ""
+	}
+	if !t.havePos {
+		return t.buttonForFingerCount()
+	}
+	const maxTapTravel = 90
+	if abs32(t.x-t.startX) > maxTapTravel || abs32(t.y-t.startY) > maxTapTravel {
+		return ""
+	}
+	return t.buttonForFingerCount()
+}
+
+func (t *touchpadTapDetector) buttonForFingerCount() string {
+	if t.fingerCount == 2 {
+		return "right"
+	}
+	return "left"
+}
+
+func abs32(value int32) int32 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

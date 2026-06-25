@@ -315,7 +315,7 @@ func ffmpegSpatialFilter(gain float64, pan float64) string {
 	} else if pan > 0 {
 		left *= 1 - pan
 	}
-	return fmt.Sprintf("pan=stereo|c0=%.3f*c0|c1=%.3f*c1,volume=%.3f", left, right, gain)
+	return fmt.Sprintf("pan=stereo|c0=%.3f*c0|c1=%.3f*c0", left, right)
 }
 
 func getAudioPlayerStatus() (player string, spatial bool, hint string, commands []string) {

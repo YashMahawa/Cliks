@@ -70,6 +70,8 @@ Live presence is in memory. Rooms disappear from memory when empty. There is no 
 
 Deleting a team requires its delete password. A successful delete marks the stored team row deleted and closes any live in-memory room for that team so connected peers cannot keep using a deleted code.
 
+Teams can be created and deleted from the website, from `cliks create` / `cliks delete`, and from the bare `cliks` Bubble Tea interface. CLI/TUI delete-password prompts must not echo the password when a real terminal is available.
+
 ## Client-Side Placement
 
 Do not move placement logic to the server.
@@ -96,15 +98,16 @@ Current pack:
 
 The audio engine randomly picks one sample per event. Mouse samples are real recorded click sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`. The website mirror in `site/public/sounds/` must stay in sync with both packs.
 
-Audio playback auto-detects `ffplay`, `mpv`, `afplay`, `paplay`, `pw-play`, `aplay`, or Windows `Media.SoundPlayer` through PowerShell. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash. `cliks doctor` should show whether the active player has full stereo spatial support or only distance/basic playback.
+Audio playback auto-detects `ffplay`, `mpv`, `afplay`, `paplay`, `pw-play`, `aplay`, or Windows `Media.SoundPlayer` through PowerShell. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash. `ffplay` receives the bundled mono samples through an explicit stereo pan filter so left/right gain both apply. `cliks doctor` should show whether the active player has full stereo spatial support or only distance/basic playback.
 
-The website mirrors this on the web. `site/components/AcousticProvider.tsx` preloads the keyboard WAVs from `site/public/sounds/keyboard/` (a copy of the CLI pack) via the Web Audio API and plays a random sample on every `keydown`/`mousedown`, with randomized gain and playback-rate jitter to match the CLI's organic feel. Audio integrity rule: if the WAVs fail to load it must fail silently — never fall back to a synthesized oscillator beep. Keep `site/public/sounds/keyboard/*` in sync with `cli/assets/sounds/keyboard/*`.
+The website mirrors this on the web. `site/components/AcousticProvider.tsx` preloads the keyboard and mouse WAVs from `site/public/sounds/` (a copy of the CLI pack) via the Web Audio API and plays a random sample on every `keydown`/`mousedown`, with randomized gain and playback-rate jitter to match the CLI's organic feel. Audio integrity rule: if the WAVs fail to load it must fail silently — never fall back to a synthesized oscillator beep. Keep `site/public/sounds/*` in sync with `cli/assets/sounds/*`.
 
 ## Capture
 
 Current modes:
 
 - Bare `cliks`: opens the Bubble Tea home/settings interface.
+- `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms.
 - `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
 - `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
@@ -113,10 +116,11 @@ Current modes:
 - `cliks capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `cliks doctor`: explains privacy, checks Go/audio/input-device readiness, and prints detected fix commands.
 - `cliks settings` / `cliks ui`: opens the Bubble Tea settings TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+- `cliks background start|stop|status [team-code]`: runs `cliks start` detached from the terminal for the selected team, reports the pid/log path, or stops it. Use this for "close the terminal but keep Cliks connected" behavior; `cliks autostart` is for login-time launch.
 - `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
 - `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
 - `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
-- `cli/install.sh`: installs the CLI through a user-local wrapper, runs `cliks doctor`, gives macOS/Windows/Linux setup hints, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
+- `cli/install.sh`: installs the CLI through a user-local wrapper, runs `cliks doctor`, gives macOS/Windows/Linux setup hints, and on desktop Linux offers to add the current user to the `input` group. Termux is allowed as a non-supported test shell and must not be sent through sudo/input-group setup. Keep this user-facing and never request or print backend provider tokens.
 
 Important platform reality:
 
@@ -124,13 +128,14 @@ Important platform reality:
 - macOS can use Event Tap APIs with Accessibility permission.
 - Linux Xorg can use XRecord/XInput/native hooks.
 - Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and coarse timing.
-- Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, multi-finger gestures, or touchpad tool/finger events.
+- Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, app/window hover, pointer coordinates, or generic gestures. Linux evdev touchpads use a conservative tap heuristic: short stationary one-finger tap is left click, short stationary two-finger tap is right click, physical `BTN_LEFT`/`BTN_RIGHT` clicks are emitted directly, movement/long-press/three-or-more-finger gestures are ignored, and physical button clicks suppress duplicate tap emission.
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state.
 - Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `cliks fix-terminal`.
 - The `cliks start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
 - `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, peers, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
+- TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands
@@ -148,11 +153,14 @@ npm run dev:site
 cliks sound-test
 cliks capture-test
 cliks fix-terminal
+cliks create
+cliks delete CLIK-LOCAL
 cliks join CLIK-LOCAL
 cliks start --terminal --self
 cliks settings
 cliks set hear.self off
 cliks preset deep
+cliks background status
 cliks autostart status
 ```
 

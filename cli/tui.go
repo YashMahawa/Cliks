@@ -24,10 +24,18 @@ var (
 type homeAction string
 
 const (
-	actionNone      homeAction = ""
-	actionStart     homeAction = "start"
-	actionDoctor    homeAction = "doctor"
-	actionSoundTest homeAction = "sound-test"
+	actionNone             homeAction = ""
+	actionStart            homeAction = "start"
+	actionCreate           homeAction = "create"
+	actionDelete           homeAction = "delete"
+	actionDoctor           homeAction = "doctor"
+	actionSoundTest        homeAction = "sound-test"
+	actionBackgroundStart  homeAction = "background-start"
+	actionBackgroundStop   homeAction = "background-stop"
+	actionBackgroundStatus homeAction = "background-status"
+	actionAutostartEnable  homeAction = "autostart-enable"
+	actionAutostartDisable homeAction = "autostart-disable"
+	actionAutostartStatus  homeAction = "autostart-status"
 )
 
 type homeModel struct {
@@ -37,6 +45,12 @@ type homeModel struct {
 	message        string
 	action         homeAction
 	settingsCursor int
+	formCursor     int
+	createName     string
+	createPassword string
+	deleteCode     string
+	deletePassword string
+	busy           bool
 	width          int
 	height         int
 }
@@ -46,7 +60,7 @@ func runHomeTUI(cfg CliksConfig) error {
 		printHelp("cliks")
 		return nil
 	}
-	model := homeModel{cfg: cfg, mode: "home", message: "Enter selects. Mouse wheel or arrows move. q quits."}
+	model := homeModel{cfg: cfg, mode: "home", message: welcomeMessage(cfg)}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -56,10 +70,26 @@ func runHomeTUI(cfg CliksConfig) error {
 	switch result.action {
 	case actionStart:
 		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
+	case actionCreate:
+		return cmdCreate(nil)
+	case actionDelete:
+		return cmdDelete(nil)
 	case actionDoctor:
 		return runDoctor()
 	case actionSoundTest:
 		return runSoundTest()
+	case actionBackgroundStart:
+		return cmdBackground([]string{"start", result.cfg.CurrentTeamCode})
+	case actionBackgroundStop:
+		return cmdBackground([]string{"stop"})
+	case actionBackgroundStatus:
+		return cmdBackground([]string{"status"})
+	case actionAutostartEnable:
+		return cmdAutostart([]string{"enable", result.cfg.CurrentTeamCode})
+	case actionAutostartDisable:
+		return cmdAutostart([]string{"disable"})
+	case actionAutostartStatus:
+		return cmdAutostart([]string{"status"})
 	default:
 		return nil
 	}
@@ -69,10 +99,27 @@ func (m homeModel) Init() tea.Cmd { return nil }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case formDoneMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.message = msg.err.Error()
+			return m, nil
+		}
+		m.cfg = msg.cfg
+		m.mode = "home"
+		if msg.kind == "create" {
+			m.message = fmt.Sprintf("Created %s. Press Enter on Start when ready.", msg.code)
+		} else {
+			m.message = fmt.Sprintf("Deleted %s.", msg.code)
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.MouseMsg:
+		if m.mode == "create" || m.mode == "delete" {
+			return m, nil
+		}
 		if msg.Type == tea.MouseWheelUp {
 			m.move(-1)
 		}
@@ -88,6 +135,9 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.changeSetting(1)
 		}
 	case tea.KeyMsg:
+		if m.mode == "create" || m.mode == "delete" {
+			return m.updateForm(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			if m.mode == "settings" {
@@ -126,6 +176,8 @@ func (m homeModel) View() string {
 	var body string
 	if m.mode == "settings" {
 		body = m.settingsView()
+	} else if m.mode == "create" || m.mode == "delete" {
+		body = m.formView()
 	} else {
 		body = m.homeView()
 	}
@@ -150,6 +202,18 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 	case "start":
 		m.action = actionStart
 		return m, tea.Quit
+	case "create":
+		m.mode = "create"
+		m.formCursor = 0
+		m.createName = ""
+		m.createPassword = ""
+		m.message = "Name the room and set a delete password."
+	case "delete":
+		m.mode = "delete"
+		m.formCursor = 0
+		m.deleteCode = m.cfg.CurrentTeamCode
+		m.deletePassword = ""
+		m.message = "Delete closes the live room for everyone using this code."
 	case "settings":
 		m.mode = "settings"
 		m.message = "Adjust with left/right. s saves. q returns."
@@ -158,6 +222,24 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "sound":
 		m.action = actionSoundTest
+		return m, tea.Quit
+	case "background-start":
+		m.action = actionBackgroundStart
+		return m, tea.Quit
+	case "background-stop":
+		m.action = actionBackgroundStop
+		return m, tea.Quit
+	case "background-status":
+		m.action = actionBackgroundStatus
+		return m, tea.Quit
+	case "autostart-enable":
+		m.action = actionAutostartEnable
+		return m, tea.Quit
+	case "autostart-disable":
+		m.action = actionAutostartDisable
+		return m, tea.Quit
+	case "autostart-status":
+		m.action = actionAutostartStatus
 		return m, tea.Quit
 	case "quit":
 		return m, tea.Quit
@@ -184,6 +266,7 @@ func (m homeModel) homeView() string {
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf("Team: %s", valueOr(m.cfg.CurrentTeamCode, "not joined")))
 	lines = append(lines, fmt.Sprintf("Nickname: %s", valueOr(m.cfg.Nickname, "not set")))
+	lines = append(lines, fmt.Sprintf("Background: %s", backgroundSummary()))
 	lines = append(lines, "")
 	for i, item := range items {
 		line := fmt.Sprintf("%-12s %s", item.label, item.help)
@@ -221,10 +304,25 @@ type homeItem struct {
 	help  string
 }
 
+type formDoneMsg struct {
+	kind string
+	code string
+	cfg  CliksConfig
+	err  error
+}
+
 func homeItems() []homeItem {
 	return []homeItem{
 		{key: "start", label: "Start", help: "join the room and open the live ambience dashboard"},
+		{key: "create", label: "Create", help: "make a new team code from the terminal"},
+		{key: "delete", label: "Delete", help: "delete the selected team with its password"},
 		{key: "settings", label: "Settings", help: "volume, density, spatial audio, sharing, and team"},
+		{key: "background-start", label: "BG Start", help: "keep this team connected after closing the terminal"},
+		{key: "background-status", label: "BG Status", help: "see whether background Cliks is running"},
+		{key: "background-stop", label: "BG Stop", help: "disconnect the background room"},
+		{key: "autostart-enable", label: "Boot On", help: "auto-connect this team when you sign in"},
+		{key: "autostart-status", label: "Boot Status", help: "show login-time autoconnect status"},
+		{key: "autostart-disable", label: "Boot Off", help: "disable login-time autoconnect"},
 		{key: "doctor", label: "Doctor", help: "check audio, capture, permissions, and privacy"},
 		{key: "sound", label: "Sound Test", help: "play the bundled keyboard and mouse samples"},
 		{key: "quit", label: "Quit", help: "close Cliks"},
@@ -253,6 +351,202 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		{"Share keyboard", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
 		{"Share mouse", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
 		{"Current team", func(c CliksConfig) string { return valueOr(c.CurrentTeamCode, "not set") }, func(c *CliksConfig, d int) { cycleTeam(c, d) }},
+	}
+}
+
+func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.busy {
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.mode = "home"
+		m.message = "Cancelled."
+		return m, nil
+	case "up", "shift+tab":
+		m.formCursor = clampInt(m.formCursor-1, 0, m.formFieldCount()-1)
+		return m, nil
+	case "down", "tab":
+		m.formCursor = clampInt(m.formCursor+1, 0, m.formFieldCount()-1)
+		return m, nil
+	case "enter":
+		if m.formCursor < m.formFieldCount()-1 {
+			m.formCursor++
+			return m, nil
+		}
+		return m.submitForm()
+	case "backspace", "ctrl+h":
+		m.trimFormValue()
+		return m, nil
+	case "ctrl+u":
+		m.setFormValue("")
+		return m, nil
+	}
+	if msg.Type == tea.KeyRunes {
+		m.setFormValue(m.formValue() + string(msg.Runes))
+	}
+	return m, nil
+}
+
+func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
+	if m.mode == "create" {
+		name := strings.TrimSpace(m.createName)
+		if name == "" {
+			name = "Cliks Room"
+		}
+		password := strings.TrimSpace(m.createPassword)
+		if len(password) < 6 {
+			m.message = "Delete password must be at least 6 characters."
+			m.formCursor = 1
+			return m, nil
+		}
+		m.busy = true
+		m.message = "Creating team..."
+		return m, createTeamCmd(name, password)
+	}
+	code := strings.ToUpper(strings.TrimSpace(m.deleteCode))
+	if code == "" {
+		m.message = "Team code is required."
+		m.formCursor = 0
+		return m, nil
+	}
+	password := strings.TrimSpace(m.deletePassword)
+	if password == "" {
+		m.message = "Delete password is required."
+		m.formCursor = 1
+		return m, nil
+	}
+	m.busy = true
+	m.message = "Deleting team..."
+	return m, deleteTeamCmd(code, password)
+}
+
+func (m homeModel) formFieldCount() int {
+	return 2
+}
+
+func (m homeModel) formValue() string {
+	switch m.mode {
+	case "create":
+		if m.formCursor == 0 {
+			return m.createName
+		}
+		return m.createPassword
+	case "delete":
+		if m.formCursor == 0 {
+			return m.deleteCode
+		}
+		return m.deletePassword
+	default:
+		return ""
+	}
+}
+
+func (m *homeModel) setFormValue(value string) {
+	switch m.mode {
+	case "create":
+		if m.formCursor == 0 {
+			m.createName = value
+		} else {
+			m.createPassword = value
+		}
+	case "delete":
+		if m.formCursor == 0 {
+			m.deleteCode = strings.ToUpper(value)
+		} else {
+			m.deletePassword = value
+		}
+	}
+}
+
+func (m *homeModel) trimFormValue() {
+	value := []rune(m.formValue())
+	if len(value) == 0 {
+		return
+	}
+	m.setFormValue(string(value[:len(value)-1]))
+}
+
+func (m homeModel) formView() string {
+	var title string
+	var rows []string
+	if m.mode == "create" {
+		title = "Create Team"
+		rows = []string{
+			formLine("Team name", valueOr(m.createName, "Cliks Room"), m.formCursor == 0),
+			formLine("Delete password", maskSecret(m.createPassword), m.formCursor == 1),
+		}
+	} else {
+		title = "Delete Team"
+		rows = []string{
+			formLine("Team code", valueOr(m.deleteCode, "CLIK-XXXXXX"), m.formCursor == 0),
+			formLine("Delete password", maskSecret(m.deletePassword), m.formCursor == 1),
+		}
+	}
+	lines := []string{styleAccent.Render(title), ""}
+	lines = append(lines, rows...)
+	lines = append(lines, "")
+	if m.busy {
+		lines = append(lines, styleAccent.Render(m.message))
+	} else {
+		lines = append(lines, styleDim.Render("Enter moves forward/submits. Tab changes fields. Esc cancels."))
+		lines = append(lines, styleDim.Render(m.message))
+	}
+	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+}
+
+func formLine(label string, value string, selected bool) string {
+	line := fmt.Sprintf("%-18s %s", label, value)
+	if selected {
+		return styleSelected.Render(" " + line + " ")
+	}
+	return line
+}
+
+func maskSecret(value string) string {
+	if value == "" {
+		return styleDim.Render("not set")
+	}
+	return strings.Repeat("*", len([]rune(value)))
+}
+
+func createTeamCmd(name string, password string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := loadConfig()
+		team, err := createTeamViaAPI(cfg, name, password)
+		if err != nil {
+			return formDoneMsg{kind: "create", err: err}
+		}
+		next, err := rememberTeam(team.Code, team.Name)
+		if err != nil {
+			return formDoneMsg{kind: "create", err: err}
+		}
+		return formDoneMsg{kind: "create", code: team.Code, cfg: next}
+	}
+}
+
+func deleteTeamCmd(code string, password string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := loadConfig()
+		if err := deleteTeamViaAPI(cfg, code, password); err != nil {
+			return formDoneMsg{kind: "delete", code: code, err: err}
+		}
+		cfg.Teams = filterTeams(cfg.Teams, code)
+		if cfg.CurrentTeamCode == code {
+			cfg.CurrentTeamCode = ""
+			if len(cfg.Teams) > 0 {
+				cfg.CurrentTeamCode = cfg.Teams[0].Code
+			}
+		}
+		if err := saveConfig(cfg); err != nil {
+			return formDoneMsg{kind: "delete", code: code, err: err}
+		}
+		return formDoneMsg{kind: "delete", code: code, cfg: cfg}
 	}
 }
 
@@ -527,6 +821,24 @@ func connectionStyle(value string) string {
 		return styleWarn.Render(value)
 	}
 	return styleAccent.Render(value)
+}
+
+func welcomeMessage(cfg CliksConfig) string {
+	if cfg.CurrentTeamCode == "" {
+		return "Desk is warm. Create or join a team to start hearing the room."
+	}
+	return fmt.Sprintf("Desk is warm for %s. Press Enter to start.", cfg.CurrentTeamCode)
+}
+
+func backgroundSummary() string {
+	pid, ok := readBackgroundPID()
+	if !ok {
+		return styleDim.Render("stopped")
+	}
+	if processLooksAlive(pid) {
+		return styleOK.Render(fmt.Sprintf("running (pid %d)", pid))
+	}
+	return styleWarn.Render(fmt.Sprintf("stale pid %d", pid))
 }
 
 func isTerminalCaptureKey(key string) bool {

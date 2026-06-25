@@ -12,7 +12,7 @@ Open the Cliks website, create a team code, and copy the install or join command
 
 [cliks.agichaos.dev](https://cliks.agichaos.dev)
 
-The site is also a live preview: press any key on the page and it plays the exact same keyboard samples the CLI uses, so you can hear the ambience before you install anything.
+The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything.
 
 Install the CLI:
 
@@ -20,14 +20,15 @@ Install the CLI:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-Then join a room:
+Then create or join a room:
 
 ```bash
+cliks create
 cliks join CLIK-XXXXXX
 cliks start
 ```
 
-If you run bare `cliks`, it opens the interactive Bubble Tea interface. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+If you run bare `cliks`, it opens the interactive Bubble Tea interface for creating/deleting teams, joining the room, changing settings, starting background mode, and setting launch-at-login autoconnect. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
 
 ## What It Sends
 
@@ -49,6 +50,8 @@ Cliks does **not** send:
 - microphone audio
 
 Remote timing is rounded into 50ms buckets by the relay before teammates receive it. This keeps the ambience rhythmic without exposing raw millisecond keystroke patterns.
+
+Mouse activity means left/right clicks only. Cliks intentionally ignores cursor movement, scroll/wheel events, side buttons, app/window focus, and pointer coordinates. On Linux evdev, short stationary touchpad taps are treated as clicks: one-finger tap is left click and two-finger tap is right click; long presses, movement, and three-or-more-finger gestures are ignored.
 
 ## Quick Start
 
@@ -115,6 +118,8 @@ cliks
 Useful commands:
 
 ```bash
+cliks create
+cliks delete [CLIK-XXXXXX]
 cliks join CLIK-XXXXXX
 cliks start
 cliks settings
@@ -123,13 +128,16 @@ cliks teams
 cliks switch CLIK-XXXXXX
 cliks config
 cliks autostart enable
+cliks background start
+cliks background status
+cliks background stop
 cliks sound-test
 cliks capture-test
 cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens a Bubble Tea interface for starting the room, tuning settings, running doctor, and testing sound. `cliks settings` opens the settings view directly for keyboard or mouse control over volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+Bare `cliks` opens a Bubble Tea interface for creating and deleting teams, starting the room, tuning settings, running doctor, checking background state, configuring boot autoconnect, and testing sound. `cliks settings` opens the settings view directly for keyboard or mouse control over volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
 
 While `cliks start` is open, Cliks shows a live terminal dashboard with room, capture, connection, and sound controls. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
 
@@ -173,6 +181,16 @@ cliks autostart status
 cliks autostart disable
 ```
 
+To keep Cliks connected after closing the current terminal:
+
+```bash
+cliks background start
+cliks background status
+cliks background stop
+```
+
+Background mode writes status logs under the user state directory and uses the currently selected team unless you pass a team code.
+
 ## Install Script
 
 Install the CLI with:
@@ -181,7 +199,7 @@ Install the CLI with:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed. In Termux, the wrapper is installed into `$PREFIX/bin`.
+The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On desktop Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed. In Termux, the wrapper is installed into `$PREFIX/bin` and desktop input-device permission prompts are skipped.
 
 ## Self-Hosting
 
