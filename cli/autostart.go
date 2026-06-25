@@ -13,8 +13,16 @@ const serviceName = "cliks"
 const launchAgentID = "io.cliks.app"
 
 func cmdAutostart(args []string) error {
+	message, err := autostartAction(args)
+	if message != "" {
+		fmt.Println(message)
+	}
+	return err
+}
+
+func autostartAction(args []string) (string, error) {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: cliks autostart enable|disable|status [team-code]")
+		return "", fmt.Errorf("usage: cliks autostart enable|disable|status [team-code]")
 	}
 	cfg := loadConfig()
 	action := args[0]
@@ -23,7 +31,7 @@ func cmdAutostart(args []string) error {
 		code = strings.ToUpper(args[1])
 	}
 	if action == "enable" && code == "" {
-		return fmt.Errorf("no team selected. Run: cliks join CLIK-XXXXXX")
+		return "", fmt.Errorf("no team selected. Run: cliks join CLIK-XXXXXX")
 	}
 	switch runtime.GOOS {
 	case "linux":
@@ -33,7 +41,7 @@ func cmdAutostart(args []string) error {
 	case "windows":
 		return windowsAutostart(action, code)
 	default:
-		return fmt.Errorf("autostart is supported on Linux, macOS, and Windows")
+		return "", fmt.Errorf("autostart is supported on Linux, macOS, and Windows")
 	}
 }
 
@@ -45,7 +53,7 @@ func currentExecutable() string {
 	return exe
 }
 
-func linuxAutostart(action, code string) error {
+func linuxAutostart(action, code string) (string, error) {
 	home, _ := os.UserHomeDir()
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
@@ -55,15 +63,15 @@ func linuxAutostart(action, code string) error {
 	path := filepath.Join(dir, serviceName+".service")
 	switch action {
 	case "status":
-		printAutostartStatus(path, "systemd user service")
+		return autostartStatusText(path, "systemd user service"), nil
 	case "disable":
 		_ = exec.Command("systemctl", "--user", "disable", "--now", serviceName+".service").Run()
 		_ = os.Remove(path)
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-		fmt.Println("Cliks autostart disabled.")
+		return "Cliks autostart disabled.", nil
 	case "enable":
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return "", err
 		}
 		body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
@@ -75,39 +83,39 @@ ExecStart=%s start
 Restart=always
 RestartSec=10
 Environment=CLIKS_AUTOSTART_TEAM=%s
+Environment=CLIKS_RUN_MODE=%s
 
 [Install]
 WantedBy=default.target
-`, currentExecutable(), code)
+`, currentExecutable(), code, runModeBoot)
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return err
+			return "", err
 		}
 		reload := exec.Command("systemctl", "--user", "daemon-reload").Run()
 		enable := exec.Command("systemctl", "--user", "enable", "--now", serviceName+".service").Run()
-		fmt.Printf("Cliks autostart enabled for %s.\n", code)
 		if reload != nil || enable != nil {
-			fmt.Printf("Service file written. Run: systemctl --user enable --now %s.service\n", serviceName)
+			return fmt.Sprintf("Service file written for %s. Run: systemctl --user enable --now %s.service", code, serviceName), nil
 		}
+		return fmt.Sprintf("Cliks autostart enabled for %s.", code), nil
 	default:
-		return fmt.Errorf("unknown autostart action: %s", action)
+		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}
-	return nil
 }
 
-func macAutostart(action, code string) error {
+func macAutostart(action, code string) (string, error) {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "Library", "LaunchAgents")
 	path := filepath.Join(dir, launchAgentID+".plist")
 	switch action {
 	case "status":
-		printAutostartStatus(path, "LaunchAgent")
+		return autostartStatusText(path, "LaunchAgent"), nil
 	case "disable":
 		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), path).Run()
 		_ = os.Remove(path)
-		fmt.Println("Cliks autostart disabled.")
+		return "Cliks autostart disabled.", nil
 	case "enable":
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return "", err
 		}
 		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -124,6 +132,8 @@ func macAutostart(action, code string) error {
   <dict>
     <key>CLIKS_AUTOSTART_TEAM</key>
     <string>%s</string>
+    <key>CLIKS_RUN_MODE</key>
+    <string>%s</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -135,56 +145,57 @@ func macAutostart(action, code string) error {
   <string>%s</string>
 </dict>
 </plist>
-`, launchAgentID, currentExecutable(), code, filepath.Join(home, "Library", "Logs", "cliks.log"), filepath.Join(home, "Library", "Logs", "cliks.err.log"))
+`, launchAgentID, currentExecutable(), code, runModeBoot, filepath.Join(home, "Library", "Logs", "cliks.log"), filepath.Join(home, "Library", "Logs", "cliks.err.log"))
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return err
+			return "", err
 		}
 		err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), path).Run()
-		fmt.Printf("Cliks autostart enabled for %s.\n", code)
 		if err != nil {
-			fmt.Printf("LaunchAgent written. Run: launchctl bootstrap gui/$(id -u) %q\n", path)
+			return fmt.Sprintf("LaunchAgent written for %s. Run: launchctl bootstrap gui/$(id -u) %q", code, path), nil
 		}
+		return fmt.Sprintf("Cliks autostart enabled for %s.", code), nil
 	default:
-		return fmt.Errorf("unknown autostart action: %s", action)
+		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}
-	return nil
 }
 
-func windowsAutostart(action, code string) error {
+func windowsAutostart(action, code string) (string, error) {
 	startup := os.Getenv("APPDATA")
 	if startup == "" {
-		return fmt.Errorf("could not locate Windows Startup folder")
+		return "", fmt.Errorf("could not locate Windows Startup folder")
 	}
 	dir := filepath.Join(startup, "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
 	path := filepath.Join(dir, "Cliks.cmd")
 	switch action {
 	case "status":
-		printAutostartStatus(path, "Startup script")
+		return autostartStatusText(path, "Startup script"), nil
 	case "disable":
 		_ = os.Remove(path)
-		fmt.Println("Cliks autostart disabled.")
+		return "Cliks autostart disabled.", nil
 	case "enable":
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return "", err
 		}
-		body := fmt.Sprintf("@echo off\r\nset CLIKS_AUTOSTART_TEAM=%s\r\nstart \"Cliks\" /min \"%s\" start\r\n", code, currentExecutable())
+		body := fmt.Sprintf("@echo off\r\nset CLIKS_AUTOSTART_TEAM=%s\r\nset CLIKS_RUN_MODE=%s\r\nstart \"Cliks\" /min \"%s\" start\r\n", code, runModeBoot, currentExecutable())
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return err
+			return "", err
 		}
-		fmt.Printf("Cliks autostart enabled for %s.\n", code)
-		fmt.Println("It will start after your next sign-in.")
+		return fmt.Sprintf("Cliks autostart enabled for %s. It will start after your next sign-in.", code), nil
 	default:
-		return fmt.Errorf("unknown autostart action: %s", action)
+		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}
-	return nil
 }
 
-func printAutostartStatus(path, label string) {
+func autostartStatusText(path, label string) string {
 	_, err := os.Stat(path)
 	if err == nil {
-		fmt.Println("Cliks autostart: enabled")
-	} else {
-		fmt.Println("Cliks autostart: disabled")
+		return fmt.Sprintf("Cliks autostart: enabled\n%s: %s", label, path)
 	}
-	fmt.Printf("%s: %s\n", label, path)
+	return fmt.Sprintf("Cliks autostart: disabled\n%s: %s", label, path)
+}
+
+func autostartEnabled() bool {
+	cfg := loadConfig()
+	message, err := autostartAction([]string{"status", cfg.CurrentTeamCode})
+	return err == nil && strings.Contains(message, "enabled")
 }

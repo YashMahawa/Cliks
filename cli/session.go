@@ -35,23 +35,30 @@ type SessionViewState struct {
 }
 
 type sessionController struct {
-	cfg       CliksConfig
-	opts      StartOptions
-	ctx       context.Context
-	cancel    context.CancelFunc
-	audio     *AudioEngine
-	updates   chan SessionViewState
-	local     chan LocalActivityEvent
-	mu        sync.Mutex
-	wsMu      sync.Mutex
-	ws        *websocket.Conn
-	state     SessionViewState
-	ownPeerID string
+	cfg            CliksConfig
+	opts           StartOptions
+	ctx            context.Context
+	cancel         context.CancelFunc
+	audio          *AudioEngine
+	updates        chan SessionViewState
+	local          chan LocalActivityEvent
+	instance       *sessionInstance
+	lastStateWrite time.Time
+	mu             sync.Mutex
+	wsMu           sync.Mutex
+	ws             *websocket.Conn
+	state          SessionViewState
+	ownPeerID      string
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
-	controller := newSessionController(cfg, opts)
+	instance, err := acquireSessionInstance(cfg.CurrentTeamCode, runModeFromEnv())
+	if err != nil {
+		return err
+	}
+	controller := newSessionController(cfg, opts, instance)
 	if err := controller.start(); err != nil {
+		instance.release()
 		return err
 	}
 	defer controller.stop()
@@ -67,18 +74,19 @@ func startSession(cfg CliksConfig, opts StartOptions) error {
 	return nil
 }
 
-func newSessionController(cfg CliksConfig, opts StartOptions) *sessionController {
+func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionInstance) *sessionController {
 	ctx, cancel := context.WithCancel(context.Background())
 	listening := cfg.Listening
 	listening.Self = opts.SelfMonitor
 	controller := &sessionController{
-		cfg:     cfg,
-		opts:    opts,
-		ctx:     ctx,
-		cancel:  cancel,
-		audio:   newAudioEngine(listening),
-		updates: make(chan SessionViewState, 32),
-		local:   make(chan LocalActivityEvent, 256),
+		cfg:      cfg,
+		opts:     opts,
+		ctx:      ctx,
+		cancel:   cancel,
+		audio:    newAudioEngine(listening),
+		updates:  make(chan SessionViewState, 32),
+		local:    make(chan LocalActivityEvent, 256),
+		instance: instance,
 		state: SessionViewState{
 			TeamName:         cfg.CurrentTeamCode,
 			TeamCode:         cfg.CurrentTeamCode,
@@ -116,6 +124,7 @@ func (s *sessionController) start() error {
 		state.CaptureMode = captureState.Mode
 		state.PermissionHint = captureState.PermissionHint
 	})
+	s.writeSessionState(true)
 	go s.batchLoop(s.local)
 	go s.connectLoop()
 	return nil
@@ -128,6 +137,8 @@ func (s *sessionController) stop() {
 		_ = s.ws.Close()
 	}
 	s.wsMu.Unlock()
+	s.writeSessionState(true)
+	s.instance.release()
 }
 
 func (s *sessionController) viewState() SessionViewState {
@@ -141,10 +152,23 @@ func (s *sessionController) set(mutator func(*SessionViewState)) {
 	mutator(&s.state)
 	state := s.state
 	s.mu.Unlock()
+	s.writeSessionState(false)
 	select {
 	case s.updates <- state:
 	default:
 	}
+}
+
+func (s *sessionController) writeSessionState(force bool) {
+	if s.instance == nil {
+		return
+	}
+	now := time.Now()
+	if !force && now.Sub(s.lastStateWrite) < time.Second {
+		return
+	}
+	s.lastStateWrite = now
+	s.instance.update(s.viewState())
 }
 
 func (s *sessionController) adjustVolume(delta float64) {

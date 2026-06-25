@@ -28,7 +28,7 @@ cliks join CLIK-XXXXXX
 cliks start
 ```
 
-If you run bare `cliks`, it opens the interactive Bubble Tea interface for creating/deleting teams, joining the room, changing settings, starting background mode, and setting launch-at-login autoconnect. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+If you run bare `cliks`, it opens the interactive Bubble Tea control screen. It starts with a greeting, the current team, active connection status, and a one-click keep-running toggle; deeper team/preferences/diagnostic actions live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
 
 ## What It Sends
 
@@ -137,7 +137,9 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens a Bubble Tea interface for creating and deleting teams, starting the room, tuning settings, running doctor, checking background state, configuring boot autoconnect, and testing sound. `cliks settings` opens the settings view directly for keyboard or mouse control over volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics. Mouse hover moves the highlighted row, and actions such as sound test, doctor, background toggle, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
+
+Cliks allows only one active local connection per config/device. If a background or launch-at-login session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. This prevents hearing your own actions through a duplicate local client.
 
 While `cliks start` is open, Cliks shows a live terminal dashboard with room, capture, connection, and sound controls. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
 
@@ -189,7 +191,7 @@ cliks background status
 cliks background stop
 ```
 
-Background mode writes status logs under the user state directory and uses the currently selected team unless you pass a team code.
+Background mode writes status logs and a live connection state under the user state directory and uses the currently selected team unless you pass a team code. `cliks background status` also reports launch-at-login sessions because they share the same local session lock.
 
 ## Install Script
 
@@ -279,7 +281,7 @@ docker compose up
 
 ## Current Status
 
-This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/settings UI, autostart, spatial-capable CLI playback, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 

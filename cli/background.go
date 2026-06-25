@@ -23,76 +23,75 @@ func cmdBackground(args []string) error {
 		if code == "" {
 			return fmt.Errorf("no team selected. Run: cliks join CLIK-XXXXXX")
 		}
-		return startBackground(code)
+		message, err := startBackgroundForTeam(code)
+		if message != "" {
+			fmt.Println(message)
+		}
+		return err
 	case "stop":
-		return stopBackground()
+		message, err := stopBackground()
+		if message != "" {
+			fmt.Println(message)
+		}
+		return err
 	case "status":
-		return backgroundStatus()
+		fmt.Print(backgroundStatusText())
+		return nil
 	default:
 		return fmt.Errorf("usage: cliks background start|stop|status [team-code]")
 	}
 }
 
-func startBackground(code string) error {
-	if pid, ok := readBackgroundPID(); ok && processLooksAlive(pid) {
-		fmt.Printf("Cliks background is already running (pid %d).\n", pid)
-		return nil
+func startBackgroundForTeam(code string) (string, error) {
+	if active, ok := activeSession(); ok {
+		return fmt.Sprintf("Cliks is already running for %s (%s, pid %d).", valuePlain(active.TeamCode, code), modeLabel(active.Mode), active.PID), nil
 	}
 	dir := stateDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 	logPath := filepath.Join(dir, "background.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return err
+		return "", err
 	}
 	cmd := exec.Command(currentExecutable(), "start")
-	cmd.Env = append(os.Environ(), "CLIKS_AUTOSTART_TEAM="+code)
+	cmd.Env = append(os.Environ(), "CLIKS_AUTOSTART_TEAM="+code, "CLIKS_RUN_MODE="+runModeBackground)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	prepareBackgroundCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
-		return err
+		return "", err
 	}
 	_ = writeBackgroundPID(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
-	fmt.Printf("Cliks is running in the background for %s.\n", code)
-	fmt.Printf("Status: cliks background status\n")
-	fmt.Printf("Stop:   cliks background stop\n")
-	return nil
+	return fmt.Sprintf("Cliks is running in the background for %s.\nStatus: cliks background status\nStop:   cliks background stop", code), nil
 }
 
-func stopBackground() error {
-	pid, ok := readBackgroundPID()
-	if !ok {
-		fmt.Println("Cliks background is not running.")
-		return nil
+func stopBackground() (string, error) {
+	active, ok := activeSession()
+	if ok && active.Mode == runModeBoot {
+		_, _ = autostartAction([]string{"disable"})
 	}
-	process, err := os.FindProcess(pid)
-	if err == nil {
-		_ = process.Kill()
-	}
-	_ = os.Remove(backgroundPIDPath())
-	fmt.Println("Cliks background stopped.")
-	return nil
+	return stopActiveSession()
 }
 
-func backgroundStatus() error {
-	pid, ok := readBackgroundPID()
-	if !ok {
-		fmt.Println("Cliks background: stopped")
-		return nil
+func backgroundStatusText() string {
+	if active, ok := activeSession(); ok {
+		return fmt.Sprintf("Cliks: running for %s (%s, pid %d)\nConnection: %s\nActive users: %d\nCaptured: %d\nSent: %d\nLog: %s\n",
+			valuePlain(active.TeamCode, "current team"),
+			modeLabel(active.Mode),
+			active.PID,
+			valuePlain(active.ConnectionStatus, "starting"),
+			active.ActiveCount,
+			active.LocalCapturedEvents,
+			active.LocalSentEvents,
+			filepath.Join(stateDir(), "background.log"),
+		)
 	}
-	if processLooksAlive(pid) {
-		fmt.Printf("Cliks background: running (pid %d)\n", pid)
-	} else {
-		fmt.Printf("Cliks background: stale pid %d\n", pid)
-	}
-	fmt.Printf("Log: %s\n", filepath.Join(stateDir(), "background.log"))
-	return nil
+	return "Cliks: stopped\n"
 }
 
 func stateDir() string {

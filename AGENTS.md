@@ -106,7 +106,7 @@ The website mirrors this on the web. `site/components/AcousticProvider.tsx` prel
 
 Current modes:
 
-- Bare `cliks`: opens the Bubble Tea home/settings interface.
+- Bare `cliks`: opens the Bubble Tea control screen. The greeting/home view shows selected team, active local connection state, teammate count, local captured/sent counters, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. Deeper actions live under More: Preferences, Team, Connection, and Diagnostics. Avoid reintroducing a long flat home menu.
 - `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms.
 - `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
 - `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
@@ -115,8 +115,8 @@ Current modes:
 - `cliks sound-test`: plays sample sounds without joining a room.
 - `cliks capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `cliks doctor`: explains privacy, checks Go/audio/input-device readiness, and prints detected fix commands.
-- `cliks settings` / `cliks ui`: opens the Bubble Tea settings TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
-- `cliks background start|stop|status [team-code]`: runs `cliks start` detached from the terminal for the selected team, reports the pid/log path, or stops it. Use this for "close the terminal but keep Cliks connected" behavior; `cliks autostart` is for login-time launch.
+- `cliks settings` / `cliks ui`: opens the Bubble Tea control screen; the old settings concept is now named Preferences inside the TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+- `cliks background start|stop|status [team-code]`: runs `cliks start` detached from the terminal for the selected team, reports the pid/log path/session state, or stops it. Use this for "close the terminal but keep Cliks connected" behavior; `cliks autostart` is for login-time launch.
 - `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
 - `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
 - `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
@@ -135,7 +135,9 @@ Important platform reality:
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
 - `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, peers, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
+- Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection.
 - TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
+- Home/control TUI mouse movement should update the highlighted row on hover. Binary settings should be single toggle rows, not separate on/off menu choices.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands

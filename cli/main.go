@@ -457,7 +457,7 @@ Usage:
   %[1]s delete [CODE]    Delete a team
   %[1]s join CODE        Save and select a team
   %[1]s start            Start coworking ambience
-  %[1]s settings         Open settings UI
+  %[1]s settings         Open the control screen
   %[1]s doctor           Check setup and permissions
   %[1]s sound-test       Play local sample sounds
   %[1]s capture-test     Verify local activity capture

@@ -40,6 +40,8 @@ const (
 
 type homeModel struct {
 	cfg            CliksConfig
+	active         ActiveSessionState
+	activeOK       bool
 	cursor         int
 	mode           string
 	message        string
@@ -60,7 +62,8 @@ func runHomeTUI(cfg CliksConfig) error {
 		printHelp("cliks")
 		return nil
 	}
-	model := homeModel{cfg: cfg, mode: "home", message: welcomeMessage(cfg)}
+	active, activeOK := activeSession()
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: welcomeMessage(cfg)}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -95,12 +98,26 @@ func runHomeTUI(cfg CliksConfig) error {
 	}
 }
 
-func (m homeModel) Init() tea.Cmd { return nil }
+func (m homeModel) Init() tea.Cmd { return homeTick() }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case homeTickMsg:
+		m.refreshRuntime()
+		return m, homeTick()
+	case commandDoneMsg:
+		m.busy = false
+		m.refreshRuntime()
+		m.cfg = loadConfig()
+		if msg.err != nil {
+			m.message = msg.err.Error()
+		} else {
+			m.message = msg.message
+		}
+		return m, nil
 	case formDoneMsg:
 		m.busy = false
+		m.refreshRuntime()
 		if msg.err != nil {
 			m.message = msg.err.Error()
 			return m, nil
@@ -126,13 +143,15 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.MouseWheelDown {
 			m.move(1)
 		}
-		if msg.Type == tea.MouseLeft && msg.Y >= 7 {
-			if m.mode == "home" {
-				m.cursor = clampInt(msg.Y-7, 0, len(homeItems())-1)
-				return m.activate()
+		if msg.Type == tea.MouseMotion || msg.Type == tea.MouseLeft {
+			m.hover(msg.Y)
+		}
+		if msg.Type == tea.MouseLeft {
+			if m.mode == "preferences" {
+				m.changeSetting(1)
+				return m, nil
 			}
-			m.settingsCursor = clampInt(msg.Y-7, 0, len(settingsRows(m.cfg))-1)
-			m.changeSetting(1)
+			return m.activate()
 		}
 	case tea.KeyMsg:
 		if m.mode == "create" || m.mode == "delete" {
@@ -140,8 +159,8 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
-			if m.mode == "settings" {
-				m.mode = "home"
+			if m.mode != "home" {
+				m.back()
 				return m, nil
 			}
 			return m, tea.Quit
@@ -150,17 +169,17 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.move(1)
 		case "left", "h":
-			if m.mode == "settings" {
+			if m.mode == "preferences" {
 				m.changeSetting(-1)
 			}
 		case "right", "l":
-			if m.mode == "settings" {
+			if m.mode == "preferences" {
 				m.changeSetting(1)
 			}
 		case "enter", " ":
 			return m.activate()
 		case "s":
-			if m.mode == "settings" {
+			if m.mode == "preferences" {
 				if err := saveConfig(m.cfg); err != nil {
 					m.message = err.Error()
 				} else {
@@ -174,34 +193,51 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m homeModel) View() string {
 	var body string
-	if m.mode == "settings" {
-		body = m.settingsView()
+	if m.mode == "preferences" {
+		body = m.preferencesView()
 	} else if m.mode == "create" || m.mode == "delete" {
 		body = m.formView()
 	} else {
-		body = m.homeView()
+		body = m.itemView()
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks"), body)
 }
 
 func (m *homeModel) move(delta int) {
-	if m.mode == "settings" {
+	if m.mode == "preferences" {
 		m.settingsCursor = clampInt(m.settingsCursor+delta, 0, len(settingsRows(m.cfg))-1)
 		return
 	}
-	m.cursor = clampInt(m.cursor+delta, 0, len(homeItems())-1)
+	m.cursor = clampInt(m.cursor+delta, 0, len(m.items())-1)
 }
 
 func (m homeModel) activate() (tea.Model, tea.Cmd) {
-	if m.mode == "settings" {
+	if m.busy {
+		return m, nil
+	}
+	if m.mode == "preferences" {
 		m.changeSetting(1)
 		return m, nil
 	}
-	item := homeItems()[m.cursor]
+	item := m.items()[m.cursor]
 	switch item.key {
 	case "start":
+		if m.cfg.CurrentTeamCode == "" {
+			m.message = "Create or join a team first."
+			return m, nil
+		}
+		if m.activeOK {
+			m.message = fmt.Sprintf("Already running for %s (%s). Stop it before starting another local connection.", valuePlain(m.active.TeamCode, m.cfg.CurrentTeamCode), modeLabel(m.active.Mode))
+			return m, nil
+		}
 		m.action = actionStart
 		return m, tea.Quit
+	case "menu":
+		m.mode = "menu"
+		m.cursor = 0
+		m.message = "Choose what to adjust."
+	case "back":
+		m.back()
 	case "create":
 		m.mode = "create"
 		m.formCursor = 0
@@ -214,33 +250,46 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.deleteCode = m.cfg.CurrentTeamCode
 		m.deletePassword = ""
 		m.message = "Delete closes the live room for everyone using this code."
-	case "settings":
-		m.mode = "settings"
+	case "preferences":
+		m.mode = "preferences"
+		m.settingsCursor = 0
 		m.message = "Adjust with left/right. s saves. q returns."
+	case "team":
+		m.mode = "team"
+		m.cursor = 0
+		m.message = "Manage the selected team."
+	case "connection":
+		m.mode = "connection"
+		m.cursor = 0
+		m.message = "Control this device's single Cliks connection."
+	case "diagnostics":
+		m.mode = "diagnostics"
+		m.cursor = 0
+		m.message = "Check sound and setup."
+	case "switch-team":
+		cycleTeam(&m.cfg, 1)
+		_ = saveConfig(m.cfg)
+		m.message = fmt.Sprintf("Selected %s.", valuePlain(m.cfg.CurrentTeamCode, "no team"))
 	case "doctor":
-		m.action = actionDoctor
-		return m, tea.Quit
+		m.busy = true
+		m.message = "Checking setup..."
+		return m, doctorSummaryCmd()
 	case "sound":
-		m.action = actionSoundTest
-		return m, tea.Quit
-	case "background-start":
-		m.action = actionBackgroundStart
-		return m, tea.Quit
-	case "background-stop":
-		m.action = actionBackgroundStop
-		return m, tea.Quit
-	case "background-status":
-		m.action = actionBackgroundStatus
-		return m, tea.Quit
-	case "autostart-enable":
-		m.action = actionAutostartEnable
-		return m, tea.Quit
-	case "autostart-disable":
-		m.action = actionAutostartDisable
-		return m, tea.Quit
+		m.busy = true
+		m.message = "Playing test sounds..."
+		return m, soundTestCmd()
+	case "background-toggle":
+		m.busy = true
+		m.message = "Updating keep-running mode..."
+		return m, toggleBackgroundCmd(m.cfg.CurrentTeamCode, m.active, m.activeOK)
+	case "autostart-toggle":
+		m.busy = true
+		m.message = "Updating launch-at-login..."
+		return m, toggleAutostartCmd(m.cfg.CurrentTeamCode)
 	case "autostart-status":
-		m.action = actionAutostartStatus
-		return m, tea.Quit
+		m.busy = true
+		m.message = "Checking launch-at-login..."
+		return m, autostartStatusCmd()
 	case "quit":
 		return m, tea.Quit
 	}
@@ -258,15 +307,23 @@ func (m *homeModel) changeSetting(delta int) {
 	m.message = "Saved."
 }
 
-func (m homeModel) homeView() string {
-	items := homeItems()
+func (m homeModel) itemView() string {
+	items := m.items()
 	var lines []string
-	lines = append(lines, "")
-	lines = append(lines, styleAccent.Render("Ambient coworking, no keystrokes shared."))
-	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("Team: %s", valueOr(m.cfg.CurrentTeamCode, "not joined")))
-	lines = append(lines, fmt.Sprintf("Nickname: %s", valueOr(m.cfg.Nickname, "not set")))
-	lines = append(lines, fmt.Sprintf("Background: %s", backgroundSummary()))
+	title, intro := m.viewHeader()
+	lines = append(lines, styleAccent.Render(title))
+	if intro != "" {
+		lines = append(lines, intro)
+	}
+	if m.mode == "home" {
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(m.cfg.CurrentTeamCode, "not joined")))
+		lines = append(lines, "Connection: "+m.connectionSummary())
+		if m.activeOK {
+			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
+			lines = append(lines, fmt.Sprintf("Activity: %d captured, %d sent", m.active.LocalCapturedEvents, m.active.LocalSentEvents))
+		}
+	}
 	lines = append(lines, "")
 	for i, item := range items {
 		line := fmt.Sprintf("%-12s %s", item.label, item.help)
@@ -280,10 +337,10 @@ func (m homeModel) homeView() string {
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
-func (m homeModel) settingsView() string {
+func (m homeModel) preferencesView() string {
 	rows := settingsRows(m.cfg)
 	var lines []string
-	lines = append(lines, styleAccent.Render("Settings"))
+	lines = append(lines, styleAccent.Render("Preferences"))
 	lines = append(lines, "")
 	for i, row := range rows {
 		line := fmt.Sprintf("%-18s %s", row.label, row.value(m.cfg))
@@ -311,22 +368,158 @@ type formDoneMsg struct {
 	err  error
 }
 
-func homeItems() []homeItem {
-	return []homeItem{
-		{key: "start", label: "Start", help: "join the room and open the live ambience dashboard"},
-		{key: "create", label: "Create", help: "make a new team code from the terminal"},
-		{key: "delete", label: "Delete", help: "delete the selected team with its password"},
-		{key: "settings", label: "Settings", help: "volume, density, spatial audio, sharing, and team"},
-		{key: "background-start", label: "BG Start", help: "keep this team connected after closing the terminal"},
-		{key: "background-status", label: "BG Status", help: "see whether background Cliks is running"},
-		{key: "background-stop", label: "BG Stop", help: "disconnect the background room"},
-		{key: "autostart-enable", label: "Boot On", help: "auto-connect this team when you sign in"},
-		{key: "autostart-status", label: "Boot Status", help: "show login-time autoconnect status"},
-		{key: "autostart-disable", label: "Boot Off", help: "disable login-time autoconnect"},
-		{key: "doctor", label: "Doctor", help: "check audio, capture, permissions, and privacy"},
-		{key: "sound", label: "Sound Test", help: "play the bundled keyboard and mouse samples"},
-		{key: "quit", label: "Quit", help: "close Cliks"},
+type commandDoneMsg struct {
+	message string
+	err     error
+}
+
+type homeTickMsg time.Time
+
+func (m homeModel) items() []homeItem {
+	switch m.mode {
+	case "menu":
+		return []homeItem{
+			{key: "preferences", label: "Preferences", help: "sound, sharing, spatial audio, and fatigue fade"},
+			{key: "team", label: "Team", help: "create, delete, or switch the selected team"},
+			{key: "connection", label: "Connection", help: "background mode and launch-at-login"},
+			{key: "diagnostics", label: "Diagnostics", help: "sound test and setup check"},
+			{key: "back", label: "Back", help: "return to the greeting screen"},
+		}
+	case "team":
+		return []homeItem{
+			{key: "create", label: "Create", help: "make a new team code"},
+			{key: "delete", label: "Delete", help: "delete the selected team with its password"},
+			{key: "switch-team", label: "Switch", help: "cycle through saved teams"},
+			{key: "back", label: "Back", help: "return to the menu"},
+		}
+	case "connection":
+		return []homeItem{
+			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
+			{key: "autostart-toggle", label: "Launch Login", help: autostartToggleHelp()},
+			{key: "autostart-status", label: "Login Status", help: "show where launch-at-login is configured"},
+			{key: "back", label: "Back", help: "return to the menu"},
+		}
+	case "diagnostics":
+		return []homeItem{
+			{key: "sound", label: "Sound Test", help: "play keyboard and mouse samples"},
+			{key: "doctor", label: "Doctor", help: "quick setup and permission check"},
+			{key: "back", label: "Back", help: "return to the menu"},
+		}
+	default:
+		return []homeItem{
+			{key: "start", label: "Open Live", help: m.startHelp()},
+			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
+			{key: "menu", label: "More", help: "teams, preferences, diagnostics, and boot options"},
+			{key: "quit", label: "Quit", help: "close this control screen"},
+		}
 	}
+}
+
+func (m homeModel) viewHeader() (string, string) {
+	switch m.mode {
+	case "menu":
+		return "More", "Everything here stays in this control screen."
+	case "team":
+		return "Team", fmt.Sprintf("Selected: %s", valuePlain(m.cfg.CurrentTeamCode, "not joined"))
+	case "connection":
+		return "Connection", "Cliks allows one local connection per device."
+	case "diagnostics":
+		return "Diagnostics", "Quick checks without leaving the TUI."
+	default:
+		return "Welcome back", "Ambient coworking, no keystrokes shared."
+	}
+}
+
+func (m homeModel) startHelp() string {
+	if m.activeOK {
+		return fmt.Sprintf("already running as %s; no duplicate will be started", modeLabel(m.active.Mode))
+	}
+	if m.cfg.CurrentTeamCode == "" {
+		return "join or create a team first"
+	}
+	return "open the live room in this terminal; stops when this terminal closes"
+}
+
+func (m homeModel) backgroundToggleHelp() string {
+	if m.activeOK {
+		return fmt.Sprintf("on (%s); press Enter to stop", modeLabel(m.active.Mode))
+	}
+	if m.cfg.CurrentTeamCode == "" {
+		return "select a team first"
+	}
+	return "off; press Enter to keep connected after closing the terminal"
+}
+
+func (m homeModel) connectionSummary() string {
+	if !m.activeOK {
+		return styleDim.Render("stopped")
+	}
+	return fmt.Sprintf("%s for %s (%s, pid %d)",
+		connectionStyle(valuePlain(m.active.ConnectionStatus, "starting")),
+		valuePlain(m.active.TeamCode, m.cfg.CurrentTeamCode),
+		modeLabel(m.active.Mode),
+		m.active.PID,
+	)
+}
+
+func (m *homeModel) refreshRuntime() {
+	m.active, m.activeOK = activeSession()
+}
+
+func (m *homeModel) hover(y int) {
+	if m.mode == "preferences" {
+		index := y - 2
+		if index >= 0 && index < len(settingsRows(m.cfg)) {
+			m.settingsCursor = index
+		}
+		return
+	}
+	index := y - m.itemStartY()
+	if index >= 0 && index < len(m.items()) {
+		m.cursor = index
+	}
+}
+
+func (m homeModel) itemStartY() int {
+	if m.mode == "home" {
+		if m.activeOK {
+			return 8
+		}
+		return 6
+	}
+	return 3
+}
+
+func (m *homeModel) back() {
+	switch m.mode {
+	case "team", "connection", "diagnostics", "preferences":
+		m.mode = "menu"
+		m.cursor = 0
+	default:
+		m.mode = "home"
+		m.cursor = 0
+	}
+	m.message = welcomeMessage(m.cfg)
+}
+
+func peopleSummary(activeCount int) string {
+	if activeCount <= 1 {
+		return "just you"
+	}
+	return fmt.Sprintf("you + %d teammate(s)", activeCount-1)
+}
+
+func autostartToggleHelp() string {
+	if autostartEnabled() {
+		return "on; press Enter to disable launch-at-login"
+	}
+	return "off; press Enter to connect this team when you sign in"
+}
+
+func homeTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return homeTickMsg(t)
+	})
 }
 
 type settingRow struct {
@@ -530,6 +723,71 @@ func createTeamCmd(name string, password string) tea.Cmd {
 	}
 }
 
+func toggleBackgroundCmd(code string, active ActiveSessionState, activeOK bool) tea.Cmd {
+	return func() tea.Msg {
+		if activeOK {
+			if active.Mode == runModeBoot {
+				_, _ = autostartAction([]string{"disable"})
+			}
+			message, err := stopActiveSession()
+			return commandDoneMsg{message: message, err: err}
+		}
+		if code == "" {
+			return commandDoneMsg{err: fmt.Errorf("no team selected. Create or join a team first")}
+		}
+		message, err := startBackgroundForTeam(code)
+		return commandDoneMsg{message: message, err: err}
+	}
+}
+
+func toggleAutostartCmd(code string) tea.Cmd {
+	return func() tea.Msg {
+		if autostartEnabled() {
+			message, err := autostartAction([]string{"disable"})
+			return commandDoneMsg{message: message, err: err}
+		}
+		if code == "" {
+			return commandDoneMsg{err: fmt.Errorf("no team selected. Create or join a team first")}
+		}
+		message, err := autostartAction([]string{"enable", code})
+		return commandDoneMsg{message: message, err: err}
+	}
+}
+
+func autostartStatusCmd() tea.Cmd {
+	return func() tea.Msg {
+		message, err := autostartAction([]string{"status"})
+		return commandDoneMsg{message: message, err: err}
+	}
+}
+
+func soundTestCmd() tea.Cmd {
+	return func() tea.Msg {
+		audio := newAudioEngine(loadConfig().Listening)
+		if err := audio.preview(); err != nil {
+			return commandDoneMsg{err: err}
+		}
+		return commandDoneMsg{message: "Played keyboard and mouse test sounds."}
+	}
+}
+
+func doctorSummaryCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg := loadConfig()
+		player, spatial, hint, _ := getAudioPlayerStatus()
+		if player == "" {
+			return commandDoneMsg{message: "Audio player missing: " + hint}
+		}
+		if cfg.CurrentTeamCode == "" {
+			return commandDoneMsg{message: "Setup needs a team. Create or join one first."}
+		}
+		if spatial {
+			return commandDoneMsg{message: fmt.Sprintf("Doctor OK. Audio: %s with stereo spatial support.", player)}
+		}
+		return commandDoneMsg{message: fmt.Sprintf("Doctor OK. Audio: %s with basic/distance playback.", player)}
+	}
+}
+
 func deleteTeamCmd(code string, password string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := loadConfig()
@@ -683,24 +941,12 @@ func (m sessionModel) View() string {
 		return m.sessionSettingsView()
 	}
 	state := m.state
-	var peers []string
-	for _, peer := range state.Peers {
-		if peer.Nickname != "" {
-			peers = append(peers, peer.Nickname)
-		} else {
-			peers = append(peers, shortPeer(peer.PeerID))
-		}
-	}
-	if len(peers) == 0 {
-		peers = append(peers, "just you for now")
-	}
 	left := []string{
 		styleAccent.Render(state.TeamName),
 		"",
 		"Connection: " + connectionStyle(state.ConnectionStatus),
-		fmt.Sprintf("Active: %d", state.ActiveCount),
+		"People: " + peopleSummary(state.ActiveCount),
 		"Capture: " + state.CaptureMode,
-		"Peers: " + strings.Join(peers, ", "),
 		"",
 		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
 		fmt.Sprintf("Sent:     %d", state.LocalSentEvents),
