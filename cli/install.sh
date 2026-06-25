@@ -6,6 +6,14 @@ INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
 
+is_termux() {
+  [ -n "${PREFIX:-}" ] && [ -d "$PREFIX" ] && printf "%s" "$PREFIX" | grep -q "/com.termux/"
+}
+
+if is_termux; then
+  BIN_DIR="${CLIKS_BIN_DIR:-$PREFIX/bin}"
+fi
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     BIN_DIR="${CLIKS_BIN_DIR:-$HOME/bin}"
@@ -13,9 +21,14 @@ case "$(uname -s)" in
 esac
 
 if ! command -v git >/dev/null 2>&1; then
-  echo "Cliks needs git to install or update the CLI."
-  echo "Install git, then rerun this script."
-  exit 1
+  if is_termux && command -v pkg >/dev/null 2>&1; then
+    echo "Git is not installed. Installing it with Termux pkg..."
+    pkg install -y git
+  else
+    echo "Cliks needs git to install or update the CLI."
+    echo "Install git, then rerun this script."
+    exit 1
+  fi
 fi
 
 install_go() {
@@ -30,7 +43,9 @@ install_go() {
       fi
       ;;
     Linux)
-      if command -v pacman >/dev/null 2>&1; then
+      if is_termux && command -v pkg >/dev/null 2>&1; then
+        pkg install -y golang
+      elif command -v pacman >/dev/null 2>&1; then
         sudo pacman -S --needed --noconfirm go
       elif command -v apt-get >/dev/null 2>&1; then
         sudo apt-get update
@@ -99,6 +114,10 @@ case ":$PATH:" in
     echo ""
     echo "Add this directory to PATH if 'cliks' is not found in new terminals:"
     echo "  $BIN_DIR"
+    if is_termux; then
+      echo "Termux usually includes this directory by default. If this shell was opened before install, run:"
+      echo "  hash -r"
+    fi
     ;;
 esac
 

@@ -181,7 +181,7 @@ Install the CLI with:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed.
+The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed. In Termux, the wrapper is installed into `$PREFIX/bin`.
 
 ## Self-Hosting
 
