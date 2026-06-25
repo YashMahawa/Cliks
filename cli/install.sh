@@ -18,19 +18,9 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Cliks needs Node.js 20 or newer. Install Node first, then rerun this script."
-  exit 1
-fi
-
-NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
-if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "Cliks needs Node.js 20 or newer. Current version: $(node --version)"
-  exit 1
-fi
-
-if ! command -v npm >/dev/null 2>&1; then
-  echo "Cliks needs npm. Install npm with Node.js, then rerun this script."
+if ! command -v go >/dev/null 2>&1; then
+  echo "Cliks needs Go to build the CLI from source."
+  echo "Install Go, then rerun this script."
   exit 1
 fi
 
@@ -42,38 +32,33 @@ else
 fi
 
 cd "$INSTALL_DIR"
-npm install --no-audit --no-fund || {
-  echo ""
-  echo "Full install failed, likely while building optional global-capture hooks."
-  echo "Retrying without optional native hooks. Terminal mode and evdev checks will still work."
-  npm install --omit=optional --no-audit --no-fund
-}
-npm --workspace @cliks/cli run build
+cd cli
+go build -o dist/cliks .
 
 mkdir -p "$BIN_DIR"
-cat > "$BIN_DIR/typ" <<EOF
+cat > "$BIN_DIR/cliks" <<EOF
 #!/usr/bin/env sh
-exec node "$INSTALL_DIR/cli/bin/typ.js" "\$@"
+exec "$INSTALL_DIR/cli/dist/cliks" "\$@"
 EOF
-chmod +x "$BIN_DIR/typ"
+chmod +x "$BIN_DIR/cliks"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
     echo ""
-    echo "Add this directory to PATH if 'typ' is not found in new terminals:"
+    echo "Add this directory to PATH if 'cliks' is not found in new terminals:"
     echo "  $BIN_DIR"
     ;;
 esac
 
-"$BIN_DIR/typ" set api.url "$DEFAULT_BACKEND"
+"$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND"
 
 echo ""
 echo "Cliks installed."
 echo "Default backend: $DEFAULT_BACKEND"
-echo "Command installed at: $BIN_DIR/typ"
+echo "Command installed at: $BIN_DIR/cliks"
 echo ""
-"$BIN_DIR/typ" doctor || true
+"$BIN_DIR/cliks" doctor || true
 
 if [ "$(uname -s)" = "Linux" ] && [ -d /dev/input ]; then
   if ! id -nG "${USER:-$(id -un)}" | tr ' ' '\n' | grep -qx input; then
@@ -99,17 +84,17 @@ case "$(uname -s)" in
     echo ""
     echo "macOS global capture needs Accessibility permission for your terminal app."
     echo "Open System Settings > Privacy & Security > Accessibility, allow the terminal, then run:"
-    echo "  typ capture-test"
+    echo "  cliks capture-test"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     echo ""
     echo "Windows note: this installer is for Git Bash/MSYS-style shells."
-    echo "If PowerShell cannot find typ, add this to your user PATH:"
+    echo "If PowerShell cannot find cliks, add this to your user PATH:"
     echo "  $BIN_DIR"
     ;;
 esac
 
 echo ""
 echo "Create a team on the Cliks website, then run:"
-echo "  typ join CLIK-XXXXXX"
-echo "  typ start"
+echo "  cliks join CLIK-XXXXXX"
+echo "  cliks start"

@@ -4,11 +4,11 @@ Cliks should eventually use OS-native global input backends. One library is unli
 
 ## Current prototype
 
-- `typ start --terminal --self`: reliable local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal only.
-- `typ start`: on Linux tries `/dev/input` evdev capture first, then falls back to `uiohook-napi`; on other platforms it tries `uiohook-napi`. This can work on some Xorg/macOS/Windows setups, but it is not reliable enough as the final backend.
-- `typ start --evdev`: Linux-only global capture through readable `/dev/input/event*` devices.
+- `cliks start --terminal --self`: reliable local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal only.
+- `cliks start`: on Linux tries `/dev/input` evdev capture first. macOS and Windows native global capture hooks are still future work in the Go CLI.
+- `cliks start --evdev`: Linux-only global capture through readable `/dev/input/event*` devices.
 
-Terminal mode captures and restores the original terminal state and disables mouse reporting on close, error, process exit, and top-level CLI failures. If a terminal is already in a bad state, run `typ fix-terminal`.
+Terminal mode captures and restores the original terminal state and disables mouse reporting on close, error, process exit, and top-level CLI failures. If a terminal is already in a bad state, run `cliks fix-terminal`.
 
 ## Production direction
 

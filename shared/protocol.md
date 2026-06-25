@@ -12,8 +12,8 @@ Cliks uses tiny JSON messages over WebSocket.
   "teamCode": "CLIK-842KQ9",
   "nickname": "local optional name",
   "client": {
-    "name": "typ",
-    "version": "0.1.0"
+    "name": "cliks",
+    "version": "0.2.0"
   }
 }
 ```

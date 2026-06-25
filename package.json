@@ -2,7 +2,7 @@
   "name": "cliks-workspace",
   "private": true,
   "version": "0.1.0",
-  "description": "Cliks ambient coworking prototype: Vercel site, Render backend, and typ CLI.",
+  "description": "Cliks ambient coworking prototype: Vercel site, Render backend, and Go CLI.",
   "license": "MIT",
   "workspaces": [
     "server",

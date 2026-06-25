@@ -23,6 +23,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: cli/go.sum
+
       - run: npm ci
 
       - run: npm run check
@@ -30,7 +35,7 @@ jobs:
       - run: npm run build
 
       - name: CLI doctor smoke
-        run: node cli/bin/typ.js doctor
+        run: ./cli/dist/cliks doctor
 
       - name: Server smoke
         run: npm run smoke:server

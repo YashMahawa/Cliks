@@ -6,7 +6,7 @@ This file is the durable project context for future coding agents working on Cli
 
 Cliks is an ambient coworking tool for remote teams. It lets teammates hear realistic keyboard and mouse ambience from each other without sharing typed content.
 
-The current command name is still `typ`.
+The product CLI command is `cliks`. Do not reintroduce `typ` as a command alias.
 
 Primary audiences:
 
@@ -27,7 +27,7 @@ Core promise:
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join/install commands. The landing page uses the "Warm Desk" design system (warm stone palette `#11100f`/`#1a1918`, bone text `#eae5d9`, ember accent `#d97746`; Geist + Geist Mono) and doubles as a live in-browser demo of the CLI ambience (see Sound). Brand assets: `site/public/images/cliks-keycap.png` (keycap logo/favicon) and `site/public/images/warm_desk_workspace.png` (hero photo).
 - `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
-- `cli`: `typ` command. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
+- `cli`: Go-based `cliks` command with Bubble Tea/Lip Gloss terminal interfaces. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
 - `deploy/render.yaml`: starter Render config.
 - `docs/architecture.md`: deeper architecture and scaling notes.
@@ -96,7 +96,7 @@ Current pack:
 
 The audio engine randomly picks one sample per event. Mouse samples are real recorded click sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`. The website mirror in `site/public/sounds/` must stay in sync with both packs.
 
-Audio playback auto-detects `ffplay`, `mpv`, `afplay`, `paplay`, `pw-play`, `aplay`, or Windows `Media.SoundPlayer` through PowerShell. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash. `typ doctor` should show whether the active player has full stereo spatial support or only distance/basic playback.
+Audio playback auto-detects `ffplay`, `mpv`, `afplay`, `paplay`, `pw-play`, `aplay`, or Windows `Media.SoundPlayer` through PowerShell. Missing audio tools must be reported as a user-facing setup warning, not as an unhandled child-process crash. `cliks doctor` should show whether the active player has full stereo spatial support or only distance/basic playback.
 
 The website mirrors this on the web. `site/components/AcousticProvider.tsx` preloads the keyboard WAVs from `site/public/sounds/keyboard/` (a copy of the CLI pack) via the Web Audio API and plays a random sample on every `keydown`/`mousedown`, with randomized gain and playback-rate jitter to match the CLI's organic feel. Audio integrity rule: if the WAVs fail to load it must fail silently — never fall back to a synthesized oscillator beep. Keep `site/public/sounds/keyboard/*` in sync with `cli/assets/sounds/keyboard/*`.
 
@@ -104,18 +104,19 @@ The website mirrors this on the web. `site/components/AcousticProvider.tsx` prel
 
 Current modes:
 
-- `typ start`: on Linux, tries `/dev/input` evdev capture first; otherwise tries `uiohook-napi` native/global capture.
-- `typ start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
-- `typ start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
-- Running bare `typ`/`typ start` before joining a room prints first-run setup steps instead of a raw error.
-- `typ sound-test`: plays sample sounds without joining a room.
-- `typ capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
-- `typ doctor`: explains privacy, checks Node/audio/input-device readiness, and prints detected fix commands.
-- `typ settings` / `typ ui`: opens the blessed-based interactive settings TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, nickname, selected team, backend URLs, and autostart. It falls back to printing JSON config in non-interactive terminals.
-- `typ preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
-- `typ autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
-- `typ fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
-- `cli/install.sh`: installs the CLI through a user-local wrapper, runs `typ doctor`, gives macOS/Windows/Linux setup hints, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
+- Bare `cliks`: opens the Bubble Tea home/settings interface.
+- `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
+- `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
+- `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
+- `cliks start` before joining a room prints first-run setup steps instead of a raw error.
+- `cliks sound-test`: plays sample sounds without joining a room.
+- `cliks capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
+- `cliks doctor`: explains privacy, checks Go/audio/input-device readiness, and prints detected fix commands.
+- `cliks settings` / `cliks ui`: opens the Bubble Tea settings TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+- `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
+- `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
+- `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
+- `cli/install.sh`: installs the CLI through a user-local wrapper, runs `cliks doctor`, gives macOS/Windows/Linux setup hints, and on Linux offers to add the current user to the `input` group. Keep this user-facing and never request or print backend provider tokens.
 
 Important platform reality:
 
@@ -125,11 +126,11 @@ Important platform reality:
 - Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and coarse timing.
 - Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, multi-finger gestures, or touchpad tool/finger events.
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state.
-- Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `typ fix-terminal`.
-- The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
+- Terminal mode must capture and restore the original `stty` state and disable mouse reporting on close/error/signals. It should never modify Caps Lock, Shift state, layout, or inject keyboard events. If a terminal tab is already corrupted, use `cliks fix-terminal`.
+- The `cliks start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
-- `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
-- `typ start` uses a blessed-based live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
+- `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
+- `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, peers, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands
@@ -144,15 +145,15 @@ npm run smoke:server
 npm run load:server
 npm run dev:server
 npm run dev:site
-typ sound-test
-typ capture-test
-typ fix-terminal
-typ join CLIK-LOCAL
-typ start --terminal --self
-typ settings
-typ set hear.self off
-typ preset deep
-typ autostart status
+cliks sound-test
+cliks capture-test
+cliks fix-terminal
+cliks join CLIK-LOCAL
+cliks start --terminal --self
+cliks settings
+cliks set hear.self off
+cliks preset deep
+cliks autostart status
 ```
 
 CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, live room closure on delete, deleted-room lookup behavior, and 50ms timing quantization. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
@@ -197,7 +198,7 @@ Supabase should run `supabase/schema.sql`.
 - `npm audit --omit=dev` currently reports moderate advisories through Next/PostCSS dependency metadata. Do not force downgrade to old Next; wait for a patched compatible release or reassess if Next dependency graph changes.
 - Global capture is not production-ready across every OS yet.
 - Full stereo pan requires `ffplay` or `mpv` on PATH. Basic/native players may only support distance-based gain or unspatialized playback.
-- The command is still `typ`; product name is Cliks.
+- The command is `cliks`; product name is Cliks.
 
 ## README Policy
 
@@ -205,4 +206,4 @@ Keep `README.md` from the user point of view. It should explain what Cliks does,
 
 ## Public Backend URL
 
-`cli/src/config.ts` currently points new installs at `https://139.59.29.207.sslip.io`. This is a public backend URL, not a secret. Never put the DigitalOcean API token, SSH private key, or service credentials into the CLI, website bundle, README, install script, or committed env files.
+`cli/config.go` currently points new installs at `https://139.59.29.207.sslip.io`. This is a public backend URL, not a secret. Never put the DigitalOcean API token, SSH private key, or service credentials into the CLI, website bundle, README, install script, or committed env files.

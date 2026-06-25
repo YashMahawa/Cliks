@@ -86,13 +86,13 @@ Good next optimizations:
 
 ## CLI reliability and audio
 
-`typ start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, sends pings, terminates heartbeat timeouts, retries with exponential backoff, and resumes joining the selected team when the backend is reachable again. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
+`cliks start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, sends pings, terminates heartbeat timeouts, retries with exponential backoff, and resumes joining the selected team when the backend is reachable again. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
 
 Terminal mode registers the captured `stty` state with a process-wide cleanup registry. Normal stops, top-level command failures, uncaught exceptions, unhandled rejections, and process exit all restore tracked terminal state and disable terminal mouse reporting.
 
 The current audio engine still uses system players, but it caps concurrent playback processes and queues a bounded number of events so dense batches do not create unbounded process storms. Player priority is spatial-first: `ffplay` gets stereo pan plus gain through an FFmpeg audio filter, `mpv` gets stereo pan plus volume flags, `afplay`/`paplay`/`pw-play` get distance volume, and `aplay`/Windows `Media.SoundPlayer` remain basic fallback playback. A future native mixer could reduce process overhead further, but pan and distance now reach capable CLI players.
 
-Interactive controls are local-only and persist to the config file:
+The Go CLI uses Bubble Tea for the live dashboard and settings UI. Interactive controls are local-only and persist to the config file:
 
 - Up/Down: volume
 - `[`/`]`: ambience density
@@ -102,9 +102,9 @@ Interactive controls are local-only and persist to the config file:
 
 Fatigue fade attenuates dense local playback after sustained bursts. Density thins local playback only; it does not change capture or relay privacy behavior.
 
-`typ autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM` and runs `typ start`.
+`cliks autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM` and runs `cliks start`.
 
-Running `typ` before a team is selected prints a short first-run setup checklist with `typ join`, `typ start`, `typ doctor`, `typ sound-test`, and `typ capture-test` rather than surfacing an internal missing-team error.
+Running bare `cliks` opens the Bubble Tea home interface. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
 
 ## Test and release gates
 
