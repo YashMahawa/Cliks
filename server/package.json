@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "go run .",
-    "build": "go build -trimpath -ldflags=\"-s -w\" -o dist/cliks-server .",
-    "start": "./dist/cliks-server",
+    "build": "node ../scripts/build-server.mjs",
+    "start": "node ../scripts/start-server.mjs",
     "check": "go test ./..."
   }
 }
