@@ -3,10 +3,11 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"syscall"
 )
+
+const processQueryLimitedInformation = 0x1000
 
 func prepareBackgroundCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -16,9 +17,13 @@ func prepareBackgroundCommand(cmd *exec.Cmd) {
 }
 
 func processLooksAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
+	if pid <= 0 {
+		return false
+	}
+	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return false
 	}
-	return process.Signal(syscall.Signal(0)) == nil
+	_ = syscall.CloseHandle(handle)
+	return true
 }
