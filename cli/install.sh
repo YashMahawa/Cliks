@@ -7,11 +7,14 @@ BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
 
 is_termux() {
-  [ -n "${PREFIX:-}" ] && [ -d "$PREFIX" ] && printf "%s" "$PREFIX" | grep -q "/com.termux/"
+  case "${PREFIX:-}:${TERMUX_VERSION:-}:$(uname -o 2>/dev/null || true):$HOME" in
+    *com.termux*|*Android*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 if is_termux; then
-  BIN_DIR="${CLIKS_BIN_DIR:-$PREFIX/bin}"
+  BIN_DIR="${CLIKS_BIN_DIR:-${PREFIX:-$HOME/../usr}/bin}"
 fi
 
 case "$(uname -s)" in
@@ -21,9 +24,14 @@ case "$(uname -s)" in
 esac
 
 if ! command -v git >/dev/null 2>&1; then
-  if is_termux && command -v pkg >/dev/null 2>&1; then
-    echo "Git is not installed. Installing it with Termux pkg..."
-    pkg install -y git
+  if is_termux; then
+    echo "Git is not installed. Installing it with Termux package manager..."
+    if command -v pkg >/dev/null 2>&1; then
+      pkg install -y git
+    else
+      apt-get update
+      apt-get install -y git
+    fi
   else
     echo "Cliks needs git to install or update the CLI."
     echo "Install git, then rerun this script."
@@ -43,8 +51,13 @@ install_go() {
       fi
       ;;
     Linux)
-      if is_termux && command -v pkg >/dev/null 2>&1; then
-        pkg install -y golang
+      if is_termux; then
+        if command -v pkg >/dev/null 2>&1; then
+          pkg install -y golang
+        else
+          apt-get update
+          apt-get install -y golang
+        fi
       elif command -v pacman >/dev/null 2>&1; then
         sudo pacman -S --needed --noconfirm go
       elif command -v apt-get >/dev/null 2>&1; then
