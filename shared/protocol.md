@@ -13,12 +13,13 @@ Cliks uses tiny JSON messages over WebSocket.
   "nickname": "local optional name",
   "client": {
     "name": "cliks",
-    "version": "0.2.0"
+    "version": "0.2.0",
+    "features": ["compact-v1"]
   }
 }
 ```
 
-`nickname` is an explicit optional display name. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles.
+`nickname` is an explicit optional display name, capped at 10 characters by clients and the relay. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
 
 ### Activity batch
 
@@ -96,6 +97,23 @@ Used after join when a running CLI notices the local nickname changed.
 }
 ```
 
+When a recipient negotiated `compact-v1`, the relay sends the same peer activity as:
+
+```json
+{
+  "type": "a",
+  "p": "peer_xyz987",
+  "n": "Aarav",
+  "t": 1780000000000,
+  "e": [
+    ["k", 0],
+    ["m", 200, "l"]
+  ]
+}
+```
+
+Compact event kind `k` means keyboard and `m` means mouse. Compact mouse buttons use `l` for left, `r` for right, and `u` for unknown.
+
 ## Connection health
 
 The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out.
@@ -105,11 +123,22 @@ The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI 
 When a team is deleted successfully, the relay closes any live room for that code. Connected peers receive:
 
 ```json
-{ "type": "error", "message": "This team was deleted." }
+{ "type": "team_deleted", "teamCode": "CLIK-842KQ9", "message": "This team was deleted." }
 ```
 
-The socket is then closed and future lookups for that team code return 404.
+The socket is then closed and future lookups for that team code return 404. If a client tries to join a missing or deleted code, the relay sends:
+
+```json
+{
+  "type": "team_unavailable",
+  "teamCode": "CLIK-842KQ9",
+  "reason": "not_found",
+  "message": "Team code was not found or was deleted."
+}
+```
+
+The CLI should remove that team from local config, disable launch-at-login, stop the current session, and avoid reconnecting to that code.
 
 ## Room limits
 
-Rooms are capped at 20 live peers. The 21st peer receives an error and the socket closes.
+Rooms are capped at 20 live peers. The 21st peer receives an error with code `room_full` and the socket closes.

@@ -26,7 +26,7 @@ Core promise:
 ## Current Structure
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join/install commands. The landing page uses the "Warm Desk" design system (warm stone palette `#11100f`/`#1a1918`, bone text `#eae5d9`, ember accent `#d97746`; Geist + Geist Mono) and doubles as a live in-browser demo of the CLI ambience (see Sound). Brand assets: `site/public/images/cliks-keycap.png` (keycap logo/favicon) and `site/public/images/warm_desk_workspace.png` (hero photo).
-- `server`: Fastify API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
+- `server`: Go API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
 - `cli`: Go-based `cliks` command with Bubble Tea/Lip Gloss terminal interfaces. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
 - `deploy/render.yaml`: starter Render config.
@@ -53,7 +53,7 @@ Example:
 }
 ```
 
-The server only validates and relays these events. It does not assign 3D positions and does not store live event history.
+The server only validates and relays these events. It does not assign 3D positions and does not store live event history. New CLIs negotiate `compact-v1`; when present, the server sends compact activity frames (`type: "a"`) to that recipient while preserving verbose JSON for older clients.
 
 ## Team Codes And Data
 
@@ -66,11 +66,11 @@ Stored data:
 - delete password hash
 - timestamps
 
-Live presence is in memory. Rooms disappear from memory when empty. Live peers include peer id, optional nickname/display name, joined timestamp, socket, and last-seen timestamp. There is no persisted membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
+Live presence is in memory. Rooms disappear from memory when empty. Live peers include peer id, optional nickname/display name, joined timestamp, socket, and last-seen timestamp. Nicknames are explicit and capped at 10 characters. There is no persisted membership list and no stored total member count. The relay sends WebSocket pings and removes peers that miss heartbeats, so half-open sockets should not leave ghost users.
 
 Rooms are capped at 20 live peers. A 21st peer should receive a room-full error and then be disconnected.
 
-Deleting a team requires its delete password. A successful delete marks the stored team row deleted and closes any live in-memory room for that team so connected peers cannot keep using a deleted code.
+Deleting a team requires its delete password. A successful delete marks the stored team row deleted, sends `team_deleted` to all live peers, and closes any live in-memory room for that team so connected peers cannot keep using a deleted code. Joining a missing/deleted code sends `team_unavailable`; CLIs must remove that team from device storage, disable launch-at-login, and stop retrying it.
 
 Teams can be created and deleted from the website, from `cliks create` / `cliks delete`, and from the bare `cliks` Bubble Tea interface. CLI/TUI delete-password prompts must not echo the password when a real terminal is available.
 
@@ -112,7 +112,7 @@ Current modes:
 
 - Bare `cliks`: opens the Bubble Tea control screen. The greeting/home view shows selected team, active local connection state, teammate count, local captured/sent counters, `Open Live`, `Keep Running`, optional `Stop`, `More`, and `Quit`. Deeper actions live under More: Preferences, Team, Connection, and Diagnostics. Avoid reintroducing a long flat home menu. If a connection is already active, toggling Keep Running off should schedule the active connection to stop when the control screen closes; use the separate Stop action for immediate disconnect.
 - `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms.
-- `cliks nickname [NAME]` / `cliks set nickname NAME`: configures the optional display name shared in live presence and peer activity. Empty names should be treated as anonymous; never infer names from the OS user, Git config, hostname, app/window title, or typed text.
+- `cliks nickname [NAME]` / `cliks set nickname NAME`: configures the optional display name shared in live presence and peer activity. Names are capped at 10 characters. Empty names should be treated as anonymous; never infer names from the OS user, Git config, hostname, app/window title, or typed text.
 - `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
 - `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
@@ -120,10 +120,10 @@ Current modes:
 - `cliks sound-test`: plays sample sounds without joining a room.
 - `cliks capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `cliks doctor`: explains privacy, checks Go/audio/input-device readiness, and prints detected fix commands.
-- `cliks settings` / `cliks ui`: opens the Bubble Tea control screen; the old settings concept is now named Preferences inside the TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
+- `cliks settings` / `cliks ui`: opens the Bubble Tea control screen; the old settings concept is now named Preferences inside the TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, dynamic circle placement, fatigue fade, self-monitoring, sharing toggles, Keep Running preference, and selected team. Preference rows should include short user-facing explanations.
 - `cliks background start|stop|status [team-code]`: runs `cliks start` detached from the terminal for the selected team, reports the pid/log path/session state, or stops it. Use this for "close the terminal but keep Cliks connected" behavior; `cliks autostart` is for login-time launch.
 - `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
-- `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder. Shared stop paths for a boot-managed session must disable launch-at-login before killing the process so systemd/launchd does not immediately restart it.
+- `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder. Linux services should use `Restart=on-failure`, macOS LaunchAgents should not set `KeepAlive`, and shared stop paths must disable launch-at-login before killing the process whenever autostart is enabled so the platform service does not immediately restart it.
 - `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
 - `cli/install.sh`: installs the CLI through a user-local wrapper, runs `cliks doctor`, gives macOS/Windows/Linux setup hints, and on desktop Linux offers to add the current user to the `input` group. Termux is allowed as a non-supported test shell and must not be sent through sudo/input-group setup. Keep this user-facing and never request or print backend provider tokens.
 
@@ -139,11 +139,13 @@ Important platform reality:
 - The `cliks start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
+- `cliks start` must stop retrying when the server sends `team_deleted` or `team_unavailable`. In that case it should remove the team from local config, disable launch-at-login, and show a clear stopped/unavailable notice.
 - `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room, optional display names for small rooms, a recent "X, Y are typing" summary from received activity batches, capture, connection, local counters, peers/counts, hints, and sound controls with keyboard and mouse support. Larger rooms should collapse to people/typing counts. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
 - Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection. The Go CLI also scans for older same-executable `cliks start` processes that predate the lock file and treats them as active local sessions; when a managed session is active, the TUI should clean up those duplicate local copies.
 - TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
 - Home/control TUI mouse movement should update the highlighted row on hover. Use all-motion mouse tracking and keep row hit-testing aligned with the title, panel border, and padding. Binary settings should be single toggle rows, not separate on/off menu choices.
 - TUI mouse clicks should activate only the row under the pointer. A keyboard-focused row may look focus-highlighted for Enter, but it must not trigger from a mouse click elsewhere.
+- With no active session, the home/control TUI Keep Running row must only toggle persisted preference and must not start a background session. With an active session, Keep Running controls whether that active session is stopped when the control screen exits; Stop remains the immediate disconnect.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands
@@ -172,7 +174,7 @@ cliks background status
 cliks autostart status
 ```
 
-CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, live room closure on delete, deleted-room lookup behavior, and 50ms timing quantization. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
+CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, compact activity frames, nickname truncation, live room closure on delete, deleted-room lookup behavior, room limits, and 50ms timing quantization. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
 
 ## Deploy
 
@@ -184,7 +186,7 @@ NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 
 Current production site alias is `https://site-kappa-six-64.vercel.app`. An attempt on 2026-06-20 to assign `https://cliks.vercel.app` failed because Vercel reported that alias was already in use.
 
-The current DigitalOcean backend is a Droplet running `cliks-api` under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
+The current DigitalOcean backend is a Droplet running the Go `cliks-api` service under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
 
 The public `/health` route must stay unauthenticated for uptime checks, but it must not expose team codes, team names, peer ids, nicknames, or per-room snapshots. It returns only `ok`, `totalRooms`, and `totalPeers`.
 
@@ -195,11 +197,11 @@ Security posture for the live Droplet:
 - the DigitalOcean API token is not in the repo, website bundle, CLI, installer, or Droplet app env
 - the CLI contains only the public backend URL, which is not secret
 - UFW allows only OpenSSH, HTTP, and HTTPS
-- Node listens on port 8787 behind Caddy, and direct public access to 8787 should be blocked by firewall
+- the Go server listens on port 8787 behind Caddy, and direct public access to 8787 should be blocked by firewall
 - SSH password and keyboard-interactive auth are disabled
 - CORS is set to the production Vercel origin
 
-If using App Platform or another managed Node host, set:
+If using App Platform, Render, or another managed host, set:
 
 ```text
 CORS_ORIGIN=https://your-vercel-site

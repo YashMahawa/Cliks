@@ -204,7 +204,7 @@ func stopActiveSession() (string, error) {
 	if active.PID == os.Getpid() {
 		return "", fmt.Errorf("this terminal owns the active Cliks session")
 	}
-	if active.Mode == runModeBoot {
+	if active.Mode == runModeBoot || autostartEnabled() {
 		_, _ = autostartAction([]string{"disable"})
 	}
 	stoppedCount := stopSessionPIDs(append([]int{active.PID}, active.DuplicateLocalPIDs...))

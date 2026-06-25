@@ -37,7 +37,7 @@ Cliks sends only tiny activity pulses:
 - keyboard activity happened
 - mouse click happened
 - coarse timing between those activity pulses
-- your optional display name, if you set one with `cliks nickname`
+- your optional 10-character display name, if you set one with `cliks nickname`
 
 Cliks does **not** send:
 
@@ -122,7 +122,7 @@ Useful commands:
 cliks create
 cliks delete [CLIK-XXXXXX]
 cliks join CLIK-XXXXXX
-cliks nickname "Your Name"
+cliks nickname "YourName"
 cliks start
 cliks settings
 cliks preset deep
@@ -139,13 +139,13 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes an easy Nickname form for the display name teammates see. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stopping a launch-at-login connection also disables launch-at-login so the service cannot reconnect behind your back. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, background toggle, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
+Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes an easy Nickname form for the short display name teammates see. If no session is running, Keep Running only saves the future terminal-close preference; it does not start a hidden connection. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stopping a connection also disables launch-at-login when it is enabled so the service cannot reconnect behind your back. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
-While `cliks start` is open, Cliks shows a live terminal dashboard with room, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
+While `cliks start` is open, Cliks shows a live terminal dashboard with room, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
 
-Rooms are capped at 20 live people. Spatial placement keeps 4 people in the first ring and adds 2 seats per outer ring. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally.
+Rooms are capped at 20 live people. Spatial placement pans teammates around your desk locally: 4 people in the first ring and 2 more seats per outer ring. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally. Fatigue fade softens long typing bursts so dense work sessions do not become harsh. Density controls how many received sounds are played locally; it never changes what activity is sent.
 
 Listening presets:
 
@@ -159,7 +159,8 @@ cliks preset quiet
 Useful settings:
 
 ```bash
-cliks set nickname "Your Name"
+cliks set nickname "YourName"
+cliks set keep.running on
 cliks set spatial.dynamic on
 cliks set spatial.shuffleMinutes 10
 ```
@@ -173,7 +174,7 @@ cliks capture-test --evdev
 
 While `cliks start` is running, the status screen also shows connection state plus local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check whether the CLI is reconnecting to the backend.
 
-If the WebSocket drops during a server restart or short network outage, `cliks start` stays open and retries automatically with backoff. The CLI and relay exchange heartbeats so half-open connections are cleaned up instead of leaving stale teammates in the room. Activity captured while offline is best-effort and may be dropped until the connection is restored.
+If the WebSocket drops during a server restart or short network outage, `cliks start` stays open and retries automatically with backoff. The CLI and relay exchange heartbeats so half-open connections are cleaned up instead of leaving stale teammates in the room. Activity captured while offline is best-effort and may be dropped until the connection is restored. If the backend says the selected team was deleted or is no longer in the database, the CLI removes that team from local config, disables launch-at-login, and stops reconnecting to it.
 
 If a terminal tab feels stuck in a strange input mode after terminal-only testing, run:
 
@@ -220,7 +221,7 @@ The installer points `cliks` at the hosted Cliks backend by default and installs
 Cliks is split into three parts:
 
 - Website: deploy `site` to Vercel.
-- Backend: deploy `server` to DigitalOcean or another Node host with WebSocket support.
+- Backend: deploy the Go `server` to DigitalOcean, Render, App Platform, or another host with WebSocket support.
 - Database: use local Postgres on the same server, or use Supabase/Postgres elsewhere.
 
 To build your own CLI pointed at your own backend:
@@ -293,7 +294,7 @@ docker compose up
 
 ## Current Status
 
-This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, Go WebSocket relay, team deletion with live deleted-room signals, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 

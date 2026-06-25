@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,10 +77,14 @@ func startSession(cfg CliksConfig, opts StartOptions) error {
 		return err
 	}
 	fmt.Println("Cliks started. Press Ctrl+C to stop.")
-	for state := range controller.updates {
-		fmt.Printf("%s | %s | captured=%d sent=%d\n", state.TeamName, state.ConnectionStatus, state.LocalCapturedEvents, state.LocalSentEvents)
+	for {
+		select {
+		case state := <-controller.updates:
+			fmt.Printf("%s | %s | captured=%d sent=%d\n", state.TeamName, state.ConnectionStatus, state.LocalCapturedEvents, state.LocalSentEvents)
+		case <-controller.ctx.Done():
+			return nil
+		}
 	}
-	return nil
 }
 
 func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionInstance) *sessionController {
@@ -367,12 +372,16 @@ func (s *sessionController) connectLoop() {
 			"type":     "join",
 			"teamCode": s.cfg.CurrentTeamCode,
 			"nickname": sanitizeNickname(s.cfg.Nickname),
-			"client":   map[string]string{"name": "cliks", "version": version},
+			"client": map[string]any{
+				"name":     "cliks",
+				"version":  version,
+				"features": []string{"compact-v1"},
+			},
 		})
 		s.set(func(state *SessionViewState) { state.ConnectionStatus = "connected" })
 		closed := make(chan struct{})
 		go s.pingLoop(conn, closed)
-		s.readLoop(conn)
+		fatal := s.readLoop(conn)
 		close(closed)
 		s.wsMu.Lock()
 		if s.ws == conn {
@@ -380,6 +389,10 @@ func (s *sessionController) connectLoop() {
 		}
 		s.wsMu.Unlock()
 		_ = conn.Close()
+		if fatal {
+			s.cancel()
+			return
+		}
 		attempt++
 		delay := reconnectDelay(attempt)
 		s.set(func(state *SessionViewState) {
@@ -404,15 +417,16 @@ func (s *sessionController) pingLoop(conn *websocket.Conn, closed <-chan struct{
 	}
 }
 
-func (s *sessionController) readLoop(conn *websocket.Conn) {
+func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
-			return
+			return false
 		}
 		var envelope struct {
 			Type           string                `json:"type"`
 			Message        string                `json:"message,omitempty"`
+			Reason         string                `json:"reason,omitempty"`
 			PeerID         string                `json:"peerId,omitempty"`
 			TeamCode       string                `json:"teamCode,omitempty"`
 			ActiveCount    int                   `json:"activeCount,omitempty"`
@@ -420,6 +434,10 @@ func (s *sessionController) readLoop(conn *websocket.Conn) {
 			BatchStartedAt int64                 `json:"batchStartedAt,omitempty"`
 			Events         []RemoteActivityEvent `json:"events,omitempty"`
 			Peers          []PeerPresence        `json:"peers,omitempty"`
+			CompactPeerID  string                `json:"p,omitempty"`
+			CompactName    string                `json:"n,omitempty"`
+			CompactAt      int64                 `json:"t,omitempty"`
+			CompactEvents  []json.RawMessage     `json:"e,omitempty"`
 			Team           struct {
 				Code string `json:"code"`
 				Name string `json:"name"`
@@ -455,11 +473,86 @@ func (s *sessionController) readLoop(conn *websocket.Conn) {
 				state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.PeerID, envelope.Nickname, time.Now())
 			})
 			s.audio.scheduleBatch(envelope.PeerID, envelope.Events)
+		case "a":
+			events := parseCompactEvents(envelope.CompactEvents)
+			if envelope.CompactPeerID != "" && len(events) > 0 {
+				s.set(func(state *SessionViewState) {
+					state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.CompactPeerID, envelope.CompactName, time.Now())
+				})
+				s.audio.scheduleBatch(envelope.CompactPeerID, events)
+			}
+		case "team_deleted", "team_unavailable":
+			s.handleTeamUnavailable(envelope.TeamCode, envelope.Message)
+			return true
 		case "error":
 			s.set(func(state *SessionViewState) {
 				state.Notice = "Server: " + envelope.Message
 			})
 		}
+	}
+}
+
+func (s *sessionController) handleTeamUnavailable(teamCode string, message string) {
+	teamCode = strings.ToUpper(strings.TrimSpace(teamCode))
+	if teamCode == "" {
+		teamCode = s.cfg.CurrentTeamCode
+	}
+	cfg, err := forgetTeam(teamCode)
+	if err == nil {
+		s.cfg = cfg
+	}
+	_, _ = autostartAction([]string{"disable"})
+	if message == "" {
+		message = "Team code was not found or was deleted."
+	}
+	s.set(func(state *SessionViewState) {
+		state.ConnectionStatus = "stopped: team unavailable"
+		state.Notice = message + " Removed it from this device."
+		state.ActiveCount = 0
+	})
+}
+
+func parseCompactEvents(raw []json.RawMessage) []RemoteActivityEvent {
+	events := make([]RemoteActivityEvent, 0, len(raw))
+	for _, item := range raw {
+		var tuple []any
+		if json.Unmarshal(item, &tuple) != nil || len(tuple) < 2 {
+			continue
+		}
+		kind, _ := tuple[0].(string)
+		offset, ok := numericJSON(tuple[1])
+		if !ok {
+			continue
+		}
+		switch kind {
+		case "k":
+			events = append(events, RemoteActivityEvent{Kind: "keyboard", OffsetMs: offset})
+		case "m":
+			button := "unknown"
+			if len(tuple) > 2 {
+				if compactButton, ok := tuple[2].(string); ok {
+					switch compactButton {
+					case "l":
+						button = "left"
+					case "r":
+						button = "right"
+					}
+				}
+			}
+			events = append(events, RemoteActivityEvent{Kind: "mouse", OffsetMs: offset, Button: button})
+		}
+	}
+	return events
+}
+
+func numericJSON(value any) (int, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed), true
+	case int:
+		return typed, true
+	default:
+		return 0, false
 	}
 }
 

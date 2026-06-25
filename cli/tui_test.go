@@ -53,3 +53,29 @@ func TestPreferencesClickOutsideRowDoesNotChangeSetting(t *testing.T) {
 		t.Fatalf("settingsCursor = %d, want %d", got.settingsCursor, model.settingsCursor)
 	}
 }
+
+func TestKeepRunningToggleWithoutActiveSessionDoesNotStart(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := homeModel{
+		cfg:    cfg,
+		mode:   "home",
+		cursor: 1,
+	}
+
+	updated, cmd := model.activate()
+	got := updated.(homeModel)
+	if cmd != nil {
+		t.Fatalf("keep-running toggle returned command")
+	}
+	if got.action != "" {
+		t.Fatalf("action = %q, want none", got.action)
+	}
+	if !got.cfg.KeepRunning {
+		t.Fatalf("KeepRunning = false, want true")
+	}
+	if saved := loadConfig(); !saved.KeepRunning {
+		t.Fatalf("saved KeepRunning = false, want true")
+	}
+}

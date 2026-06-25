@@ -13,8 +13,11 @@ runcmd:
   - [ bash, -lc, |
       set -euxo pipefail
 
-      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-      apt-get install -y nodejs postgresql postgresql-contrib
+      GO_VERSION=1.24.0
+      curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz
+      rm -rf /usr/local/go
+      tar -C /usr/local -xzf /tmp/go.tgz
+      apt-get install -y postgresql postgresql-contrib
 
       if ! id cliks >/dev/null 2>&1; then
         useradd --system --create-home --shell /usr/sbin/nologin cliks
@@ -33,11 +36,10 @@ runcmd:
       chown -R cliks:cliks /opt/cliks
 
       cd /opt/cliks/server
-      npm install
-      npm run build
+      /usr/local/go/bin/go mod download
+      /usr/local/go/bin/go build -trimpath -ldflags="-s -w" -o dist/cliks-server .
 
       cat >/etc/cliks-api.env <<'EOF'
-      NODE_ENV=production
       PORT=8787
       CLIKS_LOCAL_POSTGRES=true
       CORS_ORIGIN=https://site-kappa-six-64.vercel.app
@@ -65,8 +67,8 @@ runcmd:
       Group=cliks
       WorkingDirectory=/opt/cliks/server
       EnvironmentFile=/etc/cliks-api.env
-      ExecStart=/usr/bin/npm start
-      Restart=always
+      ExecStart=/opt/cliks/server/dist/cliks-server
+      Restart=on-failure
       RestartSec=5
 
       [Install]

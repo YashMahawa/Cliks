@@ -41,7 +41,7 @@ Example:
 }
 ```
 
-The receiving CLI schedules local sound playback using those offsets. That means the server sees only tiny JSON pulses, while the receiver still hears a natural rhythm.
+The receiving CLI schedules local sound playback using those offsets. That means the server sees only tiny pulses, while the receiver still hears a natural rhythm. New CLIs negotiate compact server-to-client activity frames with `compact-v1`; older clients still receive the verbose JSON shape.
 
 ## Team codes and public status
 
@@ -55,7 +55,7 @@ The public `/health` endpoint is intentionally safe for unauthenticated uptime c
 
 It must not return room codes, team names, peer ids, nicknames, or per-room snapshots. Detailed live room state should stay internal unless a future authenticated admin route is added.
 
-Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists. When deletion succeeds, the relay closes any live room for that team and disconnects connected peers with a local error message.
+Team creation and deletion are protected by lightweight in-memory per-IP throttles before bcrypt work runs. Deletion also uses a dummy bcrypt comparison for missing rooms so response timing does not reveal whether a code exists. When deletion succeeds, the relay sends `team_deleted`, closes any live room for that team, and disconnects connected peers. When a client tries to join a missing or deleted code, the relay sends `team_unavailable` and closes the socket; the CLI must remove that team locally and stop retrying it.
 
 Soft-deleted team rows are retained for history, but code uniqueness is scoped to active rows only. Postgres and Supabase both use a partial unique index on `(code) where deleted_at is null`, so deleting a room does not permanently consume its code.
 
@@ -84,7 +84,7 @@ Current defaults:
 Good next optimizations:
 
 - adaptive batch window for large rooms
-- binary WebSocket frames after the JSON prototype
+- binary WebSocket frames if compact JSON is not enough at larger scale
 - Redis presence if the backend scales beyond one Render instance
 - additional themed sound packs once the launch-critical setup/capture path is stable
 
@@ -111,11 +111,11 @@ Fatigue fade attenuates dense local playback after sustained bursts. Density thi
 
 All local run modes share a single-session guard. `cliks start`, `cliks background start`, and boot autostart acquire `session.lock` under the user state directory and update `session.json` with pid, team, mode, connection status, active count, and local counters. A second local start must refuse to connect while that pid is alive. This prevents one device from joining the same team twice and playing the user's own activity back as a teammate. Stale locks are removed when the pid is gone. The Go CLI also scans for older same-executable `cliks start` processes that were launched before the lock existed; those are treated as active local sessions, and the TUI cleans up duplicate copies when a managed session is already active.
 
-`cliks autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM`, sets `CLIKS_RUN_MODE=boot`, and runs `cliks start`.
+`cliks autostart enable` creates login-time background launchers for the current team: a systemd user service on Linux, a LaunchAgent on macOS, or a Startup-folder command on Windows. The launcher sets `CLIKS_AUTOSTART_TEAM`, sets `CLIKS_RUN_MODE=boot`, and runs `cliks start`. Linux uses `Restart=on-failure` and macOS does not set LaunchAgent `KeepAlive`; explicit Stop disables launch-at-login whenever it is enabled before killing the active process.
 
-Running bare `cliks` opens the Bubble Tea control screen. The home view stays intentionally small: greeting, selected team, active local connection state, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. More contains Preferences, Team, Connection, and Diagnostics. TUI actions should run in-place whenever possible, and mouse all-motion hover should move the highlighted row with hit-testing that accounts for the title, panel border, and padding. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
+Running bare `cliks` opens the Bubble Tea control screen. The home view stays intentionally small: greeting, selected team, active local connection state, `Open Live`, one-click `Keep Running`, `More`, and `Quit`. More contains Preferences, Team, Connection, and Diagnostics. TUI actions should run in-place whenever possible, and mouse all-motion hover should move the highlighted row with hit-testing that accounts for the title, panel border, and padding. With no active connection, Keep Running only toggles the persisted preference and must not start a background session. Running `cliks start` before a team is selected prints a short first-run setup checklist with `cliks join`, `cliks start`, `cliks doctor`, `cliks sound-test`, and `cliks capture-test` rather than surfacing an internal missing-team error.
 
-`cliks nickname [NAME]` and the Team > Nickname TUI form configure an explicit display name. The server keeps that name only in live peer presence and relays it with peer activity so small-room dashboards can show names and "X, Y are typing." Larger rooms should show only total people and typing counts. When a connection is already active, turning Keep Running off should schedule it to stop when the control screen closes; use the separate Stop action for immediate disconnect. If that active connection is managed by launch-at-login, the shared stop path disables autostart first so the platform service does not immediately recreate the connection.
+`cliks nickname [NAME]` and the Team > Nickname TUI form configure an explicit display name capped at 10 characters. The server keeps that name only in live peer presence and relays it with peer activity so small-room dashboards can show names and "X, Y are typing." Larger rooms should show only total people and typing counts. When a connection is already active, turning Keep Running off should schedule it to stop when the control screen closes; use the separate Stop action for immediate disconnect. If launch-at-login is enabled, the shared stop path disables autostart first so the platform service does not immediately recreate the connection.
 
 Spatial placement remains client-side. Ring capacity is 4 seats in the first ring and then grows by 2 seats per ring. Optional dynamic placement counts recently received activity per peer and, on the configured interval, locally moves more active peers closer for that listener.
 
@@ -131,8 +131,9 @@ Required local checks before pushing:
 - `bash -n cli/install.sh`
 - `go test ./...` from `cli`
 - cross-build the Go CLI for Linux, macOS, and Windows when capture/background/startup behavior changes
+- `go test ./...` from `server` when relay/store/protocol behavior changes
 
-CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, delete lookup behavior, and live-room closure on delete. `scripts/load-test.mjs` provides controlled relay load tests; keep default settings safe for the live Droplet and use explicit `CLIKS_LOAD_*` env vars for larger ramps.
+CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, compact activity frames, nickname truncation, deleted-code lookup behavior, room caps, and live-room closure on delete. `scripts/load-test.mjs` provides controlled relay load tests; keep default settings safe for the live Droplet and use explicit `CLIKS_LOAD_*` env vars for larger ramps.
 
 ## Free-tier expectation
 
@@ -140,4 +141,4 @@ Vercel should stay mostly idle because it serves a static team-creation page.
 
 Supabase load is tiny because it stores team code records only.
 
-Render is the bottleneck because it keeps WebSockets open and fans out activity batches. A $200 DigitalOcean credit runway would be useful for an always-on backend once demos move beyond a small beta.
+The Go relay keeps the baseline memory footprint low, but live fanout remains the bottleneck because every active sender fans out to room listeners. A $200 DigitalOcean credit runway would be useful for an always-on backend once demos move beyond a small beta.

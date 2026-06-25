@@ -318,7 +318,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.formCursor = 0
 		m.mouseOver = false
 		m.nicknameValue = m.cfg.Nickname
-		m.message = "Set the name teammates see in the live room."
+		m.message = "Set the short name teammates see in the live room. Max 10 characters."
 	case "preferences":
 		m.mode = "preferences"
 		m.settingsCursor = 0
@@ -342,7 +342,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 	case "switch-team":
 		cycleTeam(&m.cfg, 1)
 		_ = saveConfig(m.cfg)
-		m.message = fmt.Sprintf("Selected %s.", valuePlain(m.cfg.CurrentTeamCode, "no team"))
+		m.message = fmt.Sprintf("Selected %s.", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "no team"))
 	case "doctor":
 		m.busy = true
 		m.message = "Checking setup..."
@@ -353,11 +353,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		return m, soundTestCmd()
 	case "background-toggle":
 		if m.activeOK {
-			if m.active.Mode == runModeForeground {
-				m.message = "This live-terminal session already stops with its own terminal. Use Stop to disconnect it now."
-				return m, nil
-			}
 			m.stopActiveOnExit = !m.stopActiveOnExit
+			m.cfg.KeepRunning = !m.stopActiveOnExit
+			_ = saveConfig(m.cfg)
 			if m.stopActiveOnExit {
 				_ = scheduleDeferredStop(m.active.PID)
 				if m.active.Mode == runModeBoot {
@@ -371,9 +369,17 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.busy = true
-		m.message = "Updating keep-running mode..."
-		return m, toggleBackgroundCmd(m.cfg.CurrentTeamCode, m.active, m.activeOK)
+		m.cfg.KeepRunning = !m.cfg.KeepRunning
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		if m.cfg.KeepRunning {
+			m.message = "Keep Running is on. Future live sessions may stay connected after this terminal closes."
+		} else {
+			m.message = "Keep Running is off. Future live sessions stop with their terminal unless started in background."
+		}
+		return m, nil
 	case "stop-connection":
 		m.busy = true
 		m.message = "Stopping this device's connection..."
@@ -413,7 +419,11 @@ func (m homeModel) itemView() string {
 	}
 	if m.mode == "home" {
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(m.cfg.CurrentTeamCode, "not joined")))
+		teamText := teamLabel(m.cfg, m.cfg.CurrentTeamCode)
+		if m.activeOK && m.activeTeamLabel() != "" {
+			teamText = m.activeTeamLabel()
+		}
+		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(teamText, "not joined")))
 		lines = append(lines, "Connection: "+m.connectionSummary())
 		if m.activeOK {
 			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
@@ -443,7 +453,7 @@ func (m homeModel) preferencesView() string {
 	lines = append(lines, styleAccent.Render("Preferences"))
 	lines = append(lines, "")
 	for i, row := range rows {
-		line := fmt.Sprintf("%-18s %s", row.label, row.value(m.cfg))
+		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(m.cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
 			if m.mouseOver {
 				line = styleSelected.Render(" " + line + " ")
@@ -491,7 +501,7 @@ func (m homeModel) items() []homeItem {
 		}
 	case "team":
 		return []homeItem{
-			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set your display name")},
+			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
 			{key: "create", label: "Create", help: "make a new team code"},
 			{key: "delete", label: "Delete", help: "delete the selected team with its password"},
 			{key: "switch-team", label: "Switch", help: "cycle through saved teams"},
@@ -554,18 +564,15 @@ func (m homeModel) startHelp() string {
 
 func (m homeModel) backgroundToggleHelp() string {
 	if m.activeOK {
-		if m.active.Mode == runModeForeground {
-			return "off (live terminal); use Stop to disconnect"
-		}
 		if m.stopActiveOnExit {
 			return "off after close; press Enter to keep running"
 		}
 		return fmt.Sprintf("on (%s); use Stop to disconnect", modeLabel(m.active.Mode))
 	}
-	if m.cfg.CurrentTeamCode == "" {
-		return "select a team first"
+	if m.cfg.KeepRunning {
+		return "on for future sessions; press Enter to turn off"
 	}
-	return "off; press Enter to keep connected after closing the terminal"
+	return "off for future sessions; press Enter to turn on"
 }
 
 func (m homeModel) stopConnectionHelp() string {
@@ -581,10 +588,17 @@ func (m homeModel) connectionSummary() string {
 	}
 	return fmt.Sprintf("%s for %s (%s, pid %d)",
 		connectionStyle(valuePlain(m.active.ConnectionStatus, "starting")),
-		valuePlain(m.active.TeamCode, m.cfg.CurrentTeamCode),
+		valuePlain(m.activeTeamLabel(), m.cfg.CurrentTeamCode),
 		modeLabel(m.active.Mode),
 		m.active.PID,
 	)
+}
+
+func (m homeModel) activeTeamLabel() string {
+	if strings.TrimSpace(m.active.TeamName) != "" {
+		return m.active.TeamName
+	}
+	return teamLabel(m.cfg, m.active.TeamCode)
 }
 
 func (m *homeModel) refreshRuntime() {
@@ -766,30 +780,32 @@ func homeTick() tea.Cmd {
 
 type settingRow struct {
 	label string
+	help  string
 	value func(CliksConfig) string
 	apply func(*CliksConfig, int)
 }
 
 func settingsRows(cfg CliksConfig) []settingRow {
 	return []settingRow{
-		{"Volume", func(c CliksConfig) string { return bar(c.Listening.Volume) }, func(c *CliksConfig, d int) {
+		{"Volume", "overall loudness", func(c CliksConfig) string { return bar(c.Listening.Volume) }, func(c *CliksConfig, d int) {
 			c.Listening.Volume = clamp(c.Listening.Volume+float64(d)*0.05, 0, 1)
 			c.Listening.Muted = false
 		}},
-		{"Density", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
-		{"Muted", func(c CliksConfig) string { return onOff(c.Listening.Muted) }, func(c *CliksConfig, _ int) { c.Listening.Muted = !c.Listening.Muted }},
-		{"Spatial audio", func(c CliksConfig) string { return onOff(c.Listening.Spatial) }, func(c *CliksConfig, _ int) { c.Listening.Spatial = !c.Listening.Spatial }},
-		{"Dynamic circle", func(c CliksConfig) string { return onOff(c.Listening.DynamicPlacement) }, func(c *CliksConfig, _ int) { c.Listening.DynamicPlacement = !c.Listening.DynamicPlacement }},
-		{"Shuffle mins", func(c CliksConfig) string { return fmt.Sprintf("%d min", c.Listening.ShuffleMinutes) }, func(c *CliksConfig, d int) {
+		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
+		{"Muted", "silence local playback", func(c CliksConfig) string { return onOff(c.Listening.Muted) }, func(c *CliksConfig, _ int) { c.Listening.Muted = !c.Listening.Muted }},
+		{"Spatial audio", "pan teammates around your desk", func(c CliksConfig) string { return onOff(c.Listening.Spatial) }, func(c *CliksConfig, _ int) { c.Listening.Spatial = !c.Listening.Spatial }},
+		{"Dynamic circle", "move active teammates closer locally", func(c CliksConfig) string { return onOff(c.Listening.DynamicPlacement) }, func(c *CliksConfig, _ int) { c.Listening.DynamicPlacement = !c.Listening.DynamicPlacement }},
+		{"Shuffle mins", "dynamic circle refresh interval", func(c CliksConfig) string { return fmt.Sprintf("%d min", c.Listening.ShuffleMinutes) }, func(c *CliksConfig, d int) {
 			c.Listening.ShuffleMinutes = clampInt(c.Listening.ShuffleMinutes+d, 1, 60)
 		}},
-		{"Fatigue fade", func(c CliksConfig) string { return onOff(c.Listening.FatigueProtection) }, func(c *CliksConfig, _ int) { c.Listening.FatigueProtection = !c.Listening.FatigueProtection }},
-		{"Hear keyboard", func(c CliksConfig) string { return onOff(c.Listening.Keyboard) }, func(c *CliksConfig, _ int) { c.Listening.Keyboard = !c.Listening.Keyboard }},
-		{"Hear mouse", func(c CliksConfig) string { return onOff(c.Listening.Mouse) }, func(c *CliksConfig, _ int) { c.Listening.Mouse = !c.Listening.Mouse }},
-		{"Self monitor", func(c CliksConfig) string { return onOff(c.Listening.Self) }, func(c *CliksConfig, _ int) { c.Listening.Self = !c.Listening.Self }},
-		{"Share keyboard", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
-		{"Share mouse", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
-		{"Current team", func(c CliksConfig) string { return valueOr(c.CurrentTeamCode, "not set") }, func(c *CliksConfig, d int) { cycleTeam(c, d) }},
+		{"Fatigue fade", "soften long typing bursts", func(c CliksConfig) string { return onOff(c.Listening.FatigueProtection) }, func(c *CliksConfig, _ int) { c.Listening.FatigueProtection = !c.Listening.FatigueProtection }},
+		{"Hear keyboard", "play teammate keyboard events", func(c CliksConfig) string { return onOff(c.Listening.Keyboard) }, func(c *CliksConfig, _ int) { c.Listening.Keyboard = !c.Listening.Keyboard }},
+		{"Hear mouse", "play teammate click events", func(c CliksConfig) string { return onOff(c.Listening.Mouse) }, func(c *CliksConfig, _ int) { c.Listening.Mouse = !c.Listening.Mouse }},
+		{"Self monitor", "hear your own local test events", func(c CliksConfig) string { return onOff(c.Listening.Self) }, func(c *CliksConfig, _ int) { c.Listening.Self = !c.Listening.Self }},
+		{"Share keyboard", "send keyboard activity kind only", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
+		{"Share mouse", "send left/right click activity only", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
+		{"Keep Running", "saved terminal-close preference", func(c CliksConfig) string { return onOff(c.KeepRunning) }, func(c *CliksConfig, _ int) { c.KeepRunning = !c.KeepRunning }},
+		{"Current team", "cycle saved teams", func(c CliksConfig) string { return valueOr(teamLabel(c, c.CurrentTeamCode), "not set") }, func(c *CliksConfig, d int) { cycleTeam(c, d) }},
 	}
 }
 
@@ -1071,16 +1087,11 @@ func deleteTeamCmd(code string, password string) tea.Cmd {
 		if err := deleteTeamViaAPI(cfg, code, password); err != nil {
 			return formDoneMsg{kind: "delete", code: code, err: err}
 		}
-		cfg.Teams = filterTeams(cfg.Teams, code)
-		if cfg.CurrentTeamCode == code {
-			cfg.CurrentTeamCode = ""
-			if len(cfg.Teams) > 0 {
-				cfg.CurrentTeamCode = cfg.Teams[0].Code
-			}
-		}
-		if err := saveConfig(cfg); err != nil {
+		cfg, err := forgetTeam(code)
+		if err != nil {
 			return formDoneMsg{kind: "delete", code: code, err: err}
 		}
+		stopDeletedTeamSession(code)
 		return formDoneMsg{kind: "delete", code: code, cfg: cfg}
 	}
 }
@@ -1297,7 +1308,7 @@ func (m sessionModel) sessionSettingsView() string {
 	lines = append(lines, styleAccent.Render("Live Settings"))
 	lines = append(lines, "")
 	for i, row := range rows {
-		line := fmt.Sprintf("%-18s %s", row.label, row.value(cfg))
+		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
 			line = styleSelected.Render(" " + line + " ")
 		}
@@ -1374,7 +1385,7 @@ func welcomeMessage(cfg CliksConfig) string {
 	if cfg.CurrentTeamCode == "" {
 		return "Desk is warm. Create or join a team to start hearing the room."
 	}
-	return fmt.Sprintf("Desk is warm for %s. Press Enter to start.", cfg.CurrentTeamCode)
+	return fmt.Sprintf("Desk is warm for %s. Press Enter to start.", teamLabel(cfg, cfg.CurrentTeamCode))
 }
 
 func backgroundSummary() string {

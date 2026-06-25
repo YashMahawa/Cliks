@@ -1,12 +1,23 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
 const port = Number(process.env.CLIKS_SMOKE_PORT ?? 18878);
 const apiUrl = `http://127.0.0.1:${port}`;
 const wsUrl = `ws://127.0.0.1:${port}/ws`;
+const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
+const serverBin = process.env.CLIKS_SERVER_BIN ?? firstExisting([
+  join(rootDir, "server", "dist", process.platform === "win32" ? "cliks-server.exe" : "cliks-server"),
+  join(rootDir, "server", "dist", "cliks-server")
+]);
+if (!existsSync(serverBin)) {
+  throw new Error(`Server binary not found at ${serverBin}. Run: npm --workspace @cliks/server run build`);
+}
 
-const server = spawn(process.execPath, ["server/dist/index.js"], {
-  cwd: new URL("..", import.meta.url),
+const server = spawn(serverBin, [], {
+  cwd: rootDir,
   env: { ...process.env, PORT: String(port) },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -30,6 +41,12 @@ try {
   const relay = await websocketRelaySmoke(wsUrl, team.code);
   if (relay.offsets !== "50,200") {
     throw new Error(`Expected quantized offsets 50,200, got ${relay.offsets}`);
+  }
+  if (relay.compactOffsets !== "50,200") {
+    throw new Error(`Expected compact offsets 50,200, got ${relay.compactOffsets}`);
+  }
+  if (relay.nickname !== "AliceLongN") {
+    throw new Error(`Expected 10-char nickname AliceLongN, got ${JSON.stringify(relay.nickname)}`);
   }
   await websocketRoomLimitSmoke(wsUrl, team.code);
 
@@ -88,7 +105,7 @@ async function websocketDeleteSmoke(baseUrl, url, teamCode) {
 
   socket.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
-    if (message.type === "error" && message.message === "This team was deleted.") {
+    if (message.type === "team_deleted" && message.message === "This team was deleted.") {
       deleteMessageSeen = true;
     }
   });
@@ -109,20 +126,27 @@ async function websocketDeleteSmoke(baseUrl, url, teamCode) {
 async function websocketRelaySmoke(url, teamCode) {
   const a = new WebSocket(url);
   const b = new WebSocket(url);
+  const c = new WebSocket(url);
   const batches = [];
+  const compactBatches = [];
   const presences = [];
 
-  await Promise.all([once(a, "open"), once(b, "open")]);
+  await Promise.all([once(a, "open"), once(b, "open"), once(c, "open")]);
   b.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
     if (message.type === "presence") presences.push(message);
     if (message.type === "peer_activity_batch") batches.push(message);
   });
+  c.on("message", (raw) => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === "a") compactBatches.push(message);
+  });
   a.send(JSON.stringify({ type: "join", teamCode, nickname: "a" }));
   b.send(JSON.stringify({ type: "join", teamCode, nickname: "b" }));
+  c.send(JSON.stringify({ type: "join", teamCode, nickname: "c", client: { name: "cliks", version: "test", features: ["compact-v1"] } }));
 
   await sleep(250);
-  a.send(JSON.stringify({ type: "profile", nickname: "Alice" }));
+  a.send(JSON.stringify({ type: "profile", nickname: "AliceLongName" }));
   await sleep(250);
   a.send(
     JSON.stringify({
@@ -139,23 +163,30 @@ async function websocketRelaySmoke(url, teamCode) {
   await sleep(300);
   a.close();
   b.close();
+  c.close();
+  await sleep(150);
 
   if (batches.length !== 1) {
     throw new Error(`Expected one relayed batch, got ${batches.length}`);
   }
-  if (batches[0].nickname !== "Alice") {
-    throw new Error(`Expected relayed activity nickname "Alice", got ${JSON.stringify(batches[0].nickname)}`);
+  if (compactBatches.length !== 1) {
+    throw new Error(`Expected one compact relayed batch, got ${compactBatches.length}`);
+  }
+  if (batches[0].nickname !== "AliceLongN") {
+    throw new Error(`Expected relayed activity nickname "AliceLongN", got ${JSON.stringify(batches[0].nickname)}`);
   }
   const sawNamedPresence = presences.some((message) => {
     const names = new Set((message.peers ?? []).map((peer) => peer.nickname));
-    return names.has("Alice") && names.has("b");
+    return names.has("AliceLongN") && names.has("b");
   });
   if (!sawNamedPresence) {
     throw new Error(`Expected named presence for both peers, got ${JSON.stringify(presences)}`);
   }
 
   return {
-    offsets: batches[0].events.map((event) => event.offsetMs).join(",")
+    offsets: batches[0].events.map((event) => event.offsetMs).join(","),
+    compactOffsets: compactBatches[0].e.map((event) => event[1]).join(","),
+    nickname: batches[0].nickname
   };
 }
 
@@ -227,4 +258,8 @@ function onceWithTimeout(emitter, event, timeoutMs) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function firstExisting(paths) {
+  return paths.find((path) => existsSync(path)) ?? paths[0];
 }

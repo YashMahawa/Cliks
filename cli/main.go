@@ -98,17 +98,22 @@ func cmdJoin(args []string) error {
 			}
 		}
 	}
-	cfg, err := rememberTeam(code, "")
+	cfg := loadConfig()
+	team, err := getTeamViaAPI(cfg, code)
+	if err != nil {
+		return err
+	}
+	cfg, err = rememberTeam(team.Code, team.Name)
 	if err != nil {
 		return err
 	}
 	if nickname != "" {
-		cfg.Nickname = nickname
+		cfg.Nickname = sanitizeNickname(nickname)
 		if err := saveConfig(cfg); err != nil {
 			return err
 		}
 	}
-	fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", strings.ToUpper(code))
+	fmt.Printf("Joined %s (%s). Run \"cliks start\" to begin.\n", team.Code, team.Name)
 	return nil
 }
 
@@ -174,14 +179,11 @@ func cmdDelete(args []string) error {
 	if err := deleteTeamViaAPI(cfg, code, password); err != nil {
 		return err
 	}
-	cfg.Teams = filterTeams(cfg.Teams, code)
-	if cfg.CurrentTeamCode == code {
-		cfg.CurrentTeamCode = ""
-		if len(cfg.Teams) > 0 {
-			cfg.CurrentTeamCode = cfg.Teams[0].Code
-		}
+	cfg, err = forgetTeam(code)
+	if err != nil {
+		return err
 	}
-	_ = saveConfig(cfg)
+	stopDeletedTeamSession(code)
 	fmt.Printf("Deleted %s.\n", code)
 	return nil
 }
@@ -354,6 +356,8 @@ func cmdSet(args []string) error {
 		cfg.Listening.FatigueProtection = boolValue
 	case "spatial.dynamic":
 		cfg.Listening.DynamicPlacement = boolValue
+	case "keep.running":
+		cfg.KeepRunning = boolValue
 	case "volume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -420,13 +424,22 @@ func printTeams(cfg CliksConfig) {
 }
 
 func filterTeams(teams []TeamConfig, code string) []TeamConfig {
+	code = strings.ToUpper(strings.TrimSpace(code))
 	var next []TeamConfig
 	for _, team := range teams {
-		if team.Code != code {
+		if !strings.EqualFold(team.Code, code) {
 			next = append(next, team)
 		}
 	}
 	return next
+}
+
+func stopDeletedTeamSession(code string) {
+	active, ok := activeSession()
+	if !ok || !strings.EqualFold(active.TeamCode, code) {
+		return
+	}
+	_, _ = stopActiveSession()
 }
 
 func readPrompt(reader *bufio.Reader, prompt string) (string, error) {
@@ -491,7 +504,7 @@ Usage:
   %[1]s create           Create a team
   %[1]s delete [CODE]    Delete a team
   %[1]s join CODE        Save and select a team
-  %[1]s nickname [NAME]  Set your display name
+  %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience
   %[1]s settings         Open the control screen
   %[1]s doctor           Check setup and permissions
@@ -499,6 +512,7 @@ Usage:
   %[1]s capture-test     Verify local activity capture
   %[1]s autostart ...    Manage background autoconnect
   %[1]s background ...   Start, stop, or inspect background Cliks
+  %[1]s set keep.running on|off
 
 `, commandName)
 }

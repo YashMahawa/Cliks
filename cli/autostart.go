@@ -80,7 +80,7 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=%s start
-Restart=always
+Restart=on-failure
 RestartSec=10
 Environment=CLIKS_AUTOSTART_TEAM=%s
 Environment=CLIKS_RUN_MODE=%s
@@ -138,7 +138,7 @@ func macAutostart(action, code string) (string, error) {
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <false/>
   <key>StandardOutPath</key>
   <string>%s</string>
   <key>StandardErrorPath</key>

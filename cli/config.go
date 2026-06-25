@@ -41,6 +41,7 @@ type CliksConfig struct {
 	WSURL           string          `json:"wsUrl"`
 	CurrentTeamCode string          `json:"currentTeamCode,omitempty"`
 	Nickname        string          `json:"nickname,omitempty"`
+	KeepRunning     bool            `json:"keepRunning"`
 	Teams           []TeamConfig    `json:"teams"`
 	Sharing         SharingConfig   `json:"sharing"`
 	Listening       ListeningConfig `json:"listening"`
@@ -116,6 +117,9 @@ func rememberTeam(code string, name string) (CliksConfig, error) {
 	if code == "" {
 		return cfg, errors.New("team code cannot be empty")
 	}
+	if name == "" {
+		name = teamNameForCode(cfg, code)
+	}
 	next := []TeamConfig{{Code: code, Name: name, LastJoinedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	for _, team := range cfg.Teams {
 		if strings.EqualFold(team.Code, code) {
@@ -131,6 +135,43 @@ func rememberTeam(code string, name string) (CliksConfig, error) {
 	return cfg, saveConfig(cfg)
 }
 
+func forgetTeam(code string) (CliksConfig, error) {
+	cfg := loadConfig()
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		return cfg, nil
+	}
+	cfg.Teams = filterTeams(cfg.Teams, code)
+	if strings.EqualFold(cfg.CurrentTeamCode, code) {
+		cfg.CurrentTeamCode = ""
+		if len(cfg.Teams) > 0 {
+			cfg.CurrentTeamCode = cfg.Teams[0].Code
+		}
+	}
+	return cfg, saveConfig(cfg)
+}
+
+func teamNameForCode(cfg CliksConfig, code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	for _, team := range cfg.Teams {
+		if strings.EqualFold(team.Code, code) {
+			return team.Name
+		}
+	}
+	return ""
+}
+
+func teamLabel(cfg CliksConfig, code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		return ""
+	}
+	if name := teamNameForCode(cfg, code); name != "" {
+		return name
+	}
+	return code
+}
+
 func normalizeConfig(cfg *CliksConfig) {
 	def := defaultConfig()
 	if cfg.APIURL == "" {
@@ -144,6 +185,10 @@ func normalizeConfig(cfg *CliksConfig) {
 	}
 	if cfg.Teams == nil {
 		cfg.Teams = []TeamConfig{}
+	}
+	cfg.CurrentTeamCode = strings.ToUpper(strings.TrimSpace(cfg.CurrentTeamCode))
+	for index := range cfg.Teams {
+		cfg.Teams[index].Code = strings.ToUpper(strings.TrimSpace(cfg.Teams[index].Code))
 	}
 	cfg.Sharing.Keyboard = cfg.Sharing.Keyboard || (!cfg.Sharing.Keyboard && !cfg.Sharing.Mouse && cfg.BatchWindowMs == def.BatchWindowMs)
 	if !cfg.Sharing.Keyboard && !cfg.Sharing.Mouse {
@@ -185,11 +230,11 @@ func normalizeConfig(cfg *CliksConfig) {
 
 func sanitizeNickname(value string) string {
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	if len([]rune(value)) <= 32 {
+	if len([]rune(value)) <= 10 {
 		return value
 	}
 	runes := []rune(value)
-	return string(runes[:32])
+	return string(runes[:10])
 }
 
 func toWSURL(apiURL string) string {

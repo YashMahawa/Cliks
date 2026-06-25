@@ -36,6 +36,21 @@ func createTeamViaAPI(cfg CliksConfig, name string, deletePassword string) (apiT
 	return out.Team, nil
 }
 
+func getTeamViaAPI(cfg CliksConfig, code string) (apiTeam, error) {
+	var out struct {
+		Team  apiTeam `json:"team"`
+		Error string  `json:"error"`
+	}
+	err := apiJSON("GET", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+strings.ToUpper(code), nil, &out)
+	if err != nil {
+		return apiTeam{}, err
+	}
+	if out.Error != "" {
+		return apiTeam{}, errors.New(out.Error)
+	}
+	return out.Team, nil
+}
+
 func deleteTeamViaAPI(cfg CliksConfig, code string, deletePassword string) error {
 	var out struct {
 		Error string `json:"error"`
