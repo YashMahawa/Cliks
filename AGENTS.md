@@ -111,6 +111,7 @@ Current modes:
 - `typ sound-test`: plays sample sounds without joining a room.
 - `typ capture-test`: runs local capture for a short window and reports keyboard/mouse event counts plus fix commands when nothing is captured.
 - `typ doctor`: explains privacy, checks Node/audio/input-device readiness, and prints detected fix commands.
+- `typ settings` / `typ ui`: opens the blessed-based interactive settings TUI. It supports keyboard and mouse interaction for volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, nickname, selected team, backend URLs, and autostart. It falls back to printing JSON config in non-interactive terminals.
 - `typ preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
 - `typ autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder.
 - `typ fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
@@ -128,7 +129,7 @@ Important platform reality:
 - The `typ start` status screen shows local captured and sent event counters. For one-way reports, use them to split capture/config failures from connection/send failures.
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `typ start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
-- `typ start` has interactive controls when stdin is a TTY: Up/Down volume, `[`/`]` density, `m` mute, `s` spatial toggle, and `f` fatigue fade toggle. These settings are persisted.
+- `typ start` uses a blessed-based live dashboard when stdin/stdout are TTYs. It shows room, capture, connection, local counters, hints, and sound controls with keyboard and mouse support. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. These settings are persisted. Non-TTY runs fall back to a plain text status renderer.
 - Fatigue protection fades dense audio bursts after sustained activity so long typing does not become harsh. Density controls randomly thin non-essential playback locally; it never changes what is sent to the relay.
 
 ## Commands
@@ -148,6 +149,7 @@ typ capture-test
 typ fix-terminal
 typ join CLIK-LOCAL
 typ start --terminal --self
+typ settings
 typ set hear.self off
 typ preset deep
 typ autostart status

@@ -117,6 +117,7 @@ Useful commands:
 ```bash
 typ join CLIK-XXXXXX
 typ start
+typ settings
 typ preset deep
 typ teams
 typ switch CLIK-XXXXXX
@@ -128,7 +129,9 @@ typ fix-terminal
 typ doctor
 ```
 
-While `typ start` is open, use `Up/Down` to adjust volume, `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Changes are saved automatically.
+`typ settings` opens an interactive terminal UI for tuning Cliks with keyboard or mouse. It covers volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, nickname, selected team, backend URLs, and autostart. In non-interactive terminals it prints the current JSON config instead of trapping the shell.
+
+While `typ start` is open, Cliks shows a live terminal dashboard with room, capture, connection, and sound controls. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
 
 Listening presets:
 
@@ -258,7 +261,7 @@ docker compose up
 
 ## Current Status
 
-This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, CLI config, event batching, reconnect loop, interactive controls, autostart, spatial-capable CLI playback, and sample-based sounds are working.
+This is an early prototype. The website, longer team codes, WebSocket relay, team deletion, CLI config, event batching, reconnect loop, interactive terminal dashboard/settings UI, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 

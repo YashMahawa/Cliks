@@ -6,6 +6,7 @@ import { runCaptureTest } from "./captureTest.js";
 import { runDoctor } from "./doctor.js";
 import { startSession } from "./session.js";
 import { repairTerminal, restoreTrackedTerminalStates } from "./terminal.js";
+import { runSettingsTui } from "./tui.js";
 
 const program = new Command();
 
@@ -128,6 +129,14 @@ program
   .action(async () => {
     const config = await loadConfig();
     console.log(JSON.stringify(config, null, 2));
+  });
+
+program
+  .command("settings")
+  .alias("ui")
+  .description("open the interactive Cliks settings TUI")
+  .action(async () => {
+    await runSettingsTui(await loadConfig());
   });
 
 program

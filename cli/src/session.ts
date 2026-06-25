@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { ActivityBatcher, ActivityCapture, type CaptureMode } from "./activity.js";
 import { AudioEngine } from "./audio.js";
 import { saveConfig, type CliksConfig } from "./config.js";
-import { captureTerminalState, restoreTerminalState, trackTerminalState } from "./terminal.js";
+import { StartDashboard } from "./tui.js";
 
 const quips = [
   "Remote office volume: cozy focus.",
@@ -46,9 +46,10 @@ export async function startSession(
   let reconnectAttempt = 0;
   let ws: WebSocket | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
-  let controlCleanup: (() => void) | undefined;
+  let dashboard: StartDashboard | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
   let listeningSaveInFlight: Promise<void> | undefined;
+  let stopFromSignal: () => void = () => undefined;
 
   const cleanup = () => {
     if (cleanedUp) return;
@@ -62,24 +63,26 @@ export async function startSession(
       saveTimer = undefined;
       void persistListening();
     }
-    controlCleanup?.();
+    dashboard?.close();
     batcher.flush();
     capture.stop();
     ws?.close();
   };
 
   const render = () => {
-    renderStatus(
+    const state = {
       teamName,
       activeCount,
-      listening.self,
+      hearingSelf: listening.self,
       listening,
       captureMode,
       connectionStatus,
       localCapturedEvents,
       localSentEvents,
       permissionHint
-    );
+    };
+    if (dashboard) dashboard.update(state);
+    else renderStatus(state);
   };
 
   const persistListening = () => {
@@ -261,23 +264,28 @@ export async function startSession(
     }
   });
 
+  if (process.stdout.isTTY && process.stdin.isTTY) {
+    dashboard = new StartDashboard({
+      adjustVolume,
+      adjustDensity,
+      toggle,
+      quit: () => stopFromSignal()
+    });
+  }
+
   const captureState = await capture.start({ ...config.sharing, mode: options.captureMode ?? "auto" });
   captureMode = captureState.mode;
   permissionHint = captureState.permissionHint;
-  controlCleanup = setupInteractiveControls({
-    adjustVolume,
-    adjustDensity,
-    toggle
-  });
   render();
   connect();
 
   quipTimer = setInterval(() => {
-    process.stdout.write(`\n${quips[Math.floor(Math.random() * quips.length)]}\n`);
+    if (dashboard) dashboard.addLog(quips[Math.floor(Math.random() * quips.length)] ?? "");
+    else process.stdout.write(`\n${quips[Math.floor(Math.random() * quips.length)]}\n`);
     render();
   }, 18_000);
 
-  const stopFromSignal = () => {
+  stopFromSignal = () => {
     cleanup();
     ws?.close();
     const exitSoon = () => setTimeout(() => process.exit(0), 100).unref();
@@ -294,87 +302,45 @@ export async function startSession(
   process.once("exit", cleanup);
 }
 
-function renderStatus(
-  teamName: string,
-  activeCount: number,
-  hearingSelf: boolean | undefined,
+function renderStatus(state: {
+  teamName: string;
+  activeCount: number;
+  hearingSelf: boolean | undefined;
   listening: {
     volume: number;
     muted?: boolean;
     spatial?: boolean;
     fatigueProtection?: boolean;
     density?: number;
-  },
-  captureMode: string,
-  connectionStatus: string,
-  localCapturedEvents: number,
-  localSentEvents: number,
-  permissionHint?: string
-) {
-  process.stdout.write("\x1Bc");
+  };
+  captureMode: string;
+  connectionStatus: string;
+  localCapturedEvents: number;
+  localSentEvents: number;
+  permissionHint?: string;
+}) {
+  process.stdout.write("\x1b[H\x1b[J");
   console.log("Cliks");
   console.log("");
-  console.log(`Team: ${teamName}`);
-  console.log(`Active now: ${activeCount}`);
+  console.log(`Team: ${state.teamName}`);
+  console.log(`Active now: ${state.activeCount}`);
   console.log("");
   console.log("Sharing coarse activity pulses in 500ms batches.");
   console.log("Privacy: only keyboard/mouse event type and coarse timing are sent. Never key values.");
-  console.log(`Self monitor: ${hearingSelf ? "on for local testing" : "off"}`);
-  console.log(`Listen: ${listening.muted ? "muted" : `${Math.round(listening.volume * 100)}%`} | density ${Math.round((listening.density ?? 1) * 100)}% | spatial ${listening.spatial === false ? "off" : "on"} | fade ${listening.fatigueProtection === false ? "off" : "on"}`);
-  console.log(`Connection: ${connectionStatus}`);
-  console.log(`Capture: ${captureMode}`);
-  if (captureMode === "terminal") {
+  console.log(`Self monitor: ${state.hearingSelf ? "on for local testing" : "off"}`);
+  console.log(`Listen: ${state.listening.muted ? "muted" : `${Math.round(state.listening.volume * 100)}%`} | density ${Math.round((state.listening.density ?? 1) * 100)}% | spatial ${state.listening.spatial === false ? "off" : "on"} | fade ${state.listening.fatigueProtection === false ? "off" : "on"}`);
+  console.log(`Connection: ${state.connectionStatus}`);
+  console.log(`Capture: ${state.captureMode}`);
+  if (state.captureMode === "terminal") {
     console.log("Terminal mode: affects this terminal only. If input gets weird, run: typ fix-terminal");
   }
-  console.log(`Local captured events: ${localCapturedEvents}`);
-  console.log(`Local sent events: ${localSentEvents}`);
-  if (permissionHint) console.log(`Permission: ${permissionHint}`);
-  if (captureMode !== "off" && localCapturedEvents === 0) {
+  console.log(`Local captured events: ${state.localCapturedEvents}`);
+  console.log(`Local sent events: ${state.localSentEvents}`);
+  if (state.permissionHint) console.log(`Permission: ${state.permissionHint}`);
+  if (state.captureMode !== "off" && state.localCapturedEvents === 0) {
     console.log("If teammates cannot hear you, run: typ capture-test");
   }
   console.log("Controls: Up/Down volume, [/ ] density, m mute, s spatial, f fade, Ctrl+C stop.");
-}
-
-function setupInteractiveControls(input: {
-  adjustVolume(delta: number): void;
-  adjustDensity(delta: number): void;
-  toggle(key: "muted" | "spatial" | "fatigueProtection"): void;
-}) {
-  if (!process.stdin.isTTY) return undefined;
-
-  const terminalState = captureTerminalState();
-  const untrack = trackTerminalState(terminalState);
-
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    untrack();
-    return undefined;
-  }
-
-  const onData = (chunk: Buffer) => {
-    const text = chunk.toString("utf8");
-    if (text === "\u0003") {
-      process.emit("SIGINT");
-      return;
-    }
-    if (text === "\x1b[A") input.adjustVolume(0.05);
-    else if (text === "\x1b[B") input.adjustVolume(-0.05);
-    else if (text === "]" || text === "}") input.adjustDensity(0.1);
-    else if (text === "[" || text === "{") input.adjustDensity(-0.1);
-    else if (text === "m" || text === "M") input.toggle("muted");
-    else if (text === "s" || text === "S") input.toggle("spatial");
-    else if (text === "f" || text === "F") input.toggle("fatigueProtection");
-  };
-
-  process.stdin.on("data", onData);
-
-  return () => {
-    process.stdin.off("data", onData);
-    restoreTerminalState(terminalState);
-    untrack();
-  };
 }
 
 function clamp(value: number, min: number, max: number) {
