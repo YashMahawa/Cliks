@@ -274,10 +274,12 @@ func cycleTeam(cfg *CliksConfig, delta int) {
 type sessionUpdateMsg SessionViewState
 
 type sessionModel struct {
-	controller *sessionController
-	state      SessionViewState
-	width      int
-	height     int
+	controller     *sessionController
+	state          SessionViewState
+	mode           string
+	settingsCursor int
+	width          int
+	height         int
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
@@ -297,6 +299,19 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = SessionViewState(msg)
 		return m, waitForSessionUpdate(m.controller)
 	case tea.MouseMsg:
+		if m.mode == "settings" {
+			if msg.Type == tea.MouseWheelUp {
+				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(settingsRows(m.controller.cfg))-1)
+			}
+			if msg.Type == tea.MouseWheelDown {
+				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(settingsRows(m.controller.cfg))-1)
+			}
+			if msg.Type == tea.MouseLeft && msg.Y >= 5 {
+				m.settingsCursor = clampInt(msg.Y-5, 0, len(settingsRows(m.controller.cfg))-1)
+				m.applyLiveSetting(1)
+			}
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			m.controller.adjustVolume(0.05)
@@ -326,6 +341,21 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyMsg:
+		if m.mode == "settings" {
+			switch msg.String() {
+			case "esc", "tab", "q", "S":
+				m.mode = ""
+			case "up", "k":
+				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(settingsRows(m.controller.cfg))-1)
+			case "down", "j":
+				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(settingsRows(m.controller.cfg))-1)
+			case "left", "h":
+				m.applyLiveSetting(-1)
+			case "right", "l", "enter", " ":
+				m.applyLiveSetting(1)
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.controller.stop()
@@ -344,8 +374,10 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.controller.toggle("spatial")
 		case "f":
 			m.controller.toggle("fade")
+		case "tab", "S":
+			m.mode = "settings"
 		}
-		if m.state.CaptureMode == "terminal" && m.state.Listening.Keyboard && msg.String() != "ctrl+c" && msg.String() != "q" {
+		if m.state.CaptureMode == "terminal" && m.state.Listening.Keyboard && isTerminalCaptureKey(msg.String()) {
 			m.controller.recordLocalActivity(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
 		}
 	}
@@ -353,6 +385,9 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m sessionModel) View() string {
+	if m.mode == "settings" {
+		return m.sessionSettingsView()
+	}
 	state := m.state
 	var peers []string
 	for _, peer := range state.Peers {
@@ -389,7 +424,7 @@ func (m sessionModel) View() string {
 		"Fade    " + onOff(state.Listening.FatigueProtection),
 		"",
 		"Keys: ↑/↓ volume  ←/→ density",
-		"m mute  s spatial  f fade  q quit",
+		"m mute  s spatial  f fade  Tab settings  q quit",
 		"Mouse: wheel volume, click controls",
 	}
 	width := panelWidth(m.width)
@@ -401,6 +436,43 @@ func (m sessionModel) View() string {
 		styleTitle.Render("Cliks Live"),
 		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
 		controls,
+	)
+}
+
+func (m *sessionModel) applyLiveSetting(delta int) {
+	rows := settingsRows(m.controller.cfg)
+	if len(rows) == 0 {
+		return
+	}
+	row := rows[m.settingsCursor]
+	row.apply(&m.controller.cfg, delta)
+	_ = saveConfig(m.controller.cfg)
+	m.controller.set(func(state *SessionViewState) {
+		state.Listening = m.controller.cfg.Listening
+		state.HearingSelf = m.controller.cfg.Listening.Self
+	})
+	m.controller.audio.updateListening(m.controller.cfg.Listening)
+	m.state = m.controller.viewState()
+}
+
+func (m sessionModel) sessionSettingsView() string {
+	cfg := m.controller.cfg
+	rows := settingsRows(cfg)
+	var lines []string
+	lines = append(lines, styleAccent.Render("Live Settings"))
+	lines = append(lines, "")
+	for i, row := range rows {
+		line := fmt.Sprintf("%-18s %s", row.label, row.value(cfg))
+		if i == m.settingsCursor {
+			line = styleSelected.Render(" " + line + " ")
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "")
+	lines = append(lines, styleDim.Render("Left/right adjusts. Enter toggles. Tab/Esc returns to the live room. q also returns here."))
+	return lipgloss.JoinVertical(lipgloss.Left,
+		styleTitle.Render("Cliks Live"),
+		stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n")),
 	)
 }
 
@@ -455,6 +527,15 @@ func connectionStyle(value string) string {
 		return styleWarn.Render(value)
 	}
 	return styleAccent.Render(value)
+}
+
+func isTerminalCaptureKey(key string) bool {
+	switch key {
+	case "ctrl+c", "q", "tab", "S", "up", "down", "left", "right", "+", "-", "[", "]", "m", "s", "f":
+		return false
+	default:
+		return true
+	}
 }
 
 func shortPeer(peerID string) string {

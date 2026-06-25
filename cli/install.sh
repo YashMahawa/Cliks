@@ -18,9 +18,60 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
+install_go() {
+  echo "Go is not installed. Cliks will try to install it now."
+  case "$(uname -s)" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        brew install go
+      else
+        echo "Homebrew was not found. Install Go from https://go.dev/dl/ or install Homebrew, then rerun this script."
+        exit 1
+      fi
+      ;;
+    Linux)
+      if command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm go
+      elif command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update
+        sudo apt-get install -y golang-go
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y golang
+      elif command -v zypper >/dev/null 2>&1; then
+        sudo zypper install -y go
+      elif command -v apk >/dev/null 2>&1; then
+        sudo apk add go
+      else
+        echo "Could not find a supported package manager to install Go automatically."
+        echo "Install Go from https://go.dev/dl/, then rerun this script."
+        exit 1
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v winget.exe >/dev/null 2>&1; then
+        winget.exe install --id GoLang.Go -e --accept-package-agreements --accept-source-agreements
+      elif command -v choco.exe >/dev/null 2>&1; then
+        choco.exe install golang -y
+      else
+        echo "Could not find winget or Chocolatey to install Go automatically."
+        echo "Install Go from https://go.dev/dl/, reopen this shell, then rerun this script."
+        exit 1
+      fi
+      ;;
+    *)
+      echo "Install Go from https://go.dev/dl/, then rerun this script."
+      exit 1
+      ;;
+  esac
+}
+
 if ! command -v go >/dev/null 2>&1; then
-  echo "Cliks needs Go to build the CLI from source."
-  echo "Install Go, then rerun this script."
+  install_go
+fi
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "Go still was not found on PATH after installation."
+  echo "Open a new terminal or add Go to PATH, then rerun this script."
   exit 1
 fi
 

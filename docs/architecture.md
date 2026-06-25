@@ -99,6 +99,7 @@ The Go CLI uses Bubble Tea for the live dashboard and settings UI. Interactive c
 - `m`: mute
 - `s`: spatial on/off
 - `f`: fatigue fade on/off
+- `Tab` or `Shift+S`: open live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room
 
 Fatigue fade attenuates dense local playback after sustained bursts. Density thins local playback only; it does not change capture or relay privacy behavior.
 

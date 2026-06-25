@@ -131,7 +131,7 @@ cliks doctor
 
 Bare `cliks` opens a Bubble Tea interface for starting the room, tuning settings, running doctor, and testing sound. `cliks settings` opens the settings view directly for keyboard or mouse control over volume, density, mute, spatial audio, fatigue fade, self-monitoring, sharing toggles, and selected team.
 
-While `cliks start` is open, Cliks shows a live terminal dashboard with room, capture, connection, and sound controls. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
+While `cliks start` is open, Cliks shows a live terminal dashboard with room, capture, connection, and sound controls. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open live settings without disconnecting, then `Tab`/`Esc`/`q` to return. You can also click the on-screen controls in terminals with mouse reporting. Changes are saved automatically.
 
 Listening presets:
 
@@ -181,7 +181,7 @@ Install the CLI with:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source, so Go is needed for source installs. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed.
+The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed.
 
 ## Self-Hosting
 
