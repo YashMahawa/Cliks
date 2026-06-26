@@ -113,7 +113,7 @@ func cmdJoin(args []string) error {
 			return err
 		}
 	}
-	fmt.Printf("Joined %s (%s). Run \"cliks start\" to begin.\n", team.Code, team.Name)
+	fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
 	return nil
 }
 
@@ -147,7 +147,8 @@ func cmdCreate(args []string) error {
 		return err
 	}
 	_ = saveConfig(cfg)
-	fmt.Printf("Created %s (%s).\n", team.Code, team.Name)
+	fmt.Printf("Created %s.\n", formatTeamLabel(team.Name, team.Code))
+	fmt.Println(clipboardStatus(team.Code))
 	fmt.Printf("Start now: cliks start\n")
 	return nil
 }

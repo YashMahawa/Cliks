@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -26,4 +27,12 @@ func processLooksAlive(pid int) bool {
 	}
 	_ = syscall.CloseHandle(handle)
 	return true
+}
+
+func terminateProcess(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Kill()
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -166,10 +167,19 @@ func teamLabel(cfg CliksConfig, code string) string {
 	if code == "" {
 		return ""
 	}
-	if name := teamNameForCode(cfg, code); name != "" {
+	return formatTeamLabel(teamNameForCode(cfg, code), code)
+}
+
+func formatTeamLabel(name string, code string) string {
+	name = strings.TrimSpace(name)
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
 		return name
 	}
-	return code
+	if name == "" || strings.EqualFold(name, code) {
+		return code
+	}
+	return fmt.Sprintf("%s (%s)", name, code)
 }
 
 func normalizeConfig(cfg *CliksConfig) {

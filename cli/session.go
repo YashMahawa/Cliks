@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,13 @@ type StartOptions struct {
 	CaptureMode string
 	SelfMonitor bool
 }
+
+type sessionExitAction string
+
+const (
+	sessionExitStop sessionExitAction = "stop"
+	sessionExitBack sessionExitAction = "back"
+)
 
 type SessionViewState struct {
 	TeamName            string
@@ -61,30 +69,86 @@ type sessionController struct {
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
-	instance, err := acquireSessionInstance(cfg.CurrentTeamCode, runModeFromEnv())
+	exit, err := runSession(cfg, opts)
 	if err != nil {
 		return err
+	}
+	if exit == sessionExitBack && isInteractiveTerminal() {
+		return runHomeTUI(loadConfig())
+	}
+	return nil
+}
+
+func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
+	instance, err := acquireSessionInstance(cfg.CurrentTeamCode, runModeFromEnv())
+	if err != nil {
+		return sessionExitStop, err
 	}
 	controller := newSessionController(cfg, opts, instance)
 	if err := controller.start(); err != nil {
 		instance.release()
-		return err
+		return sessionExitStop, err
+	}
+	if term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
+		stopSignals := installSessionSignalHandler(controller)
+		defer stopSignals()
+		program := tea.NewProgram(newSessionModel(controller), tea.WithAltScreen(), tea.WithMouseAllMotion())
+		finalModel, err := program.Run()
+		if err != nil {
+			controller.stop()
+			return sessionExitStop, err
+		}
+		result, _ := finalModel.(sessionModel)
+		if result.exit == "" {
+			result.exit = sessionExitStop
+		}
+		keepRunning := result.exit != sessionExitStop && controller.cfg.KeepRunning && runModeFromEnv() == runModeForeground
+		if message, err := finishSessionForExit(controller, keepRunning); err == nil && message != "" {
+			fmt.Fprintln(os.Stderr, message)
+		}
+		return result.exit, nil
 	}
 	defer controller.stop()
-	if term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
-		program := tea.NewProgram(newSessionModel(controller), tea.WithAltScreen(), tea.WithMouseAllMotion())
-		_, err := program.Run()
-		return err
-	}
 	fmt.Println("Cliks started. Press Ctrl+C to stop.")
 	for {
 		select {
 		case state := <-controller.updates:
 			fmt.Printf("%s | %s | captured=%d sent=%d\n", state.TeamName, state.ConnectionStatus, state.LocalCapturedEvents, state.LocalSentEvents)
 		case <-controller.ctx.Done():
-			return nil
+			return sessionExitStop, nil
 		}
 	}
+}
+
+func installSessionSignalHandler(controller *sessionController) func() {
+	exitSignals := tuiExitSignals()
+	if len(exitSignals) == 0 {
+		return func() {}
+	}
+	signals := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(signals, exitSignals...)
+	go func() {
+		select {
+		case <-signals:
+			_, _ = finishSessionForExit(controller, controller.cfg.KeepRunning && runModeFromEnv() == runModeForeground)
+			os.Exit(0)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
+}
+
+func finishSessionForExit(controller *sessionController, keepRunning bool) (string, error) {
+	code := controller.cfg.CurrentTeamCode
+	controller.stop()
+	if !keepRunning {
+		return "", nil
+	}
+	return startBackgroundForTeam(code)
 }
 
 func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionInstance) *sessionController {
@@ -450,14 +514,19 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 		case "welcome":
 			s.ownPeerID = envelope.PeerID
 			teamName := envelope.Team.Name
+			teamCode := strings.ToUpper(strings.TrimSpace(envelope.Team.Code))
+			if teamCode == "" {
+				teamCode = s.cfg.CurrentTeamCode
+			}
 			if teamName == "" {
-				teamName = envelope.Team.Code
+				teamName = teamCode
 			}
 			if teamName == "" {
 				teamName = s.cfg.CurrentTeamCode
 			}
 			s.set(func(state *SessionViewState) {
 				state.TeamName = teamName
+				state.TeamCode = teamCode
 				state.OwnPeerID = envelope.PeerID
 				state.ActiveCount = envelope.ActiveCount
 			})

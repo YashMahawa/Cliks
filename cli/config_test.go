@@ -31,3 +31,11 @@ func TestSanitizeNicknameCapsAtTenRunes(t *testing.T) {
 		t.Fatalf("nickname = %q, want Alice Long", got)
 	}
 }
+
+func TestTeamLabelIncludesNameAndCode(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Teams = []TeamConfig{{Code: "CLIK-ABC123", Name: "Design"}}
+	if got := teamLabel(cfg, "clik-abc123"); got != "Design (CLIK-ABC123)" {
+		t.Fatalf("teamLabel = %q, want name and code", got)
+	}
+}

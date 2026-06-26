@@ -54,6 +54,7 @@ type homeModel struct {
 	formCursor       int
 	createName       string
 	createPassword   string
+	joinCode         string
 	deleteCode       string
 	deletePassword   string
 	nicknameValue    string
@@ -176,7 +177,13 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = "home"
 		m.mouseOver = false
 		if msg.kind == "create" {
-			m.message = fmt.Sprintf("Created %s. Press Enter on Start when ready.", msg.code)
+			m.message = fmt.Sprintf("Created %s. %s", teamLabel(msg.cfg, msg.code), msg.message)
+		} else if msg.kind == "join" {
+			m.message = fmt.Sprintf("Joined %s. Opening live...", teamLabel(msg.cfg, msg.code))
+			if !m.activeOK {
+				m.action = actionStart
+				return m, tea.Quit
+			}
 		} else {
 			m.message = fmt.Sprintf("Deleted %s.", msg.code)
 		}
@@ -185,7 +192,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.MouseMsg:
-		if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
+		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 			return m, nil
 		}
 		if msg.Type == tea.MouseWheelUp {
@@ -212,7 +219,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case tea.KeyMsg:
-		if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
+		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 			return m.updateForm(msg)
 		}
 		switch msg.String() {
@@ -255,7 +262,7 @@ func (m homeModel) View() string {
 	var body string
 	if m.mode == "preferences" {
 		body = m.preferencesView()
-	} else if m.mode == "create" || m.mode == "delete" || m.mode == "nickname" {
+	} else if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 		body = m.formView()
 	} else {
 		body = m.itemView()
@@ -306,6 +313,12 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.createName = ""
 		m.createPassword = ""
 		m.message = "Name the room and set a delete password."
+	case "join":
+		m.mode = "join"
+		m.formCursor = 0
+		m.mouseOver = false
+		m.joinCode = ""
+		m.message = "Paste or type a team code. Join opens live automatically."
 	case "delete":
 		m.mode = "delete"
 		m.formCursor = 0
@@ -476,10 +489,11 @@ type homeItem struct {
 }
 
 type formDoneMsg struct {
-	kind string
-	code string
-	cfg  CliksConfig
-	err  error
+	kind    string
+	code    string
+	message string
+	cfg     CliksConfig
+	err     error
 }
 
 type commandDoneMsg struct {
@@ -502,6 +516,7 @@ func (m homeModel) items() []homeItem {
 	case "team":
 		return []homeItem{
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
+			{key: "join", label: "Join", help: "save a team code and open live"},
 			{key: "create", label: "Create", help: "make a new team code"},
 			{key: "delete", label: "Delete", help: "delete the selected team with its password"},
 			{key: "switch-team", label: "Switch", help: "cycle through saved teams"},
@@ -542,7 +557,7 @@ func (m homeModel) viewHeader() (string, string) {
 	case "menu":
 		return "More", "Everything here stays in this control screen."
 	case "team":
-		return "Team", fmt.Sprintf("Selected: %s", valuePlain(m.cfg.CurrentTeamCode, "not joined"))
+		return "Team", fmt.Sprintf("Selected: %s", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "not joined"))
 	case "connection":
 		return "Connection", "Cliks allows one local connection per device."
 	case "diagnostics":
@@ -595,10 +610,7 @@ func (m homeModel) connectionSummary() string {
 }
 
 func (m homeModel) activeTeamLabel() string {
-	if strings.TrimSpace(m.active.TeamName) != "" {
-		return m.active.TeamName
-	}
-	return teamLabel(m.cfg, m.active.TeamCode)
+	return formatTeamLabel(valuePlain(m.active.TeamName, teamNameForCode(m.cfg, m.active.TeamCode)), m.active.TeamCode)
 }
 
 func (m *homeModel) refreshRuntime() {
@@ -862,6 +874,17 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Nickname set to %s.", valuePlain(name, "anonymous"))
 		return m, nil
 	}
+	if m.mode == "join" {
+		code := strings.ToUpper(strings.TrimSpace(m.joinCode))
+		if code == "" {
+			m.message = "Team code is required."
+			m.formCursor = 0
+			return m, nil
+		}
+		m.busy = true
+		m.message = "Joining team..."
+		return m, joinTeamCmd(code)
+	}
 	if m.mode == "create" {
 		name := strings.TrimSpace(m.createName)
 		if name == "" {
@@ -895,7 +918,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
-	if m.mode == "nickname" {
+	if m.mode == "nickname" || m.mode == "join" {
 		return 1
 	}
 	return 2
@@ -908,6 +931,8 @@ func (m homeModel) formValue() string {
 			return m.createName
 		}
 		return m.createPassword
+	case "join":
+		return m.joinCode
 	case "delete":
 		if m.formCursor == 0 {
 			return m.deleteCode
@@ -928,6 +953,8 @@ func (m *homeModel) setFormValue(value string) {
 		} else {
 			m.createPassword = value
 		}
+	case "join":
+		m.joinCode = strings.ToUpper(value)
 	case "delete":
 		if m.formCursor == 0 {
 			m.deleteCode = strings.ToUpper(value)
@@ -955,6 +982,11 @@ func (m homeModel) formView() string {
 		rows = []string{
 			formLine("Team name", valueOr(m.createName, "Cliks Room"), m.formCursor == 0),
 			formLine("Delete password", maskSecret(m.createPassword), m.formCursor == 1),
+		}
+	} else if m.mode == "join" {
+		title = "Join Team"
+		rows = []string{
+			formLine("Team code", valueOr(m.joinCode, "CLIK-XXXXXX"), true),
 		}
 	} else if m.mode == "delete" {
 		title = "Delete Team"
@@ -1006,7 +1038,22 @@ func createTeamCmd(name string, password string) tea.Cmd {
 		if err != nil {
 			return formDoneMsg{kind: "create", err: err}
 		}
-		return formDoneMsg{kind: "create", code: team.Code, cfg: next}
+		return formDoneMsg{kind: "create", code: team.Code, message: clipboardStatus(team.Code), cfg: next}
+	}
+}
+
+func joinTeamCmd(code string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := loadConfig()
+		team, err := getTeamViaAPI(cfg, code)
+		if err != nil {
+			return formDoneMsg{kind: "join", code: code, err: err}
+		}
+		next, err := rememberTeam(team.Code, team.Name)
+		if err != nil {
+			return formDoneMsg{kind: "join", code: team.Code, err: err}
+		}
+		return formDoneMsg{kind: "join", code: team.Code, cfg: next}
 	}
 }
 
@@ -1119,13 +1166,18 @@ type sessionModel struct {
 	state          SessionViewState
 	mode           string
 	settingsCursor int
+	settingsHover  bool
+	buttonHover    int
+	codeHover      bool
+	message        string
+	exit           sessionExitAction
 	width          int
 	height         int
 	now            time.Time
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
-	return sessionModel{controller: controller, state: controller.viewState(), now: time.Now()}
+	return sessionModel{controller: controller, state: controller.viewState(), buttonHover: -1, now: time.Now()}
 }
 
 func (m sessionModel) Init() tea.Cmd {
@@ -1149,51 +1201,54 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			rows := settingsRows(m.controller.cfg)
 			if msg.Type == tea.MouseWheelUp {
 				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(rows)-1)
+				m.settingsHover = false
 			}
 			if msg.Type == tea.MouseWheelDown {
 				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(rows)-1)
+				m.settingsHover = false
 			}
 			if msg.Type == tea.MouseMotion {
-				if index := msg.Y - 5; index >= 0 && index < len(rows) {
+				if index := m.settingsHit(msg.X, msg.Y); index >= 0 && index < len(rows) {
 					m.settingsCursor = index
+					m.settingsHover = true
+				} else {
+					m.settingsHover = false
 				}
 			}
 			if msg.Type == tea.MouseLeft {
-				index := msg.Y - 5
+				index := m.settingsHit(msg.X, msg.Y)
 				if index < 0 || index >= len(rows) {
+					m.settingsHover = false
 					return m, nil
 				}
 				m.settingsCursor = index
+				m.settingsHover = true
 				m.applyLiveSetting(1)
 			}
 			return m, nil
 		}
 		switch msg.Type {
+		case tea.MouseMotion:
+			m.buttonHover = m.controlButtonHit(msg.X, msg.Y)
+			m.codeHover = m.teamCodeHit(msg.X, msg.Y)
 		case tea.MouseWheelUp:
 			m.controller.adjustVolume(0.05)
+			m.buttonHover = -1
 		case tea.MouseWheelDown:
 			m.controller.adjustVolume(-0.05)
+			m.buttonHover = -1
 		case tea.MouseLeft:
+			if m.teamCodeHit(msg.X, msg.Y) {
+				m.codeHover = true
+				m.message = clipboardStatus(m.state.TeamCode)
+				return m, nil
+			}
+			if index := m.controlButtonHit(msg.X, msg.Y); index >= 0 {
+				m.buttonHover = index
+				return m.activateLiveButton(index)
+			}
 			if m.state.CaptureMode == "terminal" && m.state.Listening.Mouse {
 				m.controller.recordLocalActivity(LocalActivityEvent{Kind: "mouse", Button: "left", At: time.Now()})
-			}
-			if msg.Y >= maxInt(10, m.height-7) {
-				switch {
-				case msg.X < 12:
-					m.controller.adjustVolume(-0.05)
-				case msg.X < 24:
-					m.controller.adjustVolume(0.05)
-				case msg.X < 38:
-					m.controller.adjustDensity(-0.1)
-				case msg.X < 52:
-					m.controller.adjustDensity(0.1)
-				case msg.X < 64:
-					m.controller.toggle("muted")
-				case msg.X < 78:
-					m.controller.toggle("spatial")
-				default:
-					m.controller.toggle("fade")
-				}
 			}
 		}
 	case tea.KeyMsg:
@@ -1213,8 +1268,17 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "ctrl+c", "q":
-			m.controller.stop()
+		case "ctrl+c":
+			m.exit = sessionExitStop
+			return m, tea.Quit
+		case "q", "esc":
+			m.exit = sessionExitBack
+			return m, tea.Quit
+		case "b":
+			m.exit = sessionExitBack
+			return m, tea.Quit
+		case "x":
+			m.exit = sessionExitStop
 			return m, tea.Quit
 		case "up", "+":
 			m.controller.adjustVolume(0.05)
@@ -1244,11 +1308,38 @@ func (m sessionModel) View() string {
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
 	}
+	left, right, _ := m.livePanelLines()
+	width := panelWidth(m.width)
+	colWidth := (width - 6) / 2
+	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
+	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
+	controls := stylePanel.Width(width).Render(m.liveControlsLine())
+	return lipgloss.JoinVertical(lipgloss.Left,
+		styleTitle.Render("Cliks Live"),
+		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
+		controls,
+	)
+}
+
+func (m sessionModel) livePanelLines() ([]string, []string, int) {
 	state := m.state
+	teamName := strings.TrimSpace(state.TeamName)
+	if teamName == "" || strings.EqualFold(teamName, state.TeamCode) {
+		teamName = teamNameForCode(m.controller.cfg, state.TeamCode)
+	}
+	if teamName == "" {
+		teamName = "Team"
+	}
+	code := valuePlain(state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	codeValue := code
+	if m.codeHover {
+		codeValue = styleSelected.Render(" " + code + " ")
+	}
 	left := []string{
-		styleAccent.Render(state.TeamName),
+		"Team: " + styleAccent.Render(teamName),
+		"Code: " + codeValue,
+		"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
 		"",
-		"You: " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
 		"Connection: " + connectionStyle(state.ConnectionStatus),
 		"People: " + roomPeopleSummary(state),
 		"Typing: " + typingSummary(state, m.now),
@@ -1256,6 +1347,12 @@ func (m sessionModel) View() string {
 		"",
 		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
 		fmt.Sprintf("Sent:     %d", state.LocalSentEvents),
+	}
+	if state.Notice != "" {
+		left = append(left, "", styleWarn.Render(state.Notice))
+	}
+	if m.message != "" {
+		left = append(left, styleDim.Render(m.message))
 	}
 	if state.PermissionHint != "" {
 		left = append(left, "", styleWarn.Render(state.PermissionHint))
@@ -1268,21 +1365,126 @@ func (m sessionModel) View() string {
 		"Muted   " + onOff(state.Listening.Muted),
 		"Spatial " + onOff(state.Listening.Spatial),
 		"Fade    " + onOff(state.Listening.FatigueProtection),
+		"Keep    " + onOff(m.controller.cfg.KeepRunning),
 		"",
 		"Keys: ↑/↓ volume  ←/→ density",
-		"m mute  s spatial  f fade  Tab settings  q quit",
-		"Mouse: wheel volume, click controls",
+		"m mute  s spatial  f fade  Tab prefs",
+		"Esc/q/back returns  x stop",
+		"Mouse: wheel volume; click hovered controls",
 	}
+	return left, right, 1
+}
+
+type liveButton struct {
+	label  string
+	action string
+}
+
+func liveButtons() []liveButton {
+	return []liveButton{
+		{label: "Back", action: "back"},
+		{label: "Prefs", action: "prefs"},
+		{label: "Vol-", action: "vol-down"},
+		{label: "Vol+", action: "vol-up"},
+		{label: "Den-", action: "density-down"},
+		{label: "Den+", action: "density-up"},
+		{label: "Mute", action: "mute"},
+		{label: "Spatial", action: "spatial"},
+		{label: "Fade", action: "fade"},
+		{label: "Stop", action: "stop"},
+	}
+}
+
+func (m sessionModel) liveControlsLine() string {
+	parts := []string{}
+	for index, button := range liveButtons() {
+		part := "[ " + button.label + " ]"
+		if index == m.buttonHover {
+			part = styleSelected.Render(part)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m sessionModel) activateLiveButton(index int) (tea.Model, tea.Cmd) {
+	buttons := liveButtons()
+	if index < 0 || index >= len(buttons) {
+		return m, nil
+	}
+	switch buttons[index].action {
+	case "back":
+		m.exit = sessionExitBack
+		return m, tea.Quit
+	case "prefs":
+		m.mode = "settings"
+		m.settingsCursor = 0
+		m.settingsHover = false
+	case "vol-down":
+		m.controller.adjustVolume(-0.05)
+	case "vol-up":
+		m.controller.adjustVolume(0.05)
+	case "density-down":
+		m.controller.adjustDensity(-0.1)
+	case "density-up":
+		m.controller.adjustDensity(0.1)
+	case "mute":
+		m.controller.toggle("muted")
+	case "spatial":
+		m.controller.toggle("spatial")
+	case "fade":
+		m.controller.toggle("fade")
+	case "stop":
+		m.exit = sessionExitStop
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m sessionModel) livePanelHeight() int {
+	left, right, _ := m.livePanelLines()
 	width := panelWidth(m.width)
 	colWidth := (width - 6) / 2
 	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
 	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
-	controls := stylePanel.Width(width).Render("[ Vol - ] [ Vol + ] [ Density - ] [ Density + ] [ Mute ] [ Spatial ] [ Fade ]")
-	return lipgloss.JoinVertical(lipgloss.Left,
-		styleTitle.Render("Cliks Live"),
-		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
-		controls,
-	)
+	return maxInt(lipgloss.Height(room), lipgloss.Height(sound))
+}
+
+func (m sessionModel) controlsContentY() int {
+	return 1 + m.livePanelHeight() + 2
+}
+
+func (m sessionModel) controlButtonHit(x int, y int) int {
+	if y != m.controlsContentY() {
+		return -1
+	}
+	cursor := 3
+	for index, button := range liveButtons() {
+		width := len("[ " + button.label + " ]")
+		if x >= cursor && x < cursor+width {
+			return index
+		}
+		cursor += width + 1
+	}
+	return -1
+}
+
+func (m sessionModel) teamCodeHit(x int, y int) bool {
+	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	if code == "" {
+		return false
+	}
+	_, _, codeLine := m.livePanelLines()
+	codeY := 3 + codeLine
+	codeX := 3 + len("Code: ")
+	return y == codeY && x >= codeX && x < codeX+len(code)
+}
+
+func (m sessionModel) settingsHit(x int, y int) int {
+	if x < 3 || x > panelWidth(m.width)-3 {
+		return -1
+	}
+	return y - 5
 }
 
 func (m *sessionModel) applyLiveSetting(delta int) {
@@ -1310,14 +1512,18 @@ func (m sessionModel) sessionSettingsView() string {
 	for i, row := range rows {
 		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
-			line = styleSelected.Render(" " + line + " ")
+			if m.settingsHover {
+				line = styleSelected.Render(" " + line + " ")
+			} else {
+				line = styleFocused.Render("> " + line)
+			}
 		}
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, styleDim.Render("Left/right adjusts. Enter toggles. Tab/Esc returns to the live room. q also returns here."))
+	lines = append(lines, styleDim.Render("Left/right adjusts. Enter toggles. Tab/Esc/q returns to the live room."))
 	return lipgloss.JoinVertical(lipgloss.Left,
-		styleTitle.Render("Cliks Live"),
+		styleTitle.Render("Cliks Preferences"),
 		stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n")),
 	)
 }
@@ -1401,7 +1607,7 @@ func backgroundSummary() string {
 
 func isTerminalCaptureKey(key string) bool {
 	switch key {
-	case "ctrl+c", "q", "tab", "S", "up", "down", "left", "right", "+", "-", "[", "]", "m", "s", "f":
+	case "ctrl+c", "q", "esc", "b", "x", "tab", "S", "up", "down", "left", "right", "+", "-", "[", "]", "m", "s", "f":
 		return false
 	default:
 		return true

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,5 +78,68 @@ func TestKeepRunningToggleWithoutActiveSessionDoesNotStart(t *testing.T) {
 	}
 	if saved := loadConfig(); !saved.KeepRunning {
 		t.Fatalf("saved KeepRunning = false, want true")
+	}
+}
+
+func TestLiveEscapeReturnsToHomeInsteadOfStopping(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(sessionModel)
+	if cmd == nil {
+		t.Fatalf("escape did not request quit/back transition")
+	}
+	if got.exit != sessionExitBack {
+		t.Fatalf("exit = %q, want back", got.exit)
+	}
+}
+
+func TestLiveControlHoverAndClickBack(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+	model.width = 120
+	y := model.controlsContentY()
+
+	updated, cmd := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: 4, Y: y})
+	got := updated.(sessionModel)
+	if cmd != nil {
+		t.Fatalf("hover returned command")
+	}
+	if got.buttonHover != 0 {
+		t.Fatalf("buttonHover = %d, want 0", got.buttonHover)
+	}
+
+	updated, cmd = got.Update(tea.MouseMsg{Type: tea.MouseLeft, X: 4, Y: y})
+	got = updated.(sessionModel)
+	if cmd == nil {
+		t.Fatalf("back click did not request transition")
+	}
+	if got.exit != sessionExitBack {
+		t.Fatalf("exit = %q, want back", got.exit)
+	}
+}
+
+func TestLiveTabOpensUnifiedPreferences(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got := updated.(sessionModel)
+	if got.mode != "settings" {
+		t.Fatalf("mode = %q, want settings", got.mode)
+	}
+	view := got.View()
+	if !strings.Contains(view, "Dynamic circle") || !strings.Contains(view, "Keep Running") {
+		t.Fatalf("settings view does not include unified preference rows:\n%s", view)
 	}
 }
