@@ -20,6 +20,8 @@ Linux evdev mouse capture is deliberately narrow:
 
 This keeps touchpad click users working without turning ordinary cursor movement or gestures into coworking noise.
 
+Readable evdev files are consumed with interruptible exponential retry delays from 1 second up to 30 seconds after non-EOF read errors. This prevents a disconnected or permission-changing device from driving a 100% CPU busy loop, while allowing transient failures to recover. Capture and session handoff use bounded 1024-event channels with cancellation-aware backpressure, so ordinary fast typing/click bursts are not silently dropped and shutdown cannot deadlock behind a full channel.
+
 ## Production direction
 
 - Windows: low-level keyboard and mouse hooks through `SetWindowsHookEx`.

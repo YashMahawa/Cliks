@@ -37,7 +37,7 @@ Cliks sends only tiny activity pulses:
 - keyboard activity happened
 - mouse click happened
 - coarse timing between those activity pulses
-- your optional 10-character display name, if you set one with `cliks nickname`
+- your optional 10-character plain-text display name, if you set one with `cliks nickname`
 
 Cliks does **not** send:
 
@@ -51,6 +51,8 @@ Cliks does **not** send:
 - microphone audio
 
 Remote timing is rounded into 50ms buckets by the relay before teammates receive it. This keeps the ambience rhythmic without exposing raw millisecond keystroke patterns.
+
+Nicknames are stripped of terminal escape/control sequences by both the CLI and relay before they are displayed. A peer cannot use a styled nickname to recolor, move, or corrupt someone else's terminal UI.
 
 Mouse activity means left/right clicks only. Cliks intentionally ignores cursor movement, scroll/wheel events, side buttons, app/window focus, and pointer coordinates. On Linux evdev, short stationary touchpad taps are treated as clicks: one-finger tap is left click and two-finger tap is right click; long presses, movement, and three-or-more-finger gestures are ignored.
 
@@ -130,6 +132,8 @@ cliks teams
 cliks switch CLIK-XXXXXX
 cliks config
 cliks autostart enable
+cliks set autostart on
+cliks set audio.device default
 cliks background start
 cliks background status
 cliks background stop
@@ -139,13 +143,13 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes Join, Create, Delete, Switch, and an easy Nickname form for the short display name teammates see. Joining from the TUI saves the team and opens live automatically. Creating from the TUI copies the code when clipboard support is available. If no session is running, Keep Running only saves the future terminal-close preference; it does not start a hidden connection. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stop does not disable launch-at-login; a boot-started session stays stopped until the next login or boot unless you disable autostart separately. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell.
+Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes Join, Create, Delete, Switch, and an easy Nickname form for the short display name teammates see. Joining from the TUI saves the team and opens live automatically. Creating from the TUI copies the code when clipboard support is available. If no session is running, Keep Running only saves the future terminal-close preference; it does not start a hidden connection. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stop does not disable launch-at-login; a boot-started session stays stopped until the next login or boot unless you disable autostart separately. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell. Press `?` on the control, preference, or live screens for context-specific shortcuts. Colors adapt automatically for light and dark terminal backgrounds.
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
-While `cliks start` is open, Cliks shows a live terminal dashboard with room name and code, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open the same preference rows used by the main TUI, then `Tab`/`Esc`/`q` to return to live. Press `Esc`, `q`, or the Back button from live to return to the main control screen instead of quitting the app; use Stop or `Ctrl+C` when you actually want to disconnect. If Keep Running is on, leaving or closing the foreground live window hands the room off to one background session. You can click the team code to copy it, click hovered on-screen controls, and use the mouse wheel for volume in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
+While `cliks start` is open, Cliks shows a live terminal dashboard with room name and code, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open the same preference rows used by the main TUI, then `Tab`/`Esc`/`q` to return to live. Press `Esc`, `q`, or the Back button from live to return to the main control screen instead of quitting the app; use Stop or `Ctrl+C` when you actually want to disconnect. If Keep Running is on, leaving or closing the foreground live window hands the room off to one background session. You can click the team code to copy it, click hovered on-screen controls, use `?` for the shortcut guide, and use the mouse wheel for volume in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
 
-Rooms are capped at 20 live people. Spatial placement pans teammates around your desk locally: 4 people in the first ring and 2 more seats per outer ring. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally. Fatigue fade softens long typing bursts so dense work sessions do not become harsh. Density controls how many received sounds are played locally; it never changes what activity is sent.
+Rooms are capped at 20 live people. Spatial placement pans teammates around your desk locally: 4 people in the first ring and 2 more seats per outer ring, with each ring rotated to avoid stacking teammates at the same angle. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally. Fatigue fade softens long typing bursts with a room-aware gradual curve so busy rooms do not pump between loud and quiet. Density controls how many received sounds are played locally; it never changes what activity is sent.
 
 Listening presets:
 
@@ -161,9 +165,13 @@ Useful settings:
 ```bash
 cliks set nickname "YourName"
 cliks set keep.running on
+cliks set autostart on
 cliks set spatial.dynamic on
 cliks set spatial.shuffleMinutes 10
+cliks set audio.device default
 ```
+
+`audio.device` is an optional advanced output identifier. It works with `mpv`, `paplay`, `pw-play`, and `aplay`; `cliks doctor` warns when the selected player cannot route to it. Use `default` to return to the system output. Environment overrides such as `CLIKS_API_URL` and `CLIKS_WS_URL` take precedence over saved URLs.
 
 If teammates can hear you connect but cannot hear your keystrokes, run:
 

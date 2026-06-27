@@ -11,6 +11,9 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -236,6 +239,13 @@ func normalizeTeamCode(value string) string {
 }
 
 func normalizeNickname(value string) string {
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return -1
+		}
+		return r
+	}, value)
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	runes := []rune(value)
 	if len(runes) > 10 {

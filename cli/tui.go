@@ -14,15 +14,69 @@ import (
 )
 
 var (
-	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("31")).Padding(0, 1)
-	styleAccent   = lipgloss.NewStyle().Foreground(lipgloss.Color("38")).Bold(true)
-	styleDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleWarn     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	styleOK       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("31")).Padding(1, 2)
-	styleSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("31")).Bold(true)
-	styleFocused  = lipgloss.NewStyle().Foreground(lipgloss.Color("38")).Bold(true)
+	colorAccent = lipgloss.AdaptiveColor{Light: "#006D7D", Dark: "#33D6E8"}
+	colorDim    = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+	colorWarn   = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+	colorOK     = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
+	colorPanel  = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#159BB5"}
+	colorSelect = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#33D6E8"}
+	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
+
+	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
+	styleAccent   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleDim      = lipgloss.NewStyle().Foreground(colorDim)
+	styleWarn     = lipgloss.NewStyle().Foreground(colorWarn)
+	styleOK       = lipgloss.NewStyle().Foreground(colorOK)
+	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(1, 2)
+	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
+	styleFocused  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 )
+
+type shortcutHelp struct {
+	keys        string
+	description string
+}
+
+func shortcutEntries(context string) []shortcutHelp {
+	switch context {
+	case "preferences", "live-preferences":
+		return []shortcutHelp{
+			{"Up/k, Down/j", "move between preferences"},
+			{"Left/h, Right/l", "adjust the selected preference"},
+			{"Enter/Space", "toggle the selected preference"},
+			{"Tab/Esc/q", "return to the previous screen"},
+			{"?", "close this shortcut guide"},
+		}
+	case "live":
+		return []shortcutHelp{
+			{"Up/+, Down/-", "raise or lower volume"},
+			{"Right/], Left/[", "raise or lower sound density"},
+			{"m / s / f", "toggle mute, spatial audio, or fatigue fade"},
+			{"Tab/Shift+S", "open live preferences"},
+			{"Esc/q/b", "return to the main control screen"},
+			{"x/Ctrl+C", "stop and disconnect this session"},
+			{"Mouse wheel", "adjust volume"},
+			{"?", "close this shortcut guide"},
+		}
+	default:
+		return []shortcutHelp{
+			{"Up/k, Down/j", "move between actions"},
+			{"Enter/Space", "run the highlighted action"},
+			{"Esc/q", "go back or close the control screen"},
+			{"Mouse", "hover and click an action"},
+			{"?", "close this shortcut guide"},
+		}
+	}
+}
+
+func shortcutHelpView(context string, width int) string {
+	lines := []string{styleAccent.Render("Keyboard & mouse"), ""}
+	for _, entry := range shortcutEntries(context) {
+		lines = append(lines, fmt.Sprintf("%-18s %s", entry.keys, entry.description))
+	}
+	lines = append(lines, "", styleDim.Render("Press ? or Esc to return."))
+	return stylePanel.Width(panelWidth(width)).Render(strings.Join(lines, "\n"))
+}
 
 type homeAction string
 
@@ -62,6 +116,7 @@ type homeModel struct {
 	busy             bool
 	width            int
 	height           int
+	helpOpen         bool
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -192,6 +247,9 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.MouseMsg:
+		if m.helpOpen {
+			return m, nil
+		}
 		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 			return m, nil
 		}
@@ -219,10 +277,20 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case tea.KeyMsg:
+		if m.helpOpen {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.helpOpen = false
+			}
+			return m, nil
+		}
 		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 			return m.updateForm(msg)
 		}
 		switch msg.String() {
+		case "?":
+			m.helpOpen = true
+			return m, nil
 		case "ctrl+c", "q", "esc":
 			if m.mode != "home" {
 				m.back()
@@ -260,7 +328,13 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m homeModel) View() string {
 	var body string
-	if m.mode == "preferences" {
+	if m.helpOpen {
+		context := m.mode
+		if context != "preferences" {
+			context = "home"
+		}
+		body = shortcutHelpView(context, m.width)
+	} else if m.mode == "preferences" {
 		body = m.preferencesView()
 	} else if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
 		body = m.formView()
@@ -372,7 +446,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			if m.stopActiveOnExit {
 				_ = scheduleDeferredStop(m.active.PID)
 				if m.active.Mode == runModeBoot {
-					m.message = "Keep Running is off. Launch-at-login will be disabled and this connection will stop when this screen closes."
+					m.message = "Keep Running is off. This connection will stop when this screen closes; launch-at-login remains on for the next login."
 				} else {
 					m.message = "Keep Running is off. This connection will stop when this control screen closes."
 				}
@@ -456,6 +530,7 @@ func (m homeModel) itemView() string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
+	lines = append(lines, styleDim.Render("? shortcuts"))
 	lines = append(lines, styleDim.Render(m.message))
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
@@ -1114,9 +1189,12 @@ func soundTestCmd() tea.Cmd {
 func doctorSummaryCmd() tea.Cmd {
 	return func() tea.Msg {
 		cfg := loadConfig()
-		player, spatial, hint, _ := getAudioPlayerStatus()
+		player, spatial, hint, _ := getAudioPlayerStatus(cfg.Listening.AudioDevice)
 		if player == "" {
 			return commandDoneMsg{message: "Audio player missing: " + hint}
+		}
+		if hint != "" {
+			return commandDoneMsg{message: "Audio setup warning: " + hint}
 		}
 		if cfg.CurrentTeamCode == "" {
 			return commandDoneMsg{message: "Setup needs a team. Create or join one first."}
@@ -1174,6 +1252,7 @@ type sessionModel struct {
 	width          int
 	height         int
 	now            time.Time
+	helpOpen       bool
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
@@ -1197,6 +1276,9 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = m.controller.viewState()
 		return m, sessionTick()
 	case tea.MouseMsg:
+		if m.helpOpen {
+			return m, nil
+		}
 		if m.mode == "settings" {
 			rows := settingsRows(m.controller.cfg)
 			if msg.Type == tea.MouseWheelUp {
@@ -1252,6 +1334,17 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyMsg:
+		if m.helpOpen {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.helpOpen = false
+			}
+			return m, nil
+		}
+		if msg.String() == "?" {
+			m.helpOpen = true
+			return m, nil
+		}
 		if m.mode == "settings" {
 			switch msg.String() {
 			case "esc", "tab", "q", "S":
@@ -1305,6 +1398,13 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m sessionModel) View() string {
+	if m.helpOpen {
+		context := "live"
+		if m.mode == "settings" {
+			context = "live-preferences"
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks Shortcuts"), shortcutHelpView(context, m.width))
+	}
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
 	}
@@ -1369,7 +1469,7 @@ func (m sessionModel) livePanelLines() ([]string, []string, int) {
 		"",
 		"Keys: ↑/↓ volume  ←/→ density",
 		"m mute  s spatial  f fade  Tab prefs",
-		"Esc/q/back returns  x stop",
+		"Esc/q/back returns  x stop  ? shortcuts",
 		"Mouse: wheel volume; click hovered controls",
 	}
 	return left, right, 1

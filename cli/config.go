@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 const productionAPIURL = "https://139.59.29.207.sslip.io"
@@ -35,6 +38,7 @@ type ListeningConfig struct {
 	Density           float64 `json:"density"`
 	DynamicPlacement  bool    `json:"dynamicPlacement"`
 	ShuffleMinutes    int     `json:"shuffleMinutes"`
+	AudioDevice       string  `json:"audioDevice,omitempty"`
 }
 
 type CliksConfig struct {
@@ -95,6 +99,15 @@ func loadConfig() CliksConfig {
 	}
 	_ = json.Unmarshal(data, &cfg)
 	normalizeConfig(&cfg)
+	if apiURL := strings.TrimSpace(os.Getenv("CLIKS_API_URL")); apiURL != "" {
+		cfg.APIURL = strings.TrimRight(apiURL, "/")
+		if strings.TrimSpace(os.Getenv("CLIKS_WS_URL")) == "" {
+			cfg.WSURL = toWSURL(cfg.APIURL)
+		}
+	}
+	if wsURL := strings.TrimSpace(os.Getenv("CLIKS_WS_URL")); wsURL != "" {
+		cfg.WSURL = wsURL
+	}
 	return cfg
 }
 
@@ -236,9 +249,17 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.Listening.ShuffleMinutes = 60
 	}
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
+	cfg.Listening.AudioDevice = strings.TrimSpace(cfg.Listening.AudioDevice)
 }
 
 func sanitizeNickname(value string) string {
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return -1
+		}
+		return r
+	}, value)
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	if len([]rune(value)) <= 10 {
 		return value

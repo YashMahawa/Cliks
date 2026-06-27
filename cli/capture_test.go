@@ -1,9 +1,63 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 )
+
+func TestEvdevRetryDelayBacksOffAndCaps(t *testing.T) {
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}
+	for index, expected := range want {
+		if got := evdevRetryDelay(index + 1); got != expected {
+			t.Fatalf("retry %d = %s, want %s", index+1, got, expected)
+		}
+	}
+}
+
+func TestCaptureBackpressureDoesNotDropBurstEvents(t *testing.T) {
+	capture := newActivityCapture()
+	for i := 0; i < cap(capture.Events); i++ {
+		capture.Events <- LocalActivityEvent{Kind: "keyboard"}
+	}
+	done := make(chan struct{})
+	go func() {
+		capture.emit(LocalActivityEvent{Kind: "mouse", Button: "left"})
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("emit returned while the queue was still full")
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-capture.Events
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("emit did not resume after queue space became available")
+	}
+}
+
+func TestSessionBackpressureStopsOnCancellation(t *testing.T) {
+	controller := newSessionController(defaultConfig(), StartOptions{}, nil)
+	for i := 0; i < cap(controller.local); i++ {
+		controller.local <- LocalActivityEvent{Kind: "keyboard"}
+	}
+	done := make(chan struct{})
+	go func() {
+		controller.recordLocalActivity(LocalActivityEvent{Kind: "keyboard"})
+		close(done)
+	}()
+	controller.cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recordLocalActivity did not stop after cancellation")
+	}
+	if controller.ctx.Err() != context.Canceled {
+		t.Fatalf("context error = %v, want canceled", controller.ctx.Err())
+	}
+}
 
 func TestTouchpadTapDetectorSingleFingerTap(t *testing.T) {
 	detector := &touchpadTapDetector{}

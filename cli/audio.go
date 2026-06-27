@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,15 +35,17 @@ type peerPlacement struct {
 }
 
 type audioPlayer struct {
-	Command string
-	Spatial bool
-	ArgsFor func(playbackJob) []string
+	Command       string
+	Spatial       bool
+	DeviceRouting bool
+	ArgsFor       func(playbackJob) []string
 }
 
 type playbackJob struct {
-	File string
-	Gain float64
-	Pan  float64
+	File   string
+	Gain   float64
+	Pan    float64
+	Device string
 }
 
 type AudioEngine struct {
@@ -59,15 +62,17 @@ type AudioEngine struct {
 	warned          bool
 	mu              sync.Mutex
 	recent          []time.Time
+	fatigueGain     float64
 }
 
 func newAudioEngine(listening ListeningConfig) *AudioEngine {
 	engine := &AudioEngine{
 		listening:      listening,
-		player:         detectAudioPlayer(),
+		player:         detectAudioPlayerForDevice(listening.AudioDevice),
 		placements:     map[string]peerPlacement{},
 		activityScores: map[string]int{},
 		queue:          make(chan playbackJob, 96),
+		fatigueGain:    1,
 	}
 	for i := 0; i < 4; i++ {
 		go engine.playWorker()
@@ -77,6 +82,10 @@ func newAudioEngine(listening ListeningConfig) *AudioEngine {
 
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.mu.Lock()
+	if strings.TrimSpace(listening.AudioDevice) != strings.TrimSpace(a.listening.AudioDevice) {
+		a.player = detectAudioPlayerForDevice(listening.AudioDevice)
+		a.warned = false
+	}
 	a.listening = listening
 	a.recomputePlacementsLocked(false)
 	a.mu.Unlock()
@@ -201,7 +210,10 @@ func (a *AudioEngine) preview() error {
 }
 
 func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement) {
-	if a.player == nil {
+	a.mu.Lock()
+	playerAvailable := a.player != nil
+	a.mu.Unlock()
+	if !playerAvailable {
 		a.warnUnavailableOnce()
 		return
 	}
@@ -213,6 +225,9 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 	if len(samples) == 0 {
 		return
 	}
+	if event.Kind == "keyboard" && rand.Float64() < queuePressureDropProbability(len(a.queue), cap(a.queue)) {
+		return
+	}
 	a.mu.Lock()
 	listening := a.listening
 	a.mu.Unlock()
@@ -221,9 +236,10 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 		fatigueGain = a.recordAndGetFatigueGain()
 	}
 	job := playbackJob{
-		File: samples[rand.Intn(len(samples))],
-		Gain: clamp(listening.Volume*(1/placement.Distance)*fatigueGain, 0, 1),
-		Pan:  0,
+		File:   samples[rand.Intn(len(samples))],
+		Gain:   clamp(listening.Volume*(1/placement.Distance)*fatigueGain, 0, 1),
+		Pan:    0,
+		Device: listening.AudioDevice,
 	}
 	if listening.Spatial {
 		job.Pan = placement.Pan
@@ -231,14 +247,33 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 	select {
 	case a.queue <- job:
 	default:
-		<-a.queue
-		a.queue <- job
+		select {
+		case <-a.queue:
+		default:
+		}
+		select {
+		case a.queue <- job:
+		default:
+		}
 	}
+}
+
+func queuePressureDropProbability(queueLength int, queueCapacity int) float64 {
+	if queueCapacity <= 0 {
+		return 0
+	}
+	fill := float64(queueLength) / float64(queueCapacity)
+	if fill <= 0.5 {
+		return 0
+	}
+	return clamp((fill-0.5)/0.4*0.75, 0, 0.85)
 }
 
 func (a *AudioEngine) playWorker() {
 	for job := range a.queue {
+		a.mu.Lock()
 		player := a.player
+		a.mu.Unlock()
 		if player == nil {
 			continue
 		}
@@ -291,13 +326,34 @@ func (a *AudioEngine) recordAndGetFatigueGain() float64 {
 			next = append(next, t)
 		}
 	}
+	wasQuiet := len(next) == 0
 	next = append(next, now)
 	a.recent = next
-	overload := len(a.recent) - 24
-	if overload < 0 {
-		overload = 0
+	if wasQuiet {
+		a.fatigueGain = 1
 	}
-	return clamp(1-float64(overload)*0.035, 0.35, 1)
+	target := fatigueTargetGain(len(a.recent), maxInt(1, len(a.placements)))
+	alpha := 0.18
+	if target > a.fatigueGain {
+		alpha = 0.1
+	}
+	a.fatigueGain += (target - a.fatigueGain) * alpha
+	return clamp(a.fatigueGain, 0.35, 1)
+}
+
+func fatigueThreshold(peerCount int) int {
+	peerCount = clampInt(peerCount, 1, 10)
+	return 24 + int(math.Round(24*float64(peerCount-1)/9))
+}
+
+func fatigueTargetGain(eventCount int, peerCount int) float64 {
+	threshold := fatigueThreshold(peerCount)
+	overload := maxInt(0, eventCount-threshold)
+	if overload == 0 {
+		return 1
+	}
+	pressure := float64(overload) / float64(threshold)
+	return clamp(1-math.Pow(pressure, 1.35)*0.9, 0.35, 1)
 }
 
 func (a *AudioEngine) warnUnavailableOnce() {
@@ -316,43 +372,96 @@ func detectAudioPlayer() *audioPlayer {
 			Command: "ffplay",
 			Spatial: true,
 			ArgsFor: func(job playbackJob) []string {
-				return []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}
+				return withAudioDevice("ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}, job.Device)
 			},
 		}
 	}
 	if _, err := exec.LookPath("mpv"); err == nil {
-		return &audioPlayer{
-			Command: "mpv",
-			Spatial: true,
-			ArgsFor: func(job playbackJob) []string {
-				return []string{"--no-video", "--really-quiet", "--no-terminal", fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)), fmt.Sprintf("--audio-pan=%.3f", clamp(job.Pan, -1, 1)), job.File}
-			},
-		}
+		return mpvAudioPlayer()
 	}
 	if runtime.GOOS == "darwin" {
 		return &audioPlayer{Command: "afplay", Spatial: false, ArgsFor: func(job playbackJob) []string {
-			return []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}
+			return withAudioDevice("afplay", []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
 		}}
 	}
 	if runtime.GOOS == "windows" {
 		return &audioPlayer{Command: "powershell.exe", Spatial: false, ArgsFor: func(job playbackJob) []string {
-			return []string{"-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();", job.File}
+			return withAudioDevice("powershell.exe", []string{"-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();", job.File}, job.Device)
 		}}
 	}
 	if _, err := exec.LookPath("paplay"); err == nil {
-		return &audioPlayer{Command: "paplay", Spatial: false, ArgsFor: func(job playbackJob) []string {
-			return []string{"--volume", fmt.Sprintf("%d", int(clamp(job.Gain, 0, 1)*65536)), job.File}
-		}}
+		return paplayAudioPlayer()
 	}
 	if _, err := exec.LookPath("pw-play"); err == nil {
-		return &audioPlayer{Command: "pw-play", Spatial: false, ArgsFor: func(job playbackJob) []string {
-			return []string{"--volume", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}
-		}}
+		return pipewireAudioPlayer()
 	}
 	if _, err := exec.LookPath("aplay"); err == nil {
-		return &audioPlayer{Command: "aplay", Spatial: false, ArgsFor: func(job playbackJob) []string { return []string{job.File} }}
+		return alsaAudioPlayer()
 	}
 	return nil
+}
+
+func detectAudioPlayerForDevice(device string) *audioPlayer {
+	if strings.TrimSpace(device) != "" {
+		if _, err := exec.LookPath("mpv"); err == nil {
+			return mpvAudioPlayer()
+		}
+		if runtime.GOOS == "linux" {
+			if _, err := exec.LookPath("paplay"); err == nil {
+				return paplayAudioPlayer()
+			}
+			if _, err := exec.LookPath("pw-play"); err == nil {
+				return pipewireAudioPlayer()
+			}
+			if _, err := exec.LookPath("aplay"); err == nil {
+				return alsaAudioPlayer()
+			}
+		}
+	}
+	return detectAudioPlayer()
+}
+
+func mpvAudioPlayer() *audioPlayer {
+	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+		return withAudioDevice("mpv", []string{"--no-video", "--really-quiet", "--no-terminal", fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)), fmt.Sprintf("--audio-pan=%.3f", clamp(job.Pan, -1, 1)), job.File}, job.Device)
+	}}
+}
+
+func paplayAudioPlayer() *audioPlayer {
+	return &audioPlayer{Command: "paplay", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+		return withAudioDevice("paplay", []string{"--volume", fmt.Sprintf("%d", int(clamp(job.Gain, 0, 1)*65536)), job.File}, job.Device)
+	}}
+}
+
+func pipewireAudioPlayer() *audioPlayer {
+	return &audioPlayer{Command: "pw-play", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+		return withAudioDevice("pw-play", []string{"--volume", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
+	}}
+}
+
+func alsaAudioPlayer() *audioPlayer {
+	return &audioPlayer{Command: "aplay", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+		return withAudioDevice("aplay", []string{job.File}, job.Device)
+	}}
+}
+
+func withAudioDevice(command string, args []string, device string) []string {
+	device = strings.TrimSpace(device)
+	if device == "" || strings.EqualFold(device, "default") {
+		return args
+	}
+	switch command {
+	case "mpv":
+		return append([]string{"--audio-device=" + device}, args...)
+	case "paplay":
+		return append([]string{"--device", device}, args...)
+	case "pw-play":
+		return append([]string{"--target", device}, args...)
+	case "aplay":
+		return append([]string{"--device", device}, args...)
+	default:
+		return args
+	}
 }
 
 func ffmpegSpatialFilter(gain float64, pan float64) string {
@@ -368,10 +477,17 @@ func ffmpegSpatialFilter(gain float64, pan float64) string {
 	return fmt.Sprintf("pan=stereo|c0=%.3f*c0|c1=%.3f*c0", left, right)
 }
 
-func getAudioPlayerStatus() (player string, spatial bool, hint string, commands []string) {
-	detected := detectAudioPlayer()
+func getAudioPlayerStatus(device ...string) (player string, spatial bool, hint string, commands []string) {
+	configuredDevice := ""
+	if len(device) > 0 {
+		configuredDevice = strings.TrimSpace(device[0])
+	}
+	detected := detectAudioPlayerForDevice(configuredDevice)
 	if detected == nil {
 		return "", false, audioInstallHint(), audioInstallCommands()
+	}
+	if configuredDevice != "" && !detected.DeviceRouting {
+		return detected.Command, detected.Spatial, fmt.Sprintf("%s cannot select an output device; install mpv or clear audio.device", detected.Command), nil
 	}
 	return detected.Command, detected.Spatial, "", nil
 }
@@ -426,11 +542,9 @@ func soundsRoot() (string, error) {
 func placementForIndex(index int, peerID string) peerPlacement {
 	seed := rand.New(rand.NewSource(int64(hashString(peerID))))
 	ring := ringForIndex(index)
-	ringStart := ringStartIndex(ring)
-	positionInRing := index - ringStart
 	capacity := ringCapacity(ring)
-	baseAngle := math.Pi * 2 * float64(positionInRing) / float64(capacity)
-	jitter := (seed.Float64() - 0.5) * (math.Pi / float64(capacity)) * 0.7
+	baseAngle := baseAngleForIndex(index)
+	jitter := (seed.Float64() - 0.5) * (math.Pi * 2 / float64(capacity))
 	angle := baseAngle + jitter
 	distance := 2 + float64(ring) + (seed.Float64()-0.5)*0.35
 	return peerPlacement{
@@ -438,6 +552,17 @@ func placementForIndex(index int, peerID string) peerPlacement {
 		Distance: distance,
 		Warmth:   0.72 + seed.Float64()*0.5,
 	}
+}
+
+func baseAngleForIndex(index int) float64 {
+	ring := ringForIndex(index)
+	positionInRing := index - ringStartIndex(ring)
+	capacity := ringCapacity(ring)
+	rotation := 0.0
+	for current := 1; current <= ring; current++ {
+		rotation += math.Pi / float64(ringCapacity(current-1))
+	}
+	return math.Mod(rotation+math.Pi*2*float64(positionInRing)/float64(capacity), math.Pi*2)
 }
 
 func ringForIndex(index int) int {

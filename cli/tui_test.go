@@ -143,3 +143,32 @@ func TestLiveTabOpensUnifiedPreferences(t *testing.T) {
 		t.Fatalf("settings view does not include unified preference rows:\n%s", view)
 	}
 }
+
+func TestHomeShortcutGuideTogglesWithoutChangingSelection(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "home", cursor: 1}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	got := updated.(homeModel)
+	if !got.helpOpen || got.cursor != 1 {
+		t.Fatalf("helpOpen = %v, cursor = %d; want open with cursor preserved", got.helpOpen, got.cursor)
+	}
+	if view := got.View(); !strings.Contains(view, "Up/k, Down/j") || !strings.Contains(view, "Mouse") {
+		t.Fatalf("shortcut guide is incomplete:\n%s", view)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated.(homeModel).helpOpen {
+		t.Fatal("escape did not close the shortcut guide")
+	}
+}
+
+func TestLiveShortcutGuideDocumentsSessionControls(t *testing.T) {
+	controller := newSessionController(defaultConfig(), StartOptions{}, nil)
+	model := newSessionModel(controller)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	got := updated.(sessionModel)
+	view := got.View()
+	for _, text := range []string{"m / s / f", "Tab/Shift+S", "x/Ctrl+C", "Mouse wheel"} {
+		if !strings.Contains(view, text) {
+			t.Fatalf("live shortcut guide is missing %q:\n%s", text, view)
+		}
+	}
+}

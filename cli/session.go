@@ -162,7 +162,7 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 		cancel:   cancel,
 		audio:    newAudioEngine(listening),
 		updates:  make(chan SessionViewState, 32),
-		local:    make(chan LocalActivityEvent, 256),
+		local:    make(chan LocalActivityEvent, 1024),
 		instance: instance,
 		state: SessionViewState{
 			TeamName:         cfg.CurrentTeamCode,
@@ -289,7 +289,7 @@ func (s *sessionController) toggle(key string) {
 func (s *sessionController) recordLocalActivity(event LocalActivityEvent) {
 	select {
 	case s.local <- event:
-	default:
+	case <-s.ctx.Done():
 	}
 }
 

@@ -28,9 +28,16 @@ func runDoctor() error {
 	fmt.Println("")
 	fmt.Println("System:")
 	fmt.Printf("- Runtime: Go %s\n", runtime.Version())
-	player, spatial, hint, commands := getAudioPlayerStatus()
+	player, spatial, hint, commands := getAudioPlayerStatus(cfg.Listening.AudioDevice)
 	if player != "" {
 		fmt.Printf("- Audio player: ok (%s)\n", player)
+		if cfg.Listening.AudioDevice != "" {
+			if hint == "" {
+				fmt.Printf("- Audio output: %s\n", cfg.Listening.AudioDevice)
+			} else {
+				issues = append(issues, doctorIssue{"Choose a supported audio output", hint, []string{"cliks set audio.device default"}})
+			}
+		}
 		if spatial {
 			fmt.Println("- Spatial audio: stereo pan + distance")
 		} else {

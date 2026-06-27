@@ -45,8 +45,8 @@ try {
   if (relay.compactOffsets !== "50,200") {
     throw new Error(`Expected compact offsets 50,200, got ${relay.compactOffsets}`);
   }
-  if (relay.nickname !== "AliceLongN") {
-    throw new Error(`Expected 10-char nickname AliceLongN, got ${JSON.stringify(relay.nickname)}`);
+  if (relay.nickname !== "Alice Long") {
+    throw new Error(`Expected sanitized nickname Alice Long, got ${JSON.stringify(relay.nickname)}`);
   }
   await websocketRoomLimitSmoke(wsUrl, team.code);
 
@@ -146,7 +146,7 @@ async function websocketRelaySmoke(url, teamCode) {
   c.send(JSON.stringify({ type: "join", teamCode, nickname: "c", client: { name: "cliks", version: "test", features: ["compact-v1"] } }));
 
   await sleep(250);
-  a.send(JSON.stringify({ type: "profile", nickname: "AliceLongName" }));
+  a.send(JSON.stringify({ type: "profile", nickname: "\u001b[31mAlice\u001b[0m\u001b]0;owned\u0007 Long Name" }));
   await sleep(250);
   a.send(
     JSON.stringify({
@@ -172,12 +172,12 @@ async function websocketRelaySmoke(url, teamCode) {
   if (compactBatches.length !== 1) {
     throw new Error(`Expected one compact relayed batch, got ${compactBatches.length}`);
   }
-  if (batches[0].nickname !== "AliceLongN") {
-    throw new Error(`Expected relayed activity nickname "AliceLongN", got ${JSON.stringify(batches[0].nickname)}`);
+  if (batches[0].nickname !== "Alice Long") {
+    throw new Error(`Expected relayed activity nickname "Alice Long", got ${JSON.stringify(batches[0].nickname)}`);
   }
   const sawNamedPresence = presences.some((message) => {
     const names = new Set((message.peers ?? []).map((peer) => peer.nickname));
-    return names.has("AliceLongN") && names.has("b");
+    return names.has("Alice Long") && names.has("b");
   });
   if (!sawNamedPresence) {
     throw new Error(`Expected named presence for both peers, got ${JSON.stringify(presences)}`);

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 func main() {
 	if err := run(os.Args); err != nil {
@@ -283,7 +283,11 @@ func cmdSwitch(args []string) error {
 }
 
 func printConfig() error {
-	data, err := json.MarshalIndent(loadConfig(), "", "  ")
+	type configSummary struct {
+		CliksConfig
+		AutostartEnabled bool `json:"autostartEnabled"`
+	}
+	data, err := json.MarshalIndent(configSummary{CliksConfig: loadConfig(), AutostartEnabled: autostartEnabled()}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -339,6 +343,15 @@ func cmdSet(args []string) error {
 	key, value := args[0], args[1]
 	boolValue := parseBool(value)
 	switch key {
+	case "autostart":
+		enabled, err := parseOnOff(value)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			return cmdAutostart([]string{"enable", cfg.CurrentTeamCode})
+		}
+		return cmdAutostart([]string{"disable"})
 	case "share.keyboard":
 		cfg.Sharing.Keyboard = boolValue
 	case "share.mouse":
@@ -389,6 +402,12 @@ func cmdSet(args []string) error {
 			return err
 		}
 		cfg.Listening.ShuffleMinutes = parsed
+	case "audio.device":
+		device := strings.TrimSpace(strings.Join(args[1:], " "))
+		if strings.EqualFold(device, "default") {
+			device = ""
+		}
+		cfg.Listening.AudioDevice = device
 	case "api.url":
 		cfg.APIURL = strings.TrimRight(value, "/")
 		cfg.WSURL = toWSURL(cfg.APIURL)
@@ -479,6 +498,17 @@ func parseBool(value string) bool {
 	}
 }
 
+func parseOnOff(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on", "enable", "enabled":
+		return true, nil
+	case "0", "false", "no", "off", "disable", "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected on or off, got %q", value)
+	}
+}
+
 func printFirstRunHelp() {
 	fmt.Println("Cliks is installed.")
 	fmt.Println("")
@@ -513,6 +543,9 @@ Usage:
   %[1]s capture-test     Verify local activity capture
   %[1]s autostart ...    Manage background autoconnect
   %[1]s background ...   Start, stop, or inspect background Cliks
+  %[1]s config           Show settings and launch-at-login state
+  %[1]s set autostart on|off
+  %[1]s set audio.device DEVICE|default
   %[1]s set keep.running on|off
 
 `, commandName)

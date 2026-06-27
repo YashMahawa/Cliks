@@ -13,13 +13,13 @@ Cliks uses tiny JSON messages over WebSocket.
   "nickname": "local optional name",
   "client": {
     "name": "cliks",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "features": ["compact-v1"]
   }
 }
 ```
 
-`nickname` is an explicit optional display name, capped at 10 characters by clients and the relay. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
+`nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
 
 ### Activity batch
 

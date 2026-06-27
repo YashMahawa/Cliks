@@ -47,17 +47,19 @@ type CaptureState struct {
 
 type ActivityCapture struct {
 	Events           chan LocalActivityEvent
+	ctx              context.Context
 	cancel           context.CancelFunc
 	mu               sync.Mutex
 	terminalOldState *term.State
 }
 
 func newActivityCapture() *ActivityCapture {
-	return &ActivityCapture{Events: make(chan LocalActivityEvent, 256)}
+	return &ActivityCapture{Events: make(chan LocalActivityEvent, 1024), ctx: context.Background()}
 }
 
 func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, mode string) CaptureState {
 	ctx, cancel := context.WithCancel(parent)
+	c.ctx = ctx
 	c.cancel = cancel
 	if !sharing.Keyboard && !sharing.Mouse {
 		return CaptureState{Mode: "off"}
@@ -190,6 +192,7 @@ func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing 
 	defer file.Close()
 	buf := make([]byte, 24*32)
 	touchpad := &touchpadTapDetector{}
+	consecutiveErrors := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -201,10 +204,30 @@ func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing 
 			if err == io.EOF {
 				return
 			}
+			consecutiveErrors++
+			timer := time.NewTimer(evdevRetryDelay(consecutiveErrors))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
+		consecutiveErrors = 0
 		c.handleEvdev(buf[:n], sharing, touchpad)
 	}
+}
+
+func evdevRetryDelay(consecutiveErrors int) time.Duration {
+	if consecutiveErrors < 1 {
+		consecutiveErrors = 1
+	}
+	delay := time.Second << minInt(consecutiveErrors-1, 5)
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }
 
 func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig, touchpad *touchpadTapDetector) {
@@ -247,7 +270,7 @@ func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig, touch
 func (c *ActivityCapture) emit(event LocalActivityEvent) {
 	select {
 	case c.Events <- event:
-	default:
+	case <-c.ctx.Done():
 	}
 }
 
