@@ -65,6 +65,8 @@ type AudioEngine struct {
 	fatigueGain     float64
 }
 
+const keyboardMergeWindowMs = 20
+
 func newAudioEngine(listening ListeningConfig) *AudioEngine {
 	engine := &AudioEngine{
 		listening:      listening,
@@ -145,7 +147,7 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 	listening := a.listening
 	a.mu.Unlock()
 
-	for _, event := range events {
+	for _, event := range mergePlaybackEvents(events) {
 		event := event
 		if listening.Muted {
 			continue
@@ -167,6 +169,37 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 			a.enqueue(event, placement)
 		})
 	}
+}
+
+func mergePlaybackEvents(events []RemoteActivityEvent) []RemoteActivityEvent {
+	if len(events) <= 1 {
+		return events
+	}
+	merged := make([]RemoteActivityEvent, 0, len(events))
+	var pending RemoteActivityEvent
+	hasPending := false
+	flush := func() {
+		if hasPending {
+			merged = append(merged, pending)
+			hasPending = false
+		}
+	}
+	for _, event := range events {
+		if event.Kind != "keyboard" {
+			flush()
+			merged = append(merged, event)
+			continue
+		}
+		if delta := event.OffsetMs - pending.OffsetMs; hasPending && delta >= 0 && delta <= keyboardMergeWindowMs {
+			pending = event
+			continue
+		}
+		flush()
+		pending = event
+		hasPending = true
+	}
+	flush()
+	return merged
 }
 
 func (a *AudioEngine) maybeShufflePlacementsLocked(now time.Time) {

@@ -25,10 +25,11 @@ Then create or join a room:
 ```bash
 cliks create
 cliks join CLIK-XXXXXX
-cliks start
 ```
 
-`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. It starts with a greeting, the current team name and code, active connection status, and a one-click keep-running toggle; deeper team/preferences/diagnostic actions live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+`cliks join` validates the code, saves it, and starts one background Cliks session automatically. Use `cliks join --no-start CLIK-XXXXXX` if you only want to save the team, or `cliks start CLIK-XXXXXX` if you want to select and start a code in one foreground command.
+
+`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. On first run, Join Team, Create Team, Sound Check, and Setup Check are immediately visible. After joining, the compact home screen shows the current team name and code, active connection status, and a one-click keep-running toggle; deeper controls live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
 
 ## What It Sends
 
@@ -83,7 +84,6 @@ Open the site, create a team, then join it from the CLI:
 
 ```bash
 cliks join CLIK-XXXXXX
-cliks start
 ```
 
 On Linux, for global capture across apps on both Wayland and Xorg, use:
@@ -124,13 +124,16 @@ Useful commands:
 cliks create
 cliks delete [CLIK-XXXXXX]
 cliks join CLIK-XXXXXX
+cliks join --no-start CLIK-XXXXXX
 cliks nickname "YourName"
 cliks start
+cliks start CLIK-XXXXXX
 cliks settings
 cliks preset deep
 cliks teams
 cliks switch CLIK-XXXXXX
 cliks config
+cliks set --list
 cliks autostart enable
 cliks set autostart on
 cliks set audio.device default
@@ -143,11 +146,11 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Team, Connection, and Diagnostics; Team includes Join, Create, Delete, Switch, and an easy Nickname form for the short display name teammates see. Joining from the TUI saves the team and opens live automatically. Creating from the TUI copies the code when clipboard support is available. If no session is running, Keep Running only saves the future terminal-close preference; it does not start a hidden connection. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stop does not disable launch-at-login; a boot-started session stays stopped until the next login or boot unless you disable autostart separately. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell. Press `?` on the control, preference, or live screens for context-specific shortcuts. Colors adapt automatically for light and dark terminal backgrounds.
+Bare `cliks` opens the control screen. The home view intentionally stays small: Open Live, Keep Running, Stop, More, and Quit. It shows whether this device is already connected, including foreground/background/launch-at-login mode, pid, connection state, teammate count, and local captured/sent counters. The More menu contains Preferences, Advanced, Team, Connection, and Diagnostics. Advanced exposes nickname, audio output, and batch-window controls; `cliks set --list` prints every scriptable key beside its TUI label. Team includes Join, Create, Delete, Switch, and Nickname. Joining from the TUI saves the team and opens live automatically. Creating from the TUI copies the code when clipboard support is available. Form fields support left/right, Home/End, Backspace/Delete, and precise mouse field selection, so correcting a pasted value no longer requires retyping it. Preference lists keep the selected row visible in short terminal panes. If no session is running, Keep Running only saves the future terminal-close preference; it does not start a hidden connection. If a connection is already active, turning Keep Running off schedules it to stop when the control screen closes; Stop disconnects immediately. Stop does not disable launch-at-login; a boot-started session stays stopped until the next login or boot unless you disable autostart separately. Mouse hover, wheel, clicks, and arrow keys move or activate rows, and actions such as sound test, doctor, and launch-at-login toggle return inside the TUI instead of dropping you back to the shell. Press `?` on the control, preference, or live screens for context-specific shortcuts. Colors adapt automatically for light and dark terminal backgrounds.
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
-While `cliks start` is open, Cliks shows a live terminal dashboard with room name and code, display names for small rooms, a compact typing-now summary, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open the same preference rows used by the main TUI, then `Tab`/`Esc`/`q` to return to live. Press `Esc`, `q`, or the Back button from live to return to the main control screen instead of quitting the app; use Stop or `Ctrl+C` when you actually want to disconnect. If Keep Running is on, leaving or closing the foreground live window hands the room off to one background session. You can click the team code to copy it, click hovered on-screen controls, use `?` for the shortcut guide, and use the mouse wheel for volume in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
+While `cliks start` is open, Cliks shows a live terminal dashboard with room name and code, display names for small rooms, a compact typing-now summary, local flow badge, live health/last-activity line, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open the same preference rows used by the main TUI, then `Tab`/`Esc`/`q` to return to live. Press `Esc`, `q`, or the Back button from live to return to the main control screen instead of quitting the app; use Stop or `Ctrl+C` when you actually want to disconnect. If Keep Running is on, leaving or closing the foreground live window hands the room off to one background session. You can click the team code to copy it, click hovered on-screen controls, use `?` for the shortcut guide, and use the mouse wheel for volume in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
 
 Rooms are capped at 20 live people. Spatial placement pans teammates around your desk locally: 4 people in the first ring and 2 more seats per outer ring, with each ring rotated to avoid stacking teammates at the same angle. Dynamic circle placement can optionally reshuffle every 1-60 minutes so recently active teammates move closer locally. Fatigue fade softens long typing bursts with a room-aware gradual curve so busy rooms do not pump between loud and quiet. Density controls how many received sounds are played locally; it never changes what activity is sent.
 
@@ -182,7 +185,7 @@ cliks capture-test --evdev
 
 While `cliks start` is running, the status screen also shows connection state plus local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check whether the CLI is reconnecting to the backend.
 
-If the WebSocket drops during a server restart or short network outage, `cliks start` stays open and retries automatically with backoff. The CLI and relay exchange heartbeats so half-open connections are cleaned up instead of leaving stale teammates in the room. Activity captured while offline is best-effort and may be dropped until the connection is restored. If the backend says the selected team was deleted or is no longer in the database, the CLI removes that team from local config, disables launch-at-login, and stops reconnecting to it.
+If the WebSocket drops during a server restart or short network outage, `cliks start` stays open and retries automatically with exponential backoff plus bounded random jitter. This spreads reconnects after a shared outage instead of making every client retry together. The CLI and relay exchange heartbeats so half-open connections are cleaned up instead of leaving stale teammates in the room. Activity captured while offline is best-effort and may be dropped until the connection is restored. If the backend says the selected team was deleted or is no longer in the database, the CLI removes that team from local config, disables launch-at-login, and stops reconnecting to it.
 
 If a terminal tab feels stuck in a strange input mode after terminal-only testing, run:
 
@@ -306,7 +309,7 @@ This is an early prototype. The website, longer team codes, Go WebSocket relay, 
 
 Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
 
-The hosted backend keeps `/health` public for uptime checks, but it returns only anonymous aggregate counts. It does not expose team codes, team names, or per-room snapshots.
+The hosted backend keeps `/health` public for uptime checks, but it returns only anonymous aggregate counts. It does not expose team codes, team names, or per-room snapshots. Team lookups and failed WebSocket joins are limited per IP, inbound WebSocket messages are size/rate guarded, a socket is allowed in only one room at a time, and recovered background/connection panics are logged with stack traces instead of taking down unrelated rooms.
 
 ## License
 

@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +43,9 @@ type SessionViewState struct {
 	Notice              string
 	Peers               []PeerPresence
 	RecentPeerActivity  []PeerActivityStatus
+	LastLocalActivityAt time.Time
+	LastPeerActivityAt  time.Time
+	LocalBurstCount     int
 }
 
 type PeerActivityStatus struct {
@@ -90,19 +93,24 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 		return sessionExitStop, err
 	}
 	if term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
-		stopSignals := installSessionSignalHandler(controller)
+		tuiCtx, stopSignals := tuiSignalContext(context.Background())
 		defer stopSignals()
-		program := tea.NewProgram(newSessionModel(controller), tea.WithAltScreen(), tea.WithMouseAllMotion())
+		model := newSessionModel(controller)
+		program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(tuiCtx))
 		finalModel, err := program.Run()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			controller.stop()
 			return sessionExitStop, err
 		}
-		result, _ := finalModel.(sessionModel)
+		result, ok := finalModel.(sessionModel)
+		if !ok {
+			result = model
+		}
+		signalExit := tuiCtx.Err() != nil
 		if result.exit == "" {
 			result.exit = sessionExitStop
 		}
-		keepRunning := result.exit != sessionExitStop && controller.cfg.KeepRunning && runModeFromEnv() == runModeForeground
+		keepRunning := (result.exit != sessionExitStop || signalExit) && controller.cfg.KeepRunning && runModeFromEnv() == runModeForeground
 		if message, err := finishSessionForExit(controller, keepRunning); err == nil && message != "" {
 			fmt.Fprintln(os.Stderr, message)
 		}
@@ -117,28 +125,6 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 		case <-controller.ctx.Done():
 			return sessionExitStop, nil
 		}
-	}
-}
-
-func installSessionSignalHandler(controller *sessionController) func() {
-	exitSignals := tuiExitSignals()
-	if len(exitSignals) == 0 {
-		return func() {}
-	}
-	signals := make(chan os.Signal, 1)
-	done := make(chan struct{})
-	signal.Notify(signals, exitSignals...)
-	go func() {
-		select {
-		case <-signals:
-			_, _ = finishSessionForExit(controller, controller.cfg.KeepRunning && runModeFromEnv() == runModeForeground)
-			os.Exit(0)
-		case <-done:
-		}
-	}()
-	return func() {
-		signal.Stop(signals)
-		close(done)
 	}
 }
 
@@ -287,6 +273,14 @@ func (s *sessionController) toggle(key string) {
 }
 
 func (s *sessionController) recordLocalActivity(event LocalActivityEvent) {
+	s.set(func(state *SessionViewState) {
+		if !state.LastLocalActivityAt.IsZero() && event.At.Sub(state.LastLocalActivityAt) <= 5*time.Second {
+			state.LocalBurstCount++
+		} else {
+			state.LocalBurstCount = 1
+		}
+		state.LastLocalActivityAt = event.At
+	})
 	select {
 	case s.local <- event:
 	case <-s.ctx.Done():
@@ -539,6 +533,7 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			})
 		case "peer_activity_batch":
 			s.set(func(state *SessionViewState) {
+				state.LastPeerActivityAt = time.Now()
 				state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.PeerID, envelope.Nickname, time.Now())
 			})
 			s.audio.scheduleBatch(envelope.PeerID, envelope.Events)
@@ -546,6 +541,7 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			events := parseCompactEvents(envelope.CompactEvents)
 			if envelope.CompactPeerID != "" && len(events) > 0 {
 				s.set(func(state *SessionViewState) {
+					state.LastPeerActivityAt = time.Now()
 					state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.CompactPeerID, envelope.CompactName, time.Now())
 				})
 				s.audio.scheduleBatch(envelope.CompactPeerID, events)
@@ -651,14 +647,7 @@ func markPeerActive(current []PeerActivityStatus, peerID string, nickname string
 }
 
 func reconnectDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	delay := time.Second << minInt(attempt-1, 5)
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
-	}
-	return delay
+	return randomizedRetryDelay(attempt)
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) {

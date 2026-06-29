@@ -220,14 +220,7 @@ func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing 
 }
 
 func evdevRetryDelay(consecutiveErrors int) time.Duration {
-	if consecutiveErrors < 1 {
-		consecutiveErrors = 1
-	}
-	delay := time.Second << minInt(consecutiveErrors-1, 5)
-	if delay > 30*time.Second {
-		return 30 * time.Second
-	}
-	return delay
+	return randomizedRetryDelay(consecutiveErrors)
 }
 
 func (c *ActivityCapture) handleEvdev(chunk []byte, sharing SharingConfig, touchpad *touchpadTapDetector) {

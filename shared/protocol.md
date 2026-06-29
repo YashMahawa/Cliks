@@ -2,6 +2,8 @@
 
 Cliks uses tiny JSON messages over WebSocket.
 
+Incoming WebSocket messages are capped at 8 KiB and each connection has a local message-rate guard. The 8 KiB cap leaves room for a full 128-event verbose activity batch while rejecting oversized frames before JSON processing. Plain HTTP team-code lookups and failed WebSocket joins are rate-limited per source IP to reduce code-scanning risk.
+
 ## Client to server
 
 ### Join
@@ -20,6 +22,30 @@ Cliks uses tiny JSON messages over WebSocket.
 ```
 
 `nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
+
+A WebSocket connection has exactly one current room. Sending another valid `join` migrates that connection to the new room and emits updated presence to both rooms; activity is routed only to the new room. Failed joins are limited per source IP. After 20 failed attempts in five minutes, the relay sends the following error and closes the socket so the client reconnect loop backs off:
+
+```json
+{
+  "type": "error",
+  "code": "join_rate_limited",
+  "message": "Too many team join attempts. Wait a few minutes and try again."
+}
+```
+
+Valid joins do not consume the failed-join budget.
+
+If a connected client sends too many WebSocket messages in a short window, the relay sends:
+
+```json
+{
+  "type": "error",
+  "code": "message_rate_limited",
+  "message": "Too many WebSocket messages. Slow down and reconnect."
+}
+```
+
+The socket is then closed.
 
 ### Activity batch
 
@@ -116,7 +142,7 @@ Compact event kind `k` means keyboard and `m` means mouse. Compact mouse buttons
 
 ## Connection health
 
-The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out.
+The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out. Reconnect delays use exponential backoff with bounded jitter and a 30-second cap so many clients do not retry in lockstep after an outage.
 
 ## Team deletion
 

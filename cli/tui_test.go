@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -144,6 +145,24 @@ func TestLiveTabOpensUnifiedPreferences(t *testing.T) {
 	}
 }
 
+func TestLiveViewShowsHealthAndFlowDuringQuietPeriods(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+	now := time.Now()
+	model.now = now
+	model.state.ConnectionStatus = "connected"
+	model.state.LastLocalActivityAt = now.Add(-2 * time.Second)
+	model.state.LocalBurstCount = 30
+
+	view := model.View()
+	if !strings.Contains(view, "Flow:") || !strings.Contains(view, "deep flow") || !strings.Contains(view, "Health:") {
+		t.Fatalf("live view missing health/flow status:\n%s", view)
+	}
+}
+
 func TestHomeShortcutGuideTogglesWithoutChangingSelection(t *testing.T) {
 	model := homeModel{cfg: defaultConfig(), mode: "home", cursor: 1}
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -169,6 +188,76 @@ func TestLiveShortcutGuideDocumentsSessionControls(t *testing.T) {
 	for _, text := range []string{"m / s / f", "Tab/Shift+S", "x/Ctrl+C", "Mouse wheel"} {
 		if !strings.Contains(view, text) {
 			t.Fatalf("live shortcut guide is missing %q:\n%s", text, view)
+		}
+	}
+}
+
+func TestFirstRunSurfacesJoinCreateAndSoundCheck(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "home"}
+	items := model.items()
+	want := []string{"join", "create", "sound", "doctor"}
+	for index, key := range want {
+		if items[index].key != key {
+			t.Fatalf("first-run item %d = %q, want %q", index, items[index].key, key)
+		}
+	}
+	view := model.View()
+	if !strings.Contains(view, "Set up Cliks") || !strings.Contains(view, "Join Team") {
+		t.Fatalf("first-run view does not expose setup actions:\n%s", view)
+	}
+}
+
+func TestFormEditingUsesCursorInsteadOfAppendOnlyInput(t *testing.T) {
+	model := homeModel{
+		cfg:            defaultConfig(),
+		mode:           "join",
+		joinCode:       "CLIK-ABCDEF",
+		formTextCursor: len([]rune("CLIK-ABCDEF")),
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated, _ = updated.(homeModel).Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated, _ = updated.(homeModel).Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated, _ = updated.(homeModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Z'}})
+	got := updated.(homeModel)
+	if got.joinCode != "CLIK-ABCZEF" {
+		t.Fatalf("join code = %q, want cursor edit CLIK-ABCZEF", got.joinCode)
+	}
+	if !strings.Contains(got.View(), "|") {
+		t.Fatal("form view does not render the text cursor")
+	}
+}
+
+func TestFormMouseClickFocusesOnlyTheClickedField(t *testing.T) {
+	model := homeModel{
+		cfg:            defaultConfig(),
+		mode:           "create",
+		width:          100,
+		formCursor:     0,
+		createPassword: "secret",
+	}
+	updated, cmd := model.Update(tea.MouseMsg{Type: tea.MouseLeft, X: 8, Y: formRowsStartY() + 1})
+	got := updated.(homeModel)
+	if cmd != nil || got.formCursor != 1 || got.formTextCursor != len([]rune("secret")) {
+		t.Fatalf("form click result: cursor=%d textCursor=%d cmd=%v", got.formCursor, got.formTextCursor, cmd)
+	}
+}
+
+func TestSettingsWindowKeepsSelectionVisibleInShortTerminal(t *testing.T) {
+	rows := settingsRows(defaultConfig())
+	start, end := settingsWindow(len(rows), len(rows)-1, 15)
+	if end != len(rows) || start >= end || end-start > 5 {
+		t.Fatalf("settings window = [%d,%d) for %d rows", start, end, len(rows))
+	}
+}
+
+func TestAdvancedBatchWindowValidation(t *testing.T) {
+	if got, err := parseBatchWindow("500"); err != nil || got != 500 {
+		t.Fatalf("parseBatchWindow(500) = %d, %v", got, err)
+	}
+	for _, value := range []string{"99", "2001", "nope"} {
+		if _, err := parseBatchWindow(value); err == nil {
+			t.Fatalf("parseBatchWindow(%q) should fail", value)
 		}
 	}
 }

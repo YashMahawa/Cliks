@@ -80,10 +80,11 @@ func run(args []string) error {
 
 func cmdJoin(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cliks join CLIK-XXXXXX")
+		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
 	}
 	nickname := ""
 	code := ""
+	autoStart := true
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-n", "--nickname":
@@ -92,11 +93,18 @@ func cmdJoin(args []string) error {
 			}
 			nickname = args[i+1]
 			i++
+		case "--no-start":
+			autoStart = false
+		case "--start":
+			autoStart = true
 		default:
 			if code == "" {
 				code = args[i]
 			}
 		}
+	}
+	if code == "" {
+		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
 	}
 	cfg := loadConfig()
 	team, err := getTeamViaAPI(cfg, code)
@@ -113,7 +121,15 @@ func cmdJoin(args []string) error {
 			return err
 		}
 	}
-	fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
+	if !autoStart {
+		fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
+		return nil
+	}
+	message, err := startBackgroundForTeam(team.Code)
+	if err != nil {
+		return fmt.Errorf("joined %s, but could not start Cliks in the background: %w", formatTeamLabel(team.Name, team.Code), err)
+	}
+	fmt.Printf("Joined %s.\n%s\n", formatTeamLabel(team.Name, team.Code), message)
 	return nil
 }
 
@@ -214,14 +230,8 @@ func cmdNickname(args []string) error {
 
 func cmdStart(args []string) error {
 	cfg := loadConfig()
-	if team := os.Getenv("CLIKS_AUTOSTART_TEAM"); team != "" {
-		cfg.CurrentTeamCode = strings.ToUpper(team)
-	}
-	if cfg.CurrentTeamCode == "" {
-		printFirstRunHelp()
-		return nil
-	}
 	opts := StartOptions{CaptureMode: "auto", SelfMonitor: cfg.Listening.Self}
+	codeArg := ""
 	for _, arg := range args {
 		switch arg {
 		case "--evdev":
@@ -232,9 +242,25 @@ func cmdStart(args []string) error {
 			opts.SelfMonitor = true
 		default:
 			if strings.HasPrefix(strings.ToUpper(arg), "CLIK-") {
-				cfg.CurrentTeamCode = strings.ToUpper(arg)
+				codeArg = strings.ToUpper(arg)
 			}
 		}
+	}
+	if team := os.Getenv("CLIKS_AUTOSTART_TEAM"); team != "" {
+		cfg.CurrentTeamCode = strings.ToUpper(team)
+	} else if codeArg != "" {
+		team, err := getTeamViaAPI(cfg, codeArg)
+		if err != nil {
+			return err
+		}
+		cfg, err = rememberTeam(team.Code, team.Name)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.CurrentTeamCode == "" {
+		printFirstRunHelp()
+		return nil
 	}
 	return startSession(cfg, opts)
 }
@@ -336,8 +362,12 @@ func cmdPreset(args []string) error {
 }
 
 func cmdSet(args []string) error {
+	if len(args) == 1 && (args[0] == "--list" || args[0] == "-l") {
+		printSettingCatalog()
+		return nil
+	}
 	if len(args) < 2 {
-		return errors.New("usage: cliks set <key> <value>")
+		return errors.New("usage: cliks set <key> <value>\n       cliks set --list")
 	}
 	cfg := loadConfig()
 	key, value := args[0], args[1]
@@ -515,7 +545,10 @@ func printFirstRunHelp() {
 	fmt.Println("1. Create or get a team code from the Cliks website.")
 	fmt.Println("2. Join it here:")
 	fmt.Println("   cliks join CLIK-XXXXXX")
-	fmt.Println("3. Start the room:")
+	fmt.Println("   This starts one background Cliks session automatically.")
+	fmt.Println("")
+	fmt.Println("Manual path:")
+	fmt.Println("   cliks join --no-start CLIK-XXXXXX")
 	fmt.Println("   cliks start")
 	fmt.Println("")
 	fmt.Println("Or open the interface:")
@@ -534,9 +567,11 @@ Usage:
   %[1]s                  Open the Bubble Tea interface
   %[1]s create           Create a team
   %[1]s delete [CODE]    Delete a team
-  %[1]s join CODE        Save and select a team
+  %[1]s join CODE        Save, select, and start a background session
+  %[1]s join --no-start CODE
   %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience
+  %[1]s start CODE       Join/select a code and start immediately
   %[1]s settings         Open the control screen
   %[1]s doctor           Check setup and permissions
   %[1]s sound-test       Play local sample sounds
@@ -544,6 +579,7 @@ Usage:
   %[1]s autostart ...    Manage background autoconnect
   %[1]s background ...   Start, stop, or inspect background Cliks
   %[1]s config           Show settings and launch-at-login state
+  %[1]s set --list       List every setting key and TUI label
   %[1]s set autostart on|off
   %[1]s set audio.device DEVICE|default
   %[1]s set keep.running on|off

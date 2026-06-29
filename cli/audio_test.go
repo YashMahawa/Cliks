@@ -56,6 +56,38 @@ func TestQueuePressureThinningStartsAfterHalfFull(t *testing.T) {
 	}
 }
 
+func TestMergePlaybackEventsCollapsesDenseKeyboardBursts(t *testing.T) {
+	events := []RemoteActivityEvent{
+		{Kind: "keyboard", OffsetMs: 0},
+		{Kind: "keyboard", OffsetMs: 8},
+		{Kind: "keyboard", OffsetMs: 16},
+		{Kind: "keyboard", OffsetMs: 60},
+		{Kind: "mouse", Button: "left", OffsetMs: 65},
+		{Kind: "keyboard", OffsetMs: 70},
+	}
+	got := mergePlaybackEvents(events)
+	want := []RemoteActivityEvent{
+		{Kind: "keyboard", OffsetMs: 16},
+		{Kind: "keyboard", OffsetMs: 60},
+		{Kind: "mouse", Button: "left", OffsetMs: 65},
+		{Kind: "keyboard", OffsetMs: 70},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged events = %#v, want %#v", got, want)
+	}
+}
+
+func TestMergePlaybackEventsKeepsNormalRhythm(t *testing.T) {
+	events := []RemoteActivityEvent{
+		{Kind: "keyboard", OffsetMs: 0},
+		{Kind: "keyboard", OffsetMs: 45},
+		{Kind: "keyboard", OffsetMs: 95},
+	}
+	if got := mergePlaybackEvents(events); !reflect.DeepEqual(got, events) {
+		t.Fatalf("normal rhythm was changed: %#v", got)
+	}
+}
+
 func TestFatigueThresholdScalesWithRoomPopulation(t *testing.T) {
 	if got := fatigueThreshold(1); got != 24 {
 		t.Fatalf("single-peer threshold = %d, want 24", got)

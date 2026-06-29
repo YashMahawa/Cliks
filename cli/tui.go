@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,12 +110,16 @@ type homeModel struct {
 	action           homeAction
 	settingsCursor   int
 	formCursor       int
+	formTextCursor   int
+	formReturnMode   string
 	createName       string
 	createPassword   string
 	joinCode         string
 	deleteCode       string
 	deletePassword   string
 	nicknameValue    string
+	audioDeviceValue string
+	batchWindowValue string
 	stopActiveOnExit bool
 	busy             bool
 	width            int
@@ -124,7 +132,7 @@ func runHomeTUI(cfg CliksConfig) error {
 		printHelp("cliks")
 		return nil
 	}
-	stopSignals := installDeferredStopSignalHandler()
+	ctx, stopSignals := tuiSignalContext(context.Background())
 	defer stopSignals()
 	deferredMessage := consumeDeferredStopIfNeeded()
 	active, activeOK := activeSession()
@@ -139,12 +147,15 @@ func runHomeTUI(cfg CliksConfig) error {
 		}
 	}
 	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active)}
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
-	result, _ := finalModel.(homeModel)
+	result, ok := finalModel.(homeModel)
+	if !ok {
+		result = model
+	}
 	if result.stopActiveOnExit {
 		_, _ = stopActiveSession()
 		_ = clearDeferredStop()
@@ -179,29 +190,12 @@ func runHomeTUI(cfg CliksConfig) error {
 	}
 }
 
-func installDeferredStopSignalHandler() func() {
+func tuiSignalContext(parent context.Context) (context.Context, func()) {
 	exitSignals := tuiExitSignals()
 	if len(exitSignals) == 0 {
-		return func() {}
+		return parent, func() {}
 	}
-	signals := make(chan os.Signal, 1)
-	done := make(chan struct{})
-	signal.Notify(signals, exitSignals...)
-	go func() {
-		select {
-		case <-signals:
-			if hasDeferredStop() {
-				_, _ = stopActiveSession()
-				_ = clearDeferredStop()
-			}
-			os.Exit(0)
-		case <-done:
-		}
-	}()
-	return func() {
-		signal.Stop(signals)
-		close(done)
-	}
+	return signal.NotifyContext(parent, exitSignals...)
 }
 
 func (m homeModel) Init() tea.Cmd { return homeTick() }
@@ -250,7 +244,13 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.helpOpen {
 			return m, nil
 		}
-		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
+		if isFormMode(m.mode) {
+			if msg.Type == tea.MouseLeft {
+				if index := m.formHit(msg.X, msg.Y); index >= 0 {
+					m.formCursor = index
+					m.moveFormTextCursorToEnd()
+				}
+			}
 			return m, nil
 		}
 		if msg.Type == tea.MouseWheelUp {
@@ -284,7 +284,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
+		if isFormMode(m.mode) {
 			return m.updateForm(msg)
 		}
 		switch msg.String() {
@@ -336,7 +336,7 @@ func (m homeModel) View() string {
 		body = shortcutHelpView(context, m.width)
 	} else if m.mode == "preferences" {
 		body = m.preferencesView()
-	} else if m.mode == "create" || m.mode == "join" || m.mode == "delete" || m.mode == "nickname" {
+	} else if isFormMode(m.mode) {
 		body = m.formView()
 	} else {
 		body = m.itemView()
@@ -381,31 +381,70 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 	case "back":
 		m.back()
 	case "create":
+		returnMode := m.mode
+		if returnMode != "home" {
+			returnMode = "team"
+		}
 		m.mode = "create"
 		m.formCursor = 0
+		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.createName = ""
 		m.createPassword = ""
+		m.moveFormTextCursorToEnd()
 		m.message = "Name the room and set a delete password."
 	case "join":
+		returnMode := m.mode
+		if returnMode != "home" {
+			returnMode = "team"
+		}
 		m.mode = "join"
 		m.formCursor = 0
+		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.joinCode = ""
+		m.moveFormTextCursorToEnd()
 		m.message = "Paste or type a team code. Join opens live automatically."
 	case "delete":
 		m.mode = "delete"
 		m.formCursor = 0
+		m.formReturnMode = "team"
 		m.mouseOver = false
 		m.deleteCode = m.cfg.CurrentTeamCode
 		m.deletePassword = ""
+		m.moveFormTextCursorToEnd()
 		m.message = "Delete closes the live room for everyone using this code."
 	case "nickname":
+		returnMode := m.mode
+		if returnMode != "advanced" {
+			returnMode = "team"
+		}
 		m.mode = "nickname"
 		m.formCursor = 0
+		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.nicknameValue = m.cfg.Nickname
+		m.moveFormTextCursorToEnd()
 		m.message = "Set the short name teammates see in the live room. Max 10 characters."
+	case "advanced":
+		m.mode = "advanced"
+		m.cursor = 0
+		m.mouseOver = false
+		m.message = "Less common local controls. Backend overrides stay in cliks set --list."
+	case "audio-device":
+		m.mode = "audio-device"
+		m.formCursor = 0
+		m.formReturnMode = "advanced"
+		m.audioDeviceValue = valuePlain(m.cfg.Listening.AudioDevice, "default")
+		m.moveFormTextCursorToEnd()
+		m.message = "Use default, or an output name supported by mpv/PulseAudio/PipeWire."
+	case "batch-window":
+		m.mode = "batch-window"
+		m.formCursor = 0
+		m.formReturnMode = "advanced"
+		m.batchWindowValue = fmt.Sprintf("%d", m.cfg.BatchWindowMs)
+		m.moveFormTextCursorToEnd()
+		m.message = "100-2000 ms. The default 500 ms balances latency and network use."
 	case "preferences":
 		m.mode = "preferences"
 		m.settingsCursor = 0
@@ -498,26 +537,7 @@ func (m *homeModel) changeSetting(delta int) {
 
 func (m homeModel) itemView() string {
 	items := m.items()
-	var lines []string
-	title, intro := m.viewHeader()
-	lines = append(lines, styleAccent.Render(title))
-	if intro != "" {
-		lines = append(lines, intro)
-	}
-	if m.mode == "home" {
-		lines = append(lines, "")
-		teamText := teamLabel(m.cfg, m.cfg.CurrentTeamCode)
-		if m.activeOK && m.activeTeamLabel() != "" {
-			teamText = m.activeTeamLabel()
-		}
-		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(teamText, "not joined")))
-		lines = append(lines, "Connection: "+m.connectionSummary())
-		if m.activeOK {
-			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
-			lines = append(lines, fmt.Sprintf("Activity: %d captured, %d sent", m.active.LocalCapturedEvents, m.active.LocalSentEvents))
-		}
-	}
-	lines = append(lines, "")
+	lines := m.itemPrefixLines()
 	for i, item := range items {
 		line := fmt.Sprintf("%-12s %s", item.label, item.help)
 		if i == m.cursor {
@@ -535,12 +555,36 @@ func (m homeModel) itemView() string {
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
+func (m homeModel) itemPrefixLines() []string {
+	title, intro := m.viewHeader()
+	lines := []string{styleAccent.Render(title)}
+	if intro != "" {
+		lines = append(lines, intro)
+	}
+	if m.mode == "home" {
+		lines = append(lines, "")
+		teamText := teamLabel(m.cfg, m.cfg.CurrentTeamCode)
+		if m.activeOK && m.activeTeamLabel() != "" {
+			teamText = m.activeTeamLabel()
+		}
+		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(teamText, "not joined")))
+		lines = append(lines, "Connection: "+m.connectionSummary())
+		if m.activeOK {
+			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
+			lines = append(lines, fmt.Sprintf("Activity: %d captured, %d sent", m.active.LocalCapturedEvents, m.active.LocalSentEvents))
+		}
+	}
+	return append(lines, "")
+}
+
 func (m homeModel) preferencesView() string {
 	rows := settingsRows(m.cfg)
+	start, end := settingsWindow(len(rows), m.settingsCursor, m.height)
 	var lines []string
 	lines = append(lines, styleAccent.Render("Preferences"))
 	lines = append(lines, "")
-	for i, row := range rows {
+	for i := start; i < end; i++ {
+		row := rows[i]
 		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(m.cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
 			if m.mouseOver {
@@ -552,7 +596,11 @@ func (m homeModel) preferencesView() string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, styleDim.Render("Left/right adjusts. Enter toggles. s saves. q returns."))
+	footer := "Left/right adjusts. Enter toggles. s saves. q returns."
+	if start > 0 || end < len(rows) {
+		footer = fmt.Sprintf("Showing %d-%d of %d. Up/down reveals more. q returns.", start+1, end, len(rows))
+	}
+	lines = append(lines, styleDim.Render(footer))
 	lines = append(lines, styleDim.Render(m.message))
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
@@ -583,6 +631,7 @@ func (m homeModel) items() []homeItem {
 	case "menu":
 		return []homeItem{
 			{key: "preferences", label: "Preferences", help: "sound, sharing, spatial audio, and fatigue fade"},
+			{key: "advanced", label: "Advanced", help: "nickname, audio output, and batching"},
 			{key: "team", label: "Team", help: "create, delete, or switch the selected team"},
 			{key: "connection", label: "Connection", help: "background mode and launch-at-login"},
 			{key: "diagnostics", label: "Diagnostics", help: "sound test and setup check"},
@@ -611,7 +660,24 @@ func (m homeModel) items() []homeItem {
 			{key: "doctor", label: "Doctor", help: "quick setup and permission check"},
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
+	case "advanced":
+		return []homeItem{
+			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "anonymous") + " (CLI key: nickname)"},
+			{key: "audio-device", label: "Audio Output", help: valuePlain(m.cfg.Listening.AudioDevice, "default") + " (CLI key: audio.device)"},
+			{key: "batch-window", label: "Batch Window", help: fmt.Sprintf("%d ms (CLI key: batch.ms)", m.cfg.BatchWindowMs)},
+			{key: "back", label: "Back", help: "return to the menu"},
+		}
 	default:
+		if m.cfg.CurrentTeamCode == "" {
+			return []homeItem{
+				{key: "join", label: "Join Team", help: "paste a team code and open live"},
+				{key: "create", label: "Create Team", help: "make a room and copy its code"},
+				{key: "sound", label: "Sound Check", help: "play keyboard and mouse samples"},
+				{key: "doctor", label: "Setup Check", help: "check audio and input permissions"},
+				{key: "menu", label: "More", help: "preferences, diagnostics, and connection options"},
+				{key: "quit", label: "Quit", help: "close this control screen"},
+			}
+		}
 		items := []homeItem{
 			{key: "start", label: "Open Live", help: m.startHelp()},
 			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
@@ -637,7 +703,12 @@ func (m homeModel) viewHeader() (string, string) {
 		return "Connection", "Cliks allows one local connection per device."
 	case "diagnostics":
 		return "Diagnostics", "Quick checks without leaving the TUI."
+	case "advanced":
+		return "Advanced", "These controls stay on this device. Run cliks set --list for every scriptable key."
 	default:
+		if m.cfg.CurrentTeamCode == "" {
+			return "Set up Cliks", "Join a team first, then Cliks opens the live room automatically."
+		}
 		return "Welcome back", "Ambient coworking, no keystrokes shared."
 	}
 }
@@ -694,8 +765,10 @@ func (m *homeModel) refreshRuntime() {
 
 func (m *homeModel) hover(y int) bool {
 	if m.mode == "preferences" {
-		index := y - (panelContentStartY() + 2)
-		if index >= 0 && index < len(settingsRows(m.cfg)) {
+		rows := settingsRows(m.cfg)
+		start, end := settingsWindow(len(rows), m.settingsCursor, m.height)
+		index := start + y - settingsRowsStartY()
+		if index >= start && index < end {
 			m.settingsCursor = index
 			return true
 		}
@@ -710,22 +783,42 @@ func (m *homeModel) hover(y int) bool {
 }
 
 func (m homeModel) itemStartY() int {
-	if m.mode == "home" {
-		if m.activeOK {
-			return panelContentStartY() + 8
-		}
-		return panelContentStartY() + 6
-	}
-	return panelContentStartY() + 3
+	return panelContentStartY() + len(m.itemPrefixLines())
 }
 
 func panelContentStartY() int {
 	return 3
 }
 
+func settingsRowsStartY() int {
+	return panelContentStartY() + 2
+}
+
+func formRowsStartY() int {
+	return panelContentStartY() + 2
+}
+
+func settingsWindow(total int, cursor int, height int) (int, int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	visible := total
+	if height > 0 {
+		visible = clampInt(height-10, 3, total)
+	}
+	start := cursor - visible/2
+	if start < 0 {
+		start = 0
+	}
+	if start+visible > total {
+		start = total - visible
+	}
+	return start, start + visible
+}
+
 func (m *homeModel) back() {
 	switch m.mode {
-	case "team", "connection", "diagnostics", "preferences":
+	case "team", "connection", "diagnostics", "preferences", "advanced":
 		m.mode = "menu"
 		m.cursor = 0
 	default:
@@ -787,6 +880,68 @@ func typingSummary(state SessionViewState, now time.Time) string {
 		return names[0] + " is typing"
 	}
 	return joinNames(names) + " are typing"
+}
+
+func flowBadge(state SessionViewState, now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if state.LastLocalActivityAt.IsZero() || now.Sub(state.LastLocalActivityAt) > 8*time.Second {
+		return styleDim.Render("idle")
+	}
+	if state.LocalBurstCount >= 24 {
+		return styleOK.Render("deep flow")
+	}
+	if state.LocalBurstCount >= 5 {
+		return styleAccent.Render("active")
+	}
+	return styleAccent.Render("warming")
+}
+
+func healthSummary(state SessionViewState, now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	status := strings.ToLower(state.ConnectionStatus)
+	if strings.Contains(status, "offline") || strings.Contains(status, "disconnected") || strings.Contains(status, "stopped") {
+		return styleWarn.Render("connection " + valuePlain(state.ConnectionStatus, "offline"))
+	}
+	pulse := "live"
+	if now.Unix()%2 == 0 {
+		pulse = "live."
+	}
+	last := latestTime(state.LastLocalActivityAt, state.LastPeerActivityAt)
+	if last.IsZero() {
+		return styleOK.Render(pulse) + styleDim.Render(" | waiting for activity")
+	}
+	return styleOK.Render(pulse) + styleDim.Render(" | last activity "+relativeAge(now, last))
+}
+
+func latestTime(left time.Time, right time.Time) time.Time {
+	if right.After(left) {
+		return right
+	}
+	return left
+}
+
+func relativeAge(now time.Time, then time.Time) string {
+	if then.IsZero() {
+		return "never"
+	}
+	age := now.Sub(then)
+	if age < 0 {
+		age = 0
+	}
+	if age < time.Second {
+		return "now"
+	}
+	if age < time.Minute {
+		return fmt.Sprintf("%ds ago", int(age.Seconds()))
+	}
+	if age < time.Hour {
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	}
+	return fmt.Sprintf("%dh ago", int(age.Hours()))
 }
 
 func peerDisplayNames(state SessionViewState) []string {
@@ -907,31 +1062,51 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.mode = "home"
+		m.mode = valuePlain(m.formReturnMode, "home")
+		m.cursor = 0
 		m.mouseOver = false
 		m.message = "Cancelled."
 		return m, nil
 	case "up", "shift+tab":
 		m.formCursor = clampInt(m.formCursor-1, 0, m.formFieldCount()-1)
+		m.moveFormTextCursorToEnd()
 		return m, nil
 	case "down", "tab":
 		m.formCursor = clampInt(m.formCursor+1, 0, m.formFieldCount()-1)
+		m.moveFormTextCursorToEnd()
+		return m, nil
+	case "left", "ctrl+b":
+		m.formTextCursor = clampInt(m.formTextCursor-1, 0, len([]rune(m.formValue())))
+		return m, nil
+	case "right", "ctrl+f":
+		m.formTextCursor = clampInt(m.formTextCursor+1, 0, len([]rune(m.formValue())))
+		return m, nil
+	case "home", "ctrl+a":
+		m.formTextCursor = 0
+		return m, nil
+	case "end", "ctrl+e":
+		m.moveFormTextCursorToEnd()
 		return m, nil
 	case "enter":
 		if m.formCursor < m.formFieldCount()-1 {
 			m.formCursor++
+			m.moveFormTextCursorToEnd()
 			return m, nil
 		}
 		return m.submitForm()
 	case "backspace", "ctrl+h":
 		m.trimFormValue()
 		return m, nil
+	case "delete":
+		m.deleteFormValueAtCursor()
+		return m, nil
 	case "ctrl+u":
 		m.setFormValue("")
+		m.formTextCursor = 0
 		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
-		m.setFormValue(m.formValue() + string(msg.Runes))
+		m.insertFormRunes(msg.Runes)
 	}
 	return m, nil
 }
@@ -944,9 +1119,41 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.message = err.Error()
 			return m, nil
 		}
-		m.mode = "team"
+		m.mode = valuePlain(m.formReturnMode, "team")
+		m.cursor = 0
 		m.mouseOver = false
 		m.message = fmt.Sprintf("Nickname set to %s.", valuePlain(name, "anonymous"))
+		return m, nil
+	}
+	if m.mode == "audio-device" {
+		device := strings.TrimSpace(m.audioDeviceValue)
+		if strings.EqualFold(device, "default") {
+			device = ""
+		}
+		m.cfg.Listening.AudioDevice = device
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.mode = "advanced"
+		m.cursor = 1
+		m.message = fmt.Sprintf("Audio output set to %s.", valuePlain(device, "default"))
+		return m, nil
+	}
+	if m.mode == "batch-window" {
+		window, err := parseBatchWindow(m.batchWindowValue)
+		if err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.cfg.BatchWindowMs = window
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.mode = "advanced"
+		m.cursor = 2
+		m.message = fmt.Sprintf("Batch window set to %d ms.", window)
 		return m, nil
 	}
 	if m.mode == "join" {
@@ -993,7 +1200,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
-	if m.mode == "nickname" || m.mode == "join" {
+	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" {
 		return 1
 	}
 	return 2
@@ -1015,6 +1222,10 @@ func (m homeModel) formValue() string {
 		return m.deletePassword
 	case "nickname":
 		return m.nicknameValue
+	case "audio-device":
+		return m.audioDeviceValue
+	case "batch-window":
+		return m.batchWindowValue
 	default:
 		return ""
 	}
@@ -1037,16 +1248,77 @@ func (m *homeModel) setFormValue(value string) {
 			m.deletePassword = value
 		}
 	case "nickname":
-		m.nicknameValue = sanitizeNickname(value)
+		m.nicknameValue = value
+	case "audio-device":
+		m.audioDeviceValue = value
+	case "batch-window":
+		m.batchWindowValue = value
 	}
 }
 
 func (m *homeModel) trimFormValue() {
 	value := []rune(m.formValue())
-	if len(value) == 0 {
+	if len(value) == 0 || m.formTextCursor == 0 {
 		return
 	}
-	m.setFormValue(string(value[:len(value)-1]))
+	index := clampInt(m.formTextCursor, 0, len(value))
+	value = append(value[:index-1], value[index:]...)
+	m.setFormValue(string(value))
+	m.formTextCursor = index - 1
+}
+
+func (m *homeModel) insertFormRunes(inserted []rune) {
+	value := []rune(m.formValue())
+	index := clampInt(m.formTextCursor, 0, len(value))
+	next := make([]rune, 0, len(value)+len(inserted))
+	next = append(next, value[:index]...)
+	next = append(next, inserted...)
+	next = append(next, value[index:]...)
+	m.setFormValue(string(next))
+	m.formTextCursor = clampInt(index+len(inserted), 0, len([]rune(m.formValue())))
+}
+
+func (m *homeModel) deleteFormValueAtCursor() {
+	value := []rune(m.formValue())
+	index := clampInt(m.formTextCursor, 0, len(value))
+	if index >= len(value) {
+		return
+	}
+	value = append(value[:index], value[index+1:]...)
+	m.setFormValue(string(value))
+	m.formTextCursor = clampInt(index, 0, len([]rune(m.formValue())))
+}
+
+func (m *homeModel) moveFormTextCursorToEnd() {
+	m.formTextCursor = len([]rune(m.formValue()))
+}
+
+func (m homeModel) formHit(x int, y int) int {
+	if x < 3 || x > panelWidth(m.width)-3 {
+		return -1
+	}
+	index := y - formRowsStartY()
+	if index < 0 || index >= m.formFieldCount() {
+		return -1
+	}
+	return index
+}
+
+func isFormMode(mode string) bool {
+	switch mode {
+	case "create", "join", "delete", "nickname", "audio-device", "batch-window":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseBatchWindow(value string) (int, error) {
+	window, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || window < 100 || window > 2000 {
+		return 0, fmt.Errorf("batch window must be a whole number from 100 to 2000 ms")
+	}
+	return window, nil
 }
 
 func (m homeModel) formView() string {
@@ -1055,24 +1327,34 @@ func (m homeModel) formView() string {
 	if m.mode == "create" {
 		title = "Create Team"
 		rows = []string{
-			formLine("Team name", valueOr(m.createName, "Cliks Room"), m.formCursor == 0),
-			formLine("Delete password", maskSecret(m.createPassword), m.formCursor == 1),
+			formLine("Team name", m.createName, "Cliks Room", m.formCursor == 0, m.formTextCursor, false),
+			formLine("Delete password", m.createPassword, "not set", m.formCursor == 1, m.formTextCursor, true),
 		}
 	} else if m.mode == "join" {
 		title = "Join Team"
 		rows = []string{
-			formLine("Team code", valueOr(m.joinCode, "CLIK-XXXXXX"), true),
+			formLine("Team code", m.joinCode, "CLIK-XXXXXX", true, m.formTextCursor, false),
 		}
 	} else if m.mode == "delete" {
 		title = "Delete Team"
 		rows = []string{
-			formLine("Team code", valueOr(m.deleteCode, "CLIK-XXXXXX"), m.formCursor == 0),
-			formLine("Delete password", maskSecret(m.deletePassword), m.formCursor == 1),
+			formLine("Team code", m.deleteCode, "CLIK-XXXXXX", m.formCursor == 0, m.formTextCursor, false),
+			formLine("Delete password", m.deletePassword, "not set", m.formCursor == 1, m.formTextCursor, true),
+		}
+	} else if m.mode == "audio-device" {
+		title = "Audio Output"
+		rows = []string{
+			formLine("Device", m.audioDeviceValue, "default", true, m.formTextCursor, false),
+		}
+	} else if m.mode == "batch-window" {
+		title = "Batch Window"
+		rows = []string{
+			formLine("Milliseconds", m.batchWindowValue, "500", true, m.formTextCursor, false),
 		}
 	} else {
 		title = "Nickname"
 		rows = []string{
-			formLine("Display name", valueOr(m.nicknameValue, "anonymous"), true),
+			formLine("Display name", m.nicknameValue, "anonymous", true, m.formTextCursor, false),
 		}
 	}
 	lines := []string{styleAccent.Render(title), ""}
@@ -1081,25 +1363,29 @@ func (m homeModel) formView() string {
 	if m.busy {
 		lines = append(lines, styleAccent.Render(m.message))
 	} else {
-		lines = append(lines, styleDim.Render("Enter moves forward/submits. Tab changes fields. Esc cancels."))
+		lines = append(lines, styleDim.Render("Left/right edits at the cursor. Enter submits. Tab changes fields. Esc cancels."))
 		lines = append(lines, styleDim.Render(m.message))
 	}
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
-func formLine(label string, value string, selected bool) string {
-	line := fmt.Sprintf("%-18s %s", label, value)
+func formLine(label string, value string, placeholder string, selected bool, cursor int, secret bool) string {
+	display := value
+	if secret {
+		display = strings.Repeat("*", len([]rune(value)))
+	}
+	if selected {
+		runes := []rune(display)
+		cursor = clampInt(cursor, 0, len(runes))
+		display = string(runes[:cursor]) + "|" + string(runes[cursor:])
+	} else if display == "" {
+		display = placeholder
+	}
+	line := fmt.Sprintf("%-18s %s", label, display)
 	if selected {
 		return styleSelected.Render(" " + line + " ")
 	}
 	return line
-}
-
-func maskSecret(value string) string {
-	if value == "" {
-		return styleDim.Render("not set")
-	}
-	return strings.Repeat("*", len([]rune(value)))
 }
 
 func createTeamCmd(name string, password string) tea.Cmd {
@@ -1195,6 +1481,12 @@ func doctorSummaryCmd() tea.Cmd {
 		}
 		if hint != "" {
 			return commandDoneMsg{message: "Audio setup warning: " + hint}
+		}
+		if os.Getenv("CLIKS_SKIP_INPUT_DOCTOR") == "" && runtime.GOOS == "linux" {
+			input := linuxInputStatus()
+			if input.hasInputDir && input.eventCount > 0 && input.readableCount == 0 {
+				return commandDoneMsg{message: "Input permission needed: sudo usermod -aG input " + input.username + "; then log out and back in."}
+			}
 		}
 		if cfg.CurrentTeamCode == "" {
 			return commandDoneMsg{message: "Setup needs a team. Create or join one first."}
@@ -1413,7 +1705,7 @@ func (m sessionModel) View() string {
 	colWidth := (width - 6) / 2
 	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
 	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
-	controls := stylePanel.Width(width).Render(m.liveControlsLine())
+	controls := m.liveControlsStyle().Width(width).Render(m.liveControlsLine())
 	return lipgloss.JoinVertical(lipgloss.Left,
 		styleTitle.Render("Cliks Live"),
 		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
@@ -1435,6 +1727,33 @@ func (m sessionModel) livePanelLines() ([]string, []string, int) {
 	if m.codeHover {
 		codeValue = styleSelected.Render(" " + code + " ")
 	}
+	if m.height > 0 && m.height < 24 {
+		left := []string{
+			"Team: " + styleAccent.Render(teamName),
+			"Code: " + codeValue,
+			"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
+			"Connection: " + connectionStyle(state.ConnectionStatus),
+			"People: " + roomPeopleSummary(state),
+			"Typing: " + typingSummary(state, m.now),
+			"Flow: " + flowBadge(state, m.now),
+			"Health: " + healthSummary(state, m.now),
+			fmt.Sprintf("Activity: %d captured, %d sent", state.LocalCapturedEvents, state.LocalSentEvents),
+		}
+		if state.Notice != "" {
+			left = append(left, styleWarn.Render(state.Notice))
+		} else if state.PermissionHint != "" {
+			left = append(left, styleWarn.Render(state.PermissionHint))
+		}
+		right := []string{
+			"Sound",
+			"Volume  " + muteAwareBar(state.Listening),
+			"Density " + bar(state.Listening.Density),
+			fmt.Sprintf("Mute %s  Spatial %s", onOff(state.Listening.Muted), onOff(state.Listening.Spatial)),
+			fmt.Sprintf("Fade %s  Keep %s", onOff(state.Listening.FatigueProtection), onOff(m.controller.cfg.KeepRunning)),
+			"↑/↓ volume  ←/→ density  ? help",
+		}
+		return left, right, 1
+	}
 	left := []string{
 		"Team: " + styleAccent.Render(teamName),
 		"Code: " + codeValue,
@@ -1443,6 +1762,8 @@ func (m sessionModel) livePanelLines() ([]string, []string, int) {
 		"Connection: " + connectionStyle(state.ConnectionStatus),
 		"People: " + roomPeopleSummary(state),
 		"Typing: " + typingSummary(state, m.now),
+		"Flow: " + flowBadge(state, m.now),
+		"Health: " + healthSummary(state, m.now),
 		"Capture: " + state.CaptureMode,
 		"",
 		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
@@ -1507,6 +1828,13 @@ func (m sessionModel) liveControlsLine() string {
 	return strings.Join(parts, " ")
 }
 
+func (m sessionModel) liveControlsStyle() lipgloss.Style {
+	if m.height > 0 && m.height < 24 {
+		return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(0, 2)
+	}
+	return stylePanel
+}
+
 func (m sessionModel) activateLiveButton(index int) (tea.Model, tea.Cmd) {
 	buttons := liveButtons()
 	if index < 0 || index >= len(buttons) {
@@ -1551,7 +1879,11 @@ func (m sessionModel) livePanelHeight() int {
 }
 
 func (m sessionModel) controlsContentY() int {
-	return 1 + m.livePanelHeight() + 2
+	padding := 2
+	if m.height > 0 && m.height < 24 {
+		padding = 1
+	}
+	return 1 + m.livePanelHeight() + padding
 }
 
 func (m sessionModel) controlButtonHit(x int, y int) int {
@@ -1584,7 +1916,13 @@ func (m sessionModel) settingsHit(x int, y int) int {
 	if x < 3 || x > panelWidth(m.width)-3 {
 		return -1
 	}
-	return y - 5
+	rows := settingsRows(m.controller.cfg)
+	start, end := settingsWindow(len(rows), m.settingsCursor, m.height)
+	index := start + y - settingsRowsStartY()
+	if index < start || index >= end {
+		return -1
+	}
+	return index
 }
 
 func (m *sessionModel) applyLiveSetting(delta int) {
@@ -1606,10 +1944,12 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 func (m sessionModel) sessionSettingsView() string {
 	cfg := m.controller.cfg
 	rows := settingsRows(cfg)
+	start, end := settingsWindow(len(rows), m.settingsCursor, m.height)
 	var lines []string
 	lines = append(lines, styleAccent.Render("Live Settings"))
 	lines = append(lines, "")
-	for i, row := range rows {
+	for i := start; i < end; i++ {
+		row := rows[i]
 		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
 			if m.settingsHover {
@@ -1621,7 +1961,11 @@ func (m sessionModel) sessionSettingsView() string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, styleDim.Render("Left/right adjusts. Enter toggles. Tab/Esc/q returns to the live room."))
+	footer := "Left/right adjusts. Enter toggles. Tab/Esc/q returns to the live room."
+	if start > 0 || end < len(rows) {
+		footer = fmt.Sprintf("Showing %d-%d of %d. Up/down reveals more. Tab/Esc/q returns.", start+1, end, len(rows))
+	}
+	lines = append(lines, styleDim.Render(footer))
 	return lipgloss.JoinVertical(lipgloss.Left,
 		styleTitle.Render("Cliks Preferences"),
 		stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n")),

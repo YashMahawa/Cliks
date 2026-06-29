@@ -29,6 +29,7 @@ type apiServer struct {
 	allowAnyOrigin    bool
 	createTeamLimiter *rateLimiter
 	deleteTeamLimiter *rateLimiter
+	lookupTeamLimiter *rateLimiter
 }
 
 func main() {
@@ -37,15 +38,17 @@ func main() {
 		log.Fatalf("store: %v", err)
 	}
 
+	joinTeamLimiter := newRateLimiter(5*time.Minute, 20)
 	srv := &apiServer{
 		store:             store,
-		hub:               NewRoomHub(store),
+		hub:               NewRoomHub(store, joinTeamLimiter),
 		corsOrigins:       parseCORSOrigins(os.Getenv("CORS_ORIGIN")),
 		allowAnyOrigin:    os.Getenv("CORS_ORIGIN") == "",
 		createTeamLimiter: newRateLimiter(5*time.Minute, 20),
 		deleteTeamLimiter: newRateLimiter(5*time.Minute, 30),
+		lookupTeamLimiter: newRateLimiter(5*time.Minute, 40),
 	}
-	go srv.hub.heartbeatLoop(heartbeatInterval)
+	go runSafely("heartbeat loop", func() { srv.hub.heartbeatLoop(heartbeatInterval) })
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.withCORS(srv.handleHealth))
@@ -126,6 +129,10 @@ func (s *apiServer) handleTeamByCode(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		if s.lookupTeamLimiter != nil && !s.lookupTeamLimiter.Allow(rateLimitKey(r)) {
+			writeError(w, http.StatusTooManyRequests, "Too many team lookup requests. Please wait a moment and try again.")
+			return
+		}
 		team, err := s.store.GetTeamByCode(r.Context(), code)
 		if err != nil {
 			log.Printf("get team: %v", err)
@@ -296,6 +303,10 @@ func teamUnavailablePayload(code string) map[string]string {
 
 func roomFullPayload() map[string]string {
 	return protocolError("room_full", "This room is full. Cliks rooms are capped at 20 people.")
+}
+
+func joinRateLimitedPayload() map[string]string {
+	return protocolError("join_rate_limited", "Too many team join attempts. Wait a few minutes and try again.")
 }
 
 func deletedPayload(code string, message string) map[string]string {

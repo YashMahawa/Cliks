@@ -53,7 +53,7 @@ Example:
 }
 ```
 
-The server only validates and relays these events. It does not assign 3D positions and does not store live event history. New CLIs negotiate `compact-v1`; when present, the server sends compact activity frames (`type: "a"`) to that recipient while preserving verbose JSON for older clients.
+The server only validates and relays these events. It does not assign 3D positions and does not store live event history. New CLIs negotiate `compact-v1`; when present, the server sends compact activity frames (`type: "a"`) to that recipient while preserving verbose JSON for older clients. Incoming WebSocket frames are capped at 8 KiB so full 128-event verbose batches still work while oversized payloads are rejected. Each socket also has a local message-rate guard for floods; do not lower the size cap below the largest legitimate batch without changing the client protocol first.
 
 ## Team Codes And Data
 
@@ -70,7 +70,7 @@ Live presence is in memory. Rooms disappear from memory when empty. Live peers i
 
 Rooms are capped at 20 live peers. A 21st peer should receive a room-full error and then be disconnected.
 
-Deleting a team requires its delete password. A successful delete marks the stored team row deleted, sends `team_deleted` to all live peers, and closes any live in-memory room for that team so connected peers cannot keep using a deleted code. Joining a missing/deleted code sends `team_unavailable`; CLIs must remove that team from device storage, disable launch-at-login, and stop retrying it.
+Deleting a team requires its delete password. A successful delete marks the stored team row deleted, sends `team_deleted` to all live peers, and closes any live in-memory room for that team so connected peers cannot keep using a deleted code. Joining a missing/deleted code sends `team_unavailable`; CLIs must remove that team from device storage, disable launch-at-login, and stop retrying it. Plain HTTP team-code lookups are rate-limited per source IP before database work to reduce code-scanning risk.
 
 Teams can be created and deleted from the website, from `cliks create` / `cliks delete`, and from the bare `cliks` Bubble Tea interface. CLI/TUI delete-password prompts must not echo the password when a real terminal is available. CLI/TUI create should try to copy the new team code to the local clipboard and fail softly if no clipboard command exists.
 
@@ -89,7 +89,7 @@ When people leave, the local listener recomputes the arrangement, so far users m
 
 Dynamic circle placement is optional. When enabled, the listener counts received activity per peer and, every configured interval (default 10 minutes), locally places more active peers closer than inactive peers. This remains listener-relative and must not move placement to the server.
 
-Current audio playback stores pan/distance in placement and applies those values when the selected player supports them. `ffplay` is preferred for full stereo pan plus distance gain, then `mpv` for stereo pan plus volume, then native/basic players. When `audio.device` is configured, a routing-capable installed player is preferred: `mpv`, `paplay`, `pw-play`, then `aplay`. Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded 96-job queue and four workers. Above 50% queue pressure it progressively sheds keyboard playback while preserving click events; at capacity it discards stale work in favor of recent work. Fatigue gain scales with room population and approaches its 35% floor through a smoothed nonlinear curve instead of per-event volume steps.
+Current audio playback stores pan/distance in placement and applies those values when the selected player supports them. `ffplay` is preferred for full stereo pan plus distance gain, then `mpv` for stereo pan plus volume, then native/basic players. When `audio.device` is configured, a routing-capable installed player is preferred: `mpv`, `paplay`, `pw-play`, then `aplay`. Distance attenuation is applied with native player volume flags where supported (`afplay`, `paplay`, `pw-play`). `aplay` and Windows `Media.SoundPlayer` remain basic playback paths without gain/pan. The audio engine uses a bounded 96-job queue and four workers. Keyboard events that land within a 20ms local playback window are merged before queueing, using the latest event's offset/pan/gain, while mouse clicks stay distinct. Above 50% queue pressure it progressively sheds keyboard playback while preserving click events; at capacity it discards stale work in favor of recent work. Fatigue gain scales with room population and approaches its 35% floor through a smoothed nonlinear curve instead of per-event volume steps.
 
 ## Sound
 
@@ -112,8 +112,9 @@ Current modes:
 
 - Bare `cliks`: opens the Bubble Tea control screen. The greeting/home view shows selected team name plus code, active local connection state, teammate count, local captured/sent counters, `Open Live`, `Keep Running`, optional `Stop`, `More`, and `Quit`. Deeper actions live under More: Preferences, Team, Connection, and Diagnostics. Avoid reintroducing a long flat home menu. If a connection is already active, toggling Keep Running off should schedule the active connection to stop when the control screen closes; use the separate Stop action for immediate disconnect.
 - `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms. Team > Join should let users paste a code, save the team name/code, and auto-open the live room.
+- `cliks join CODE`: validates and saves the team, then starts one detached background session by default. `cliks join --no-start CODE` only saves/selects the team for users who explicitly want the old manual flow.
 - `cliks nickname [NAME]` / `cliks set nickname NAME`: configures the optional display name shared in live presence and peer activity. Names are capped at 10 characters. Empty names should be treated as anonymous; never infer names from the OS user, Git config, hostname, app/window title, or typed text.
-- `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI.
+- `cliks start`: on Linux, tries `/dev/input` evdev capture first. Native macOS/Windows global capture hooks are still future work in the Go CLI. `cliks start CODE` validates, saves, selects, and starts that code even when local config is empty.
 - `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
 - `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
 - `cliks start` before joining a room prints first-run setup steps instead of a raw error.
@@ -142,7 +143,7 @@ Important platform reality:
 - Terminal-mode state is registered with a process-wide restore registry. Top-level uncaught exceptions, unhandled rejections, and process exit restore tracked terminal state before exiting.
 - `cliks start` no longer exits on ordinary WebSocket close/error. It keeps capture running, shows connection status, sends client pings, terminates heartbeat timeouts, and retries with exponential backoff. Offline activity pulses are best-effort and may be dropped until the socket is open again.
 - `cliks start` must stop retrying when the server sends `team_deleted` or `team_unavailable`. In that case it should remove the team from local config, disable launch-at-login, and show a clear stopped/unavailable notice.
-- `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room name and code, optional display names for small rooms, a recent "X, Y are typing" summary from received activity batches, capture, connection, local counters, peers/counts, hints, and sound controls with keyboard and mouse support. Larger rooms should collapse to people/typing counts. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens the same preference rows used by the main TUI without disconnecting; `Tab`/`Esc`/`q` returns to the room from preferences. `?` opens context-specific shortcuts in home, preferences, live, and live preferences. From the live room itself, `Esc`, `q`, or the Back button returns to the main control screen instead of quitting. Stop or `Ctrl+C` disconnects. If Keep Running is on, leaving or closing a foreground live window should hand off to one background session. The displayed team code should be hover-highlightable and click-to-copy. Non-TTY runs fall back to a plain text status renderer. TUI semantic colors must use light/dark adaptive pairs rather than fixed ANSI indexes.
+- `cliks start` uses a Bubble Tea live dashboard when stdin/stdout are TTYs. It shows room name and code, optional display names for small rooms, a recent "X, Y are typing" summary from received activity batches, local-only flow badge, live health/last-activity line for quiet periods, capture, connection, local counters, peers/counts, hints, and sound controls with keyboard and mouse support. Larger rooms should collapse to people/typing counts. Controls: Up/Down volume, Left/Right or `[`/`]` density, `m` mute, `s` spatial toggle, `f` fatigue fade toggle, mouse wheel for volume, and clickable controls. `Tab` or `Shift+S` opens the same preference rows used by the main TUI without disconnecting; `Tab`/`Esc`/`q` returns to the room from preferences. `?` opens context-specific shortcuts in home, preferences, live, and live preferences. From the live room itself, `Esc`, `q`, or the Back button returns to the main control screen instead of quitting. Stop or `Ctrl+C` disconnects. If Keep Running is on, leaving or closing a foreground live window should hand off to one background session. SIGHUP/SIGTERM should cancel Bubble Tea through context so terminal restoration and normal handoff/stop logic run; do not call `os.Exit` from TUI/session signal handlers. The displayed team code should be hover-highlightable and click-to-copy. Non-TTY runs fall back to a plain text status renderer. TUI semantic colors must use light/dark adaptive pairs rather than fixed ANSI indexes.
 - Cliks enforces one active local connection per user state directory with `session.lock` and `session.json` under `stateDir()`. Foreground `cliks start`, manual `cliks background start`, and boot autostart all share this lock. If one is active, any second local start must fail instead of creating another peer and feeding the user's own activity back as remote audio. The session state tracks pid, mode (`foreground`, `background`, `boot`), team, connection status, active count, and local counters so the control screen can show the current connection. The Go CLI also scans for older same-executable `cliks start` processes that predate the lock file and treats them as active local sessions; when a managed session is active, the TUI should clean up those duplicate local copies.
 - TUI hotkeys only come from the focused terminal because Bubble Tea reads stdin. Detached `cliks background start` and login autostart run non-interactively and must not react to unrelated keyboard input.
 - Home/control TUI mouse movement should update the highlighted row on hover. Use all-motion mouse tracking and keep row hit-testing aligned with the title, panel border, and padding. Binary settings should be single toggle rows, not separate on/off menu choices.
@@ -168,8 +169,11 @@ cliks fix-terminal
 cliks create
 cliks delete CLIK-LOCAL
 cliks join CLIK-LOCAL
+cliks join --no-start CLIK-LOCAL
+cliks start CLIK-LOCAL
 cliks start --terminal --self
 cliks settings
+cliks set --list
 cliks set hear.self off
 cliks set autostart on
 cliks set audio.device default
@@ -178,7 +182,7 @@ cliks background status
 cliks autostart status
 ```
 
-CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, compact activity frames, nickname ANSI/control sanitization plus truncation, live room closure on delete, deleted-room lookup behavior, room limits, and 50ms timing quantization. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
+CI lives in `.github/workflows/ci.yml` and runs install/check/build/server smoke across Ubuntu, macOS, and Windows, plus Docker image build on Ubuntu. Docker backend packaging is in `Dockerfile` and `docker-compose.yml`. `scripts/smoke-server.mjs` verifies health redaction, code shape, WebSocket relay, compact activity frames, nickname ANSI/control sanitization plus truncation, live room closure on delete, deleted-room lookup behavior, room limits, single-room migration, failed-join throttling, and 50ms timing quantization. Go unit tests also cover HTTP lookup throttling and WebSocket oversized/flood protection. `scripts/load-test.mjs` can safely exercise local or live backends with `CLIKS_LOAD_*` environment variables.
 
 ## Deploy
 

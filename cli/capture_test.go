@@ -9,9 +9,24 @@ import (
 func TestEvdevRetryDelayBacksOffAndCaps(t *testing.T) {
 	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}
 	for index, expected := range want {
-		if got := evdevRetryDelay(index + 1); got != expected {
+		if got := retryDelayWithSample(index+1, 0.5); got != expected {
 			t.Fatalf("retry %d = %s, want %s", index+1, got, expected)
 		}
+	}
+}
+
+func TestRetryDelayAddsBoundedJitter(t *testing.T) {
+	low := retryDelayWithSample(4, 0)
+	middle := retryDelayWithSample(4, 0.5)
+	high := retryDelayWithSample(4, 1)
+	if !(low < middle && middle < high) {
+		t.Fatalf("jitter ordering = %s, %s, %s", low, middle, high)
+	}
+	if low != 7200*time.Millisecond || high != 8800*time.Millisecond {
+		t.Fatalf("unexpected jitter bounds: %s to %s", low, high)
+	}
+	if capped := retryDelayWithSample(20, 1); capped != maxRetryDelay {
+		t.Fatalf("capped retry = %s, want %s", capped, maxRetryDelay)
 	}
 }
 

@@ -48,6 +48,8 @@ try {
   if (relay.nickname !== "Alice Long") {
     throw new Error(`Expected sanitized nickname Alice Long, got ${JSON.stringify(relay.nickname)}`);
   }
+  const migrationTeam = await createTeam(apiUrl);
+  await websocketRoomMigrationSmoke(wsUrl, team.code, migrationTeam.code);
   await websocketRoomLimitSmoke(wsUrl, team.code);
 
   const health = await fetchJson(`${apiUrl}/health`);
@@ -63,6 +65,8 @@ try {
 
   const liveDeleteTeam = await createTeam(apiUrl);
   await websocketDeleteSmoke(apiUrl, wsUrl, liveDeleteTeam.code);
+  await deleteTeam(apiUrl, migrationTeam.code, "delete-me");
+  await websocketJoinRateLimitSmoke(wsUrl);
 
   console.log(JSON.stringify({ ok: true, code: team.code, offsets: relay.offsets }));
 } finally {
@@ -190,6 +194,71 @@ async function websocketRelaySmoke(url, teamCode) {
   };
 }
 
+async function websocketRoomMigrationSmoke(url, firstTeamCode, secondTeamCode) {
+  const mover = new WebSocket(url);
+  const firstObserver = new WebSocket(url);
+  const secondObserver = new WebSocket(url);
+  const firstBatches = [];
+  const secondBatches = [];
+
+  try {
+    await Promise.all([once(mover, "open"), once(firstObserver, "open"), once(secondObserver, "open")]);
+    firstObserver.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "peer_activity_batch") firstBatches.push(message);
+    });
+    secondObserver.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "peer_activity_batch") secondBatches.push(message);
+    });
+
+    mover.send(JSON.stringify({ type: "join", teamCode: firstTeamCode, nickname: "mover" }));
+    firstObserver.send(JSON.stringify({ type: "join", teamCode: firstTeamCode, nickname: "first" }));
+    secondObserver.send(JSON.stringify({ type: "join", teamCode: secondTeamCode, nickname: "second" }));
+    await sleep(250);
+
+    mover.send(JSON.stringify({ type: "join", teamCode: secondTeamCode, nickname: "mover" }));
+    await sleep(250);
+    mover.send(JSON.stringify({
+      type: "activity_batch",
+      teamCode: secondTeamCode,
+      batchStartedAt: Date.now(),
+      events: [{ kind: "keyboard", offsetMs: 50 }]
+    }));
+    await sleep(250);
+
+    if (firstBatches.length !== 0) {
+      throw new Error("Room switch leaked activity to the previous room");
+    }
+    if (secondBatches.length !== 1) {
+      throw new Error(`Room switch should relay once to the new room, got ${secondBatches.length}`);
+    }
+  } finally {
+    mover.close();
+    firstObserver.close();
+    secondObserver.close();
+    await sleep(100);
+  }
+}
+
+async function websocketJoinRateLimitSmoke(url) {
+  for (let attempt = 1; attempt <= 21; attempt++) {
+    const socket = new WebSocket(url);
+    await once(socket, "open");
+    const response = nextJsonMessage(socket);
+    const closed = onceWithTimeout(socket, "close", 1_500);
+    socket.send(JSON.stringify({ type: "join", teamCode: `MISSING-${attempt}` }));
+    const message = await response;
+    await closed;
+    if (attempt <= 20 && message.type !== "team_unavailable") {
+      throw new Error(`Join attempt ${attempt} should be unavailable, got ${JSON.stringify(message)}`);
+    }
+    if (attempt === 21 && (message.type !== "error" || message.code !== "join_rate_limited")) {
+      throw new Error(`Join limiter did not block attempt 21: ${JSON.stringify(message)}`);
+    }
+  }
+}
+
 async function websocketRoomLimitSmoke(url, teamCode) {
   const sockets = [];
   try {
@@ -253,6 +322,13 @@ function onceWithTimeout(emitter, event, timeoutMs) {
       clearTimeout(timer);
       reject(error);
     });
+  });
+}
+
+function nextJsonMessage(socket) {
+  return new Promise((resolve, reject) => {
+    socket.once("message", (raw) => resolve(JSON.parse(raw.toString())));
+    socket.once("error", reject);
   });
 }
 
