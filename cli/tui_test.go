@@ -261,3 +261,53 @@ func TestAdvancedBatchWindowValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorCommandOpensScrollableReportInsideTUI(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := homeModel{cfg: defaultConfig(), mode: "diagnostics", height: 16}
+	updated, cmd := model.Update(commandDoneMsg{
+		message: "Found 1 setup item.",
+		report:  []string{"Cliks doctor", "System:", "- Audio player: missing", "Fixes:", "Install audio:"},
+	})
+	got := updated.(homeModel)
+	if cmd != nil || got.mode != "doctor-report" {
+		t.Fatalf("mode = %q, cmd = %v; want doctor-report", got.mode, cmd)
+	}
+	view := got.View()
+	if !strings.Contains(view, "Audio player: missing") || !strings.Contains(view, "[ Back ]") || !strings.Contains(view, "[ Refresh ]") {
+		t.Fatalf("doctor report view is incomplete:\n%s", view)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated.(homeModel).mode != "diagnostics" {
+		t.Fatalf("escape returned to %q, want diagnostics", updated.(homeModel).mode)
+	}
+}
+
+func TestHomeFooterKeepsConnectionAndVolumeVisible(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	cfg.Listening.Volume = 0.65
+	model := homeModel{
+		cfg:      cfg,
+		mode:     "preferences",
+		activeOK: true,
+		active: ActiveSessionState{
+			TeamCode:         "CLIK-LOCAL",
+			TeamName:         "Study",
+			ConnectionStatus: "connected",
+			ActiveCount:      3,
+		},
+	}
+	footer := model.statusFooterView()
+	for _, want := range []string{"Study (CLIK-LOCAL)", "connected", "volume 65%", "3 here"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("status footer missing %q: %s", want, footer)
+		}
+	}
+}
+
+func TestNewUsersGetDynamicCircleByDefault(t *testing.T) {
+	if !defaultConfig().Listening.DynamicPlacement {
+		t.Fatal("DynamicPlacement = false, want true for new configurations")
+	}
+}

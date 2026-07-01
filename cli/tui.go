@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
 
@@ -60,6 +60,15 @@ func shortcutEntries(context string) []shortcutHelp {
 			{"Esc/q/b", "return to the main control screen"},
 			{"x/Ctrl+C", "stop and disconnect this session"},
 			{"Mouse wheel", "adjust volume"},
+			{"?", "close this shortcut guide"},
+		}
+	case "doctor-report":
+		return []shortcutHelp{
+			{"Up/k, Down/j", "scroll through the setup report"},
+			{"PageUp/PageDown", "scroll one report page"},
+			{"r", "run every setup check again"},
+			{"Esc/q/b", "return to Diagnostics"},
+			{"Mouse wheel", "scroll the report"},
 			{"?", "close this shortcut guide"},
 		}
 	default:
@@ -125,6 +134,9 @@ type homeModel struct {
 	width            int
 	height           int
 	helpOpen         bool
+	doctorLines      []string
+	doctorOffset     int
+	doctorHover      string
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -211,6 +223,12 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = loadConfig()
 		if msg.err != nil {
 			m.message = msg.err.Error()
+		} else if len(msg.report) > 0 {
+			m.doctorLines = msg.report
+			m.doctorOffset = 0
+			m.doctorHover = ""
+			m.mode = "doctor-report"
+			m.message = msg.message
 		} else {
 			m.message = msg.message
 		}
@@ -242,6 +260,26 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tea.MouseMsg:
 		if m.helpOpen {
+			return m, nil
+		}
+		if m.mode == "doctor-report" {
+			switch msg.Type {
+			case tea.MouseWheelUp:
+				m.scrollDoctor(-3)
+			case tea.MouseWheelDown:
+				m.scrollDoctor(3)
+			case tea.MouseMotion:
+				m.doctorHover = m.doctorActionAt(msg.X, msg.Y)
+			case tea.MouseLeft:
+				switch m.doctorActionAt(msg.X, msg.Y) {
+				case "back":
+					m.back()
+				case "refresh":
+					m.busy = true
+					m.message = "Checking setup..."
+					return m, doctorSummaryCmd()
+				}
+			}
 			return m, nil
 		}
 		if isFormMode(m.mode) {
@@ -287,6 +325,29 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isFormMode(m.mode) {
 			return m.updateForm(msg)
 		}
+		if m.mode == "doctor-report" {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "up", "k":
+				m.scrollDoctor(-1)
+			case "down", "j":
+				m.scrollDoctor(1)
+			case "pgup":
+				m.scrollDoctor(-m.doctorVisibleCount())
+			case "pgdown":
+				m.scrollDoctor(m.doctorVisibleCount())
+			case "r":
+				m.busy = true
+				m.message = "Checking setup..."
+				return m, doctorSummaryCmd()
+			case "esc", "q", "b":
+				m.back()
+			case "?":
+				m.helpOpen = true
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "?":
 			m.helpOpen = true
@@ -330,18 +391,20 @@ func (m homeModel) View() string {
 	var body string
 	if m.helpOpen {
 		context := m.mode
-		if context != "preferences" {
+		if context != "preferences" && context != "doctor-report" {
 			context = "home"
 		}
 		body = shortcutHelpView(context, m.width)
 	} else if m.mode == "preferences" {
 		body = m.preferencesView()
+	} else if m.mode == "doctor-report" {
+		body = m.doctorReportView()
 	} else if isFormMode(m.mode) {
 		body = m.formView()
 	} else {
 		body = m.itemView()
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks"), body)
+	return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks"), body, m.statusFooterView())
 }
 
 func (m *homeModel) move(delta int) {
@@ -605,6 +668,123 @@ func (m homeModel) preferencesView() string {
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
+func (m homeModel) doctorReportView() string {
+	displayLines := m.doctorDisplayLines()
+	start, end := m.doctorWindow()
+	lines := []string{styleAccent.Render("Setup Check"), ""}
+	for _, line := range displayLines[start:end] {
+		if strings.HasSuffix(line, ":") {
+			lines = append(lines, styleAccent.Render(line))
+		} else {
+			lines = append(lines, line)
+		}
+	}
+	back := "[ Back ]"
+	refresh := "[ Refresh ]"
+	if m.doctorHover == "back" {
+		back = styleSelected.Render(" Back ")
+	}
+	if m.doctorHover == "refresh" {
+		refresh = styleSelected.Render(" Refresh ")
+	}
+	lines = append(lines, "", back+"  "+refresh)
+	position := fmt.Sprintf("Lines %d-%d of %d", start+1, end, len(displayLines))
+	if len(displayLines) == 0 {
+		position = "No report data"
+	}
+	lines = append(lines, styleDim.Render(position+". Wheel or up/down scrolls; r refreshes; q returns."), styleDim.Render(m.message))
+	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+}
+
+func (m homeModel) doctorVisibleCount() int {
+	visible := 14
+	if m.height > 0 {
+		visible = m.height - 12
+	}
+	if visible < 5 {
+		visible = 5
+	}
+	displayCount := len(m.doctorDisplayLines())
+	if displayCount > 0 && visible > displayCount {
+		visible = displayCount
+	}
+	return visible
+}
+
+func (m homeModel) doctorWindow() (int, int) {
+	displayCount := len(m.doctorDisplayLines())
+	if displayCount == 0 {
+		return 0, 0
+	}
+	visible := m.doctorVisibleCount()
+	start := clampInt(m.doctorOffset, 0, maxInt(0, displayCount-visible))
+	return start, minInt(displayCount, start+visible)
+}
+
+func (m *homeModel) scrollDoctor(delta int) {
+	visible := m.doctorVisibleCount()
+	displayCount := len(m.doctorDisplayLines())
+	m.doctorOffset = clampInt(m.doctorOffset+delta, 0, maxInt(0, displayCount-visible))
+	m.doctorHover = ""
+}
+
+func (m homeModel) doctorDisplayLines() []string {
+	width := panelWidth(m.width) - 6
+	if width < 24 {
+		width = 24
+	}
+	var wrapped []string
+	for _, line := range m.doctorLines {
+		parts := strings.Split(ansi.Wordwrap(line, width, ""), "\n")
+		wrapped = append(wrapped, parts...)
+	}
+	return wrapped
+}
+
+func (m homeModel) doctorActionAt(x, y int) string {
+	start, end := m.doctorWindow()
+	buttonY := panelContentStartY() + (end - start) + 3
+	if y != buttonY {
+		return ""
+	}
+	contentX := 3
+	if x >= contentX && x < contentX+8 {
+		return "back"
+	}
+	refreshX := contentX + 10
+	if x >= refreshX && x < refreshX+11 {
+		return "refresh"
+	}
+	return ""
+}
+
+func (m homeModel) statusFooterView() string {
+	team := valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "no team")
+	status := "stopped"
+	people := ""
+	if m.activeOK {
+		team = valuePlain(m.activeTeamLabel(), team)
+		status = valuePlain(m.active.ConnectionStatus, "starting")
+		people = fmt.Sprintf(" | %d here", maxInt(1, m.active.ActiveCount))
+	}
+	muted := ""
+	if m.cfg.Listening.Muted {
+		muted = " | muted"
+	}
+	line := fmt.Sprintf("%s | %s | volume %d%%%s%s", team, status, int(m.cfg.Listening.Volume*100+0.5), muted, people)
+	if m.width > 0 {
+		runes := []rune(line)
+		if len(runes) > m.width {
+			if m.width > 3 {
+				line = string(runes[:m.width-3]) + "..."
+			} else {
+				line = string(runes[:m.width])
+			}
+		}
+	}
+	return styleDim.Render(line)
+}
+
 type homeItem struct {
 	key   string
 	label string
@@ -621,6 +801,7 @@ type formDoneMsg struct {
 
 type commandDoneMsg struct {
 	message string
+	report  []string
 	err     error
 }
 
@@ -761,6 +942,9 @@ func (m homeModel) activeTeamLabel() string {
 
 func (m *homeModel) refreshRuntime() {
 	m.active, m.activeOK = activeSession()
+	if !isFormMode(m.mode) {
+		m.cfg = loadConfig()
+	}
 }
 
 func (m *homeModel) hover(y int) bool {
@@ -817,7 +1001,11 @@ func settingsWindow(total int, cursor int, height int) (int, int) {
 }
 
 func (m *homeModel) back() {
+	fromDoctorReport := m.mode == "doctor-report"
 	switch m.mode {
+	case "doctor-report":
+		m.mode = "diagnostics"
+		m.cursor = 0
 	case "team", "connection", "diagnostics", "preferences", "advanced":
 		m.mode = "menu"
 		m.cursor = 0
@@ -827,6 +1015,9 @@ func (m *homeModel) back() {
 	}
 	m.mouseOver = false
 	m.message = welcomeMessage(m.cfg)
+	if fromDoctorReport {
+		m.message = "Check sound or run the setup report again."
+	}
 }
 
 func peopleSummary(activeCount int) string {
@@ -1465,6 +1656,7 @@ func autostartStatusCmd() tea.Cmd {
 func soundTestCmd() tea.Cmd {
 	return func() tea.Msg {
 		audio := newAudioEngine(loadConfig().Listening)
+		defer audio.Close()
 		if err := audio.preview(); err != nil {
 			return commandDoneMsg{err: err}
 		}
@@ -1474,27 +1666,8 @@ func soundTestCmd() tea.Cmd {
 
 func doctorSummaryCmd() tea.Cmd {
 	return func() tea.Msg {
-		cfg := loadConfig()
-		player, spatial, hint, _ := getAudioPlayerStatus(cfg.Listening.AudioDevice)
-		if player == "" {
-			return commandDoneMsg{message: "Audio player missing: " + hint}
-		}
-		if hint != "" {
-			return commandDoneMsg{message: "Audio setup warning: " + hint}
-		}
-		if os.Getenv("CLIKS_SKIP_INPUT_DOCTOR") == "" && runtime.GOOS == "linux" {
-			input := linuxInputStatus()
-			if input.hasInputDir && input.eventCount > 0 && input.readableCount == 0 {
-				return commandDoneMsg{message: "Input permission needed: sudo usermod -aG input " + input.username + "; then log out and back in."}
-			}
-		}
-		if cfg.CurrentTeamCode == "" {
-			return commandDoneMsg{message: "Setup needs a team. Create or join one first."}
-		}
-		if spatial {
-			return commandDoneMsg{message: fmt.Sprintf("Doctor OK. Audio: %s with stereo spatial support.", player)}
-		}
-		return commandDoneMsg{message: fmt.Sprintf("Doctor OK. Audio: %s with basic/distance playback.", player)}
+		report := buildDoctorReport(loadConfig())
+		return commandDoneMsg{message: doctorSummary(report), report: doctorReportLines(report)}
 	}
 }
 

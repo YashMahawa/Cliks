@@ -2,7 +2,7 @@
 
 Cliks uses tiny JSON messages over WebSocket.
 
-Incoming WebSocket messages are capped at 8 KiB and each connection has a local message-rate guard. The 8 KiB cap leaves room for a full 128-event verbose activity batch while rejecting oversized frames before JSON processing. Plain HTTP team-code lookups and failed WebSocket joins are rate-limited per source IP to reduce code-scanning risk.
+Incoming WebSocket messages are capped at 8 KiB and each connection has a local message-rate guard. The 8 KiB cap leaves room for a full 128-event verbose activity batch while rejecting oversized frames before JSON processing. Plain HTTP team-code lookups and failed WebSocket joins are rate-limited per source IP to reduce code-scanning risk. Outgoing frames are serialized by one writer per connection through a bounded 32-frame queue; a full queue or 5-second write timeout closes only the slow connection.
 
 ## Client to server
 
@@ -142,7 +142,7 @@ Compact event kind `k` means keyboard and `m` means mouse. Compact mouse buttons
 
 ## Connection health
 
-The relay sends WebSocket pings and removes peers that miss heartbeats. The CLI also sends pings and reconnects when heartbeat responses time out. Reconnect delays use exponential backoff with bounded jitter and a 30-second cap so many clients do not retry in lockstep after an outage.
+The relay sends WebSocket pings and removes peers that miss heartbeats. Both sides use a rolling 75-second read deadline that is extended by traffic and pong responses. The CLI also sends pings, links socket closure to session cancellation, and reconnects when heartbeat responses time out. Reconnect delays use exponential backoff with bounded jitter and a 30-second cap so many clients do not retry in lockstep after an outage.
 
 ## Team deletion
 

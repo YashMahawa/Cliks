@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -123,6 +125,7 @@ func TestAudioDeviceArgumentsArePlayerSpecific(t *testing.T) {
 
 func TestDynamicPlacementBringsActivePeerCloser(t *testing.T) {
 	engine := newAudioEngine(ListeningConfig{DynamicPlacement: true, ShuffleMinutes: 1, Volume: 0.7, Density: 1, Keyboard: true, Mouse: true})
+	defer engine.Close()
 	engine.updatePeers([]PeerPresence{
 		{PeerID: "self", JoinedAt: 1},
 		{PeerID: "quiet-1", JoinedAt: 2},
@@ -145,4 +148,69 @@ func TestDynamicPlacementBringsActivePeerCloser(t *testing.T) {
 	if active > quiet {
 		t.Fatalf("active distance = %.2f, quiet distance = %.2f; active peer should be closer", active, quiet)
 	}
+}
+
+func TestAudioWorkerUsesPlaybackDeadline(t *testing.T) {
+	original := audioCommandRunner
+	defer func() { audioCommandRunner = original }()
+	called := make(chan time.Duration, 1)
+	audioCommandRunner = func(ctx context.Context, _ *audioPlayer, _ playbackJob) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			called <- 0
+			return nil
+		}
+		called <- time.Until(deadline)
+		return nil
+	}
+
+	engine := newAudioEngine(ListeningConfig{})
+	engine.mu.Lock()
+	engine.player = &audioPlayer{Command: "test", ArgsFor: func(playbackJob) []string { return nil }}
+	engine.mu.Unlock()
+	engine.queue <- playbackJob{File: "sample.wav"}
+	select {
+	case remaining := <-called:
+		if remaining <= 0 || remaining > audioPlaybackTimeout+100*time.Millisecond {
+			t.Fatalf("playback deadline = %s, want about %s", remaining, audioPlaybackTimeout)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("audio worker did not run")
+	}
+	engine.Close()
+}
+
+func TestAudioEngineCloseCancelsActivePlaybackAndStopsWorkers(t *testing.T) {
+	original := audioCommandRunner
+	defer func() { audioCommandRunner = original }()
+	started := make(chan struct{})
+	var once sync.Once
+	audioCommandRunner = func(ctx context.Context, _ *audioPlayer, _ playbackJob) error {
+		once.Do(func() { close(started) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	engine := newAudioEngine(ListeningConfig{})
+	engine.mu.Lock()
+	engine.player = &audioPlayer{Command: "test", ArgsFor: func(playbackJob) []string { return nil }}
+	engine.mu.Unlock()
+	engine.queue <- playbackJob{File: "sample.wav"}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("audio worker did not start")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		engine.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("audio engine did not stop promptly after cancellation")
+	}
+	engine.Close()
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -49,6 +50,10 @@ type playbackJob struct {
 }
 
 type AudioEngine struct {
+	ctx             context.Context
+	cancel          context.CancelFunc
+	closeOnce       sync.Once
+	workers         sync.WaitGroup
 	listening       ListeningConfig
 	player          *audioPlayer
 	placements      map[string]peerPlacement
@@ -65,10 +70,20 @@ type AudioEngine struct {
 	fatigueGain     float64
 }
 
-const keyboardMergeWindowMs = 20
+const (
+	keyboardMergeWindowMs = 20
+	audioPlaybackTimeout  = 2 * time.Second
+)
 
 func newAudioEngine(listening ListeningConfig) *AudioEngine {
+	return newAudioEngineWithContext(context.Background(), listening)
+}
+
+func newAudioEngineWithContext(parent context.Context, listening ListeningConfig) *AudioEngine {
+	ctx, cancel := context.WithCancel(parent)
 	engine := &AudioEngine{
+		ctx:            ctx,
+		cancel:         cancel,
 		listening:      listening,
 		player:         detectAudioPlayerForDevice(listening.AudioDevice),
 		placements:     map[string]peerPlacement{},
@@ -77,9 +92,23 @@ func newAudioEngine(listening ListeningConfig) *AudioEngine {
 		fatigueGain:    1,
 	}
 	for i := 0; i < 4; i++ {
-		go engine.playWorker()
+		engine.workers.Add(1)
+		go func() {
+			defer engine.workers.Done()
+			engine.playWorker()
+		}()
 	}
 	return engine
+}
+
+func (a *AudioEngine) Close() {
+	if a == nil {
+		return
+	}
+	a.closeOnce.Do(func() {
+		a.cancel()
+		a.workers.Wait()
+	})
 }
 
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
@@ -166,7 +195,12 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 		}
 		delay := time.Duration(maxInt(0, event.OffsetMs)) * time.Millisecond
 		time.AfterFunc(delay, func() {
-			a.enqueue(event, placement)
+			select {
+			case <-a.ctx.Done():
+				return
+			default:
+				a.enqueue(event, placement)
+			}
 		})
 	}
 }
@@ -224,6 +258,11 @@ func (a *AudioEngine) maybeShufflePlacementsLocked(now time.Time) {
 }
 
 func (a *AudioEngine) preview() error {
+	select {
+	case <-a.ctx.Done():
+		return a.ctx.Err()
+	default:
+	}
 	if a.player == nil {
 		return errors.New(audioInstallMessage())
 	}
@@ -243,6 +282,11 @@ func (a *AudioEngine) preview() error {
 }
 
 func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement) {
+	select {
+	case <-a.ctx.Done():
+		return
+	default:
+	}
 	a.mu.Lock()
 	playerAvailable := a.player != nil
 	a.mu.Unlock()
@@ -278,6 +322,8 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 		job.Pan = placement.Pan
 	}
 	select {
+	case <-a.ctx.Done():
+		return
 	case a.queue <- job:
 	default:
 		select {
@@ -285,6 +331,8 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 		default:
 		}
 		select {
+		case <-a.ctx.Done():
+			return
 		case a.queue <- job:
 		default:
 		}
@@ -303,21 +351,39 @@ func queuePressureDropProbability(queueLength int, queueCapacity int) float64 {
 }
 
 func (a *AudioEngine) playWorker() {
-	for job := range a.queue {
+	for {
+		var job playbackJob
+		select {
+		case <-a.ctx.Done():
+			return
+		case job = <-a.queue:
+		}
 		a.mu.Lock()
 		player := a.player
 		a.mu.Unlock()
 		if player == nil {
 			continue
 		}
-		cmd := exec.Command(player.Command, player.ArgsFor(job)...)
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		cmd.Stdin = nil
-		if err := cmd.Run(); err != nil {
+		ctx, cancel := context.WithTimeout(a.ctx, audioPlaybackTimeout)
+		err := runAudioCommand(ctx, player, job)
+		playbackCanceled := ctx.Err() != nil
+		cancel()
+		if err != nil && !playbackCanceled && a.ctx.Err() == nil {
 			a.warnUnavailableOnce()
 		}
 	}
+}
+
+var audioCommandRunner = func(ctx context.Context, player *audioPlayer, job playbackJob) error {
+	cmd := exec.CommandContext(ctx, player.Command, player.ArgsFor(job)...)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	return cmd.Run()
+}
+
+func runAudioCommand(ctx context.Context, player *audioPlayer, job playbackJob) error {
+	return audioCommandRunner(ctx, player, job)
 }
 
 func (a *AudioEngine) samples(kind string) ([]string, error) {

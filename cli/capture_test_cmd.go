@@ -25,20 +25,26 @@ func runCaptureTest(cfg CliksConfig, mode string, seconds int) error {
 	fmt.Printf("Type and click for %d seconds...\n", seconds)
 	keyboard := 0
 	mouse := 0
+	printResult := func() {
+		fmt.Println("")
+		fmt.Printf("Keyboard events: %d\n", keyboard)
+		fmt.Printf("Mouse events: %d\n", mouse)
+		if keyboard+mouse == 0 {
+			fmt.Println("")
+			fmt.Println("Nothing captured.")
+			if state.PermissionHint != "" {
+				fmt.Println(state.PermissionHint)
+			}
+			fmt.Println("Try: cliks doctor")
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("")
-			fmt.Printf("Keyboard events: %d\n", keyboard)
-			fmt.Printf("Mouse events: %d\n", mouse)
-			if keyboard+mouse == 0 {
-				fmt.Println("")
-				fmt.Println("Nothing captured.")
-				if state.PermissionHint != "" {
-					fmt.Println(state.PermissionHint)
-				}
-				fmt.Println("Try: cliks doctor")
-			}
+			printResult()
+			return nil
+		case <-capture.ctx.Done():
+			printResult()
 			return nil
 		case event := <-capture.Events:
 			if event.Kind == "keyboard" {

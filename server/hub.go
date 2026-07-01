@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ const (
 	maxWebSocketMessageBytes    = 8 * 1024
 	maxWebSocketMessagesPerTick = 30
 	webSocketRateWindow         = time.Second
+	webSocketReadTimeout        = 75 * time.Second
+	webSocketWriteTimeout       = 5 * time.Second
+	webSocketOutboundBuffer     = 32
 )
 
 type ActivityEvent struct {
@@ -36,12 +40,20 @@ type PeerPresence struct {
 type clientConn struct {
 	id              string
 	socket          *websocket.Conn
-	writeMu         sync.Mutex
+	outbound        chan outboundFrame
+	done            chan struct{}
+	closeOnce       sync.Once
 	alive           bool
 	roomCode        string
 	rateLimitKey    string
 	readWindowStart time.Time
 	readWindowCount int
+}
+
+type outboundFrame struct {
+	messageType int
+	data        []byte
+	closeAfter  bool
 }
 
 type peer struct {
@@ -92,9 +104,11 @@ func (h *RoomHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	socket.SetReadLimit(maxWebSocketMessageBytes)
-	conn := &clientConn{id: newPeerID(), socket: socket, alive: true, rateLimitKey: rateLimitKey(r)}
+	conn := newClientConn(newPeerID(), socket, rateLimitKey(r))
 	defer recoverAndLog("WebSocket connection")
+	conn.refreshReadDeadline()
 	socket.SetPongHandler(func(string) error {
+		conn.refreshReadDeadline()
 		h.mu.Lock()
 		conn.alive = true
 		h.mu.Unlock()
@@ -103,12 +117,13 @@ func (h *RoomHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.conns[conn.id] = conn
 	h.mu.Unlock()
+	go conn.writeLoop()
 	defer func() {
 		h.leave(conn.id)
 		h.mu.Lock()
 		delete(h.conns, conn.id)
 		h.mu.Unlock()
-		_ = socket.Close()
+		_ = conn.close()
 	}()
 
 	for {
@@ -116,8 +131,9 @@ func (h *RoomHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		conn.refreshReadDeadline()
 		if !conn.allowRead(time.Now()) {
-			conn.sendJSON(protocolError("message_rate_limited", "Too many WebSocket messages. Slow down and reconnect."))
+			conn.sendJSONAndCloseWait(protocolError("message_rate_limited", "Too many WebSocket messages. Slow down and reconnect."))
 			return
 		}
 		h.handleMessage(r.Context(), conn, data)
@@ -176,8 +192,7 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 
 func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, nickname string, compactV1 bool) {
 	if h.joinRate.Blocked(conn.rateLimitKey) {
-		conn.sendJSON(joinRateLimitedPayload())
-		_ = conn.close()
+		conn.sendJSONAndClose(joinRateLimitedPayload())
 		return
 	}
 	if teamCode == "" || len(teamCode) > 16 {
@@ -186,8 +201,7 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 	}
 	team, err := h.store.GetTeamByCode(ctx, teamCode)
 	if err != nil {
-		conn.sendJSON(serverError("Could not load team."))
-		_ = conn.close()
+		conn.sendJSONAndClose(serverError("Could not load team."))
 		return
 	}
 	if team == nil {
@@ -216,8 +230,7 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 	}
 	if len(currentRoom.peers) >= maxPeersPerRoom && currentRoom.peers[p.id] == nil {
 		h.mu.Unlock()
-		conn.sendJSON(roomFullPayload())
-		_ = conn.close()
+		conn.sendJSONAndClose(roomFullPayload())
 		return
 	}
 	if previousCode := conn.roomCode; previousCode != "" && previousCode != team.Code {
@@ -248,11 +261,10 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 
 func (h *RoomHub) rejectUnavailableJoin(conn *clientConn, teamCode string) {
 	if !h.joinRate.Allow(conn.rateLimitKey) {
-		conn.sendJSON(joinRateLimitedPayload())
+		conn.sendJSONAndClose(joinRateLimitedPayload())
 	} else {
-		conn.sendJSON(teamUnavailablePayload(teamCode))
+		conn.sendJSONAndClose(teamUnavailablePayload(teamCode))
 	}
-	_ = conn.close()
 }
 
 func (h *RoomHub) updatePeerProfile(peerID string, nickname string) {
@@ -326,8 +338,7 @@ func (h *RoomHub) CloseRoom(teamCode string, message string) {
 	h.mu.Unlock()
 	payload := deletedPayload(teamCode, message)
 	for _, p := range peers {
-		p.conn.sendJSON(payload)
-		_ = p.conn.close()
+		p.conn.sendJSONAndClose(payload)
 	}
 }
 
@@ -383,9 +394,7 @@ func (h *RoomHub) heartbeatTick() {
 		_ = conn.close()
 	}
 	for _, conn := range live {
-		conn.writeMu.Lock()
-		_ = conn.socket.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
-		conn.writeMu.Unlock()
+		conn.sendPing()
 	}
 }
 
@@ -405,16 +414,113 @@ func (h *RoomHub) TotalPeers() int {
 	return total
 }
 
-func (c *clientConn) sendJSON(value any) {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	_ = c.socket.WriteJSON(value)
+func newClientConn(id string, socket *websocket.Conn, rateLimitKey string) *clientConn {
+	return &clientConn{
+		id:           id,
+		socket:       socket,
+		outbound:     make(chan outboundFrame, webSocketOutboundBuffer),
+		done:         make(chan struct{}),
+		alive:        true,
+		rateLimitKey: rateLimitKey,
+	}
+}
+
+func (c *clientConn) sendJSON(value any) bool {
+	return c.enqueueJSON(value, false)
+}
+
+func (c *clientConn) sendJSONAndClose(value any) bool {
+	return c.enqueueJSON(value, true)
+}
+
+func (c *clientConn) sendJSONAndCloseWait(value any) bool {
+	if !c.sendJSONAndClose(value) {
+		return false
+	}
+	timer := time.NewTimer(webSocketWriteTimeout + time.Second)
+	defer timer.Stop()
+	select {
+	case <-c.done:
+		return true
+	case <-timer.C:
+		_ = c.close()
+		return false
+	}
+}
+
+func (c *clientConn) enqueueJSON(value any, closeAfter bool) bool {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false
+	}
+	return c.enqueue(outboundFrame{messageType: websocket.TextMessage, data: data, closeAfter: closeAfter})
+}
+
+func (c *clientConn) sendPing() bool {
+	return c.enqueue(outboundFrame{messageType: websocket.PingMessage})
+}
+
+func (c *clientConn) enqueue(frame outboundFrame) bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+	}
+	select {
+	case <-c.done:
+		return false
+	case c.outbound <- frame:
+		return true
+	default:
+		log.Printf("closing slow WebSocket peer %s: outbound buffer full", c.id)
+		_ = c.close()
+		return false
+	}
+}
+
+func (c *clientConn) writeLoop() {
+	defer recoverAndLog("WebSocket writer")
+	defer c.close()
+	for {
+		select {
+		case <-c.done:
+			return
+		case frame := <-c.outbound:
+			if c.socket == nil {
+				_ = c.close()
+				return
+			}
+			deadline := time.Now().Add(webSocketWriteTimeout)
+			var err error
+			if frame.messageType == websocket.PingMessage {
+				err = c.socket.WriteControl(websocket.PingMessage, frame.data, deadline)
+			} else {
+				_ = c.socket.SetWriteDeadline(deadline)
+				err = c.socket.WriteMessage(frame.messageType, frame.data)
+			}
+			if err != nil || frame.closeAfter {
+				_ = c.close()
+				return
+			}
+		}
+	}
+}
+
+func (c *clientConn) refreshReadDeadline() {
+	if c.socket != nil {
+		_ = c.socket.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
+	}
 }
 
 func (c *clientConn) close() error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return c.socket.Close()
+	var err error
+	c.closeOnce.Do(func() {
+		close(c.done)
+		if c.socket != nil {
+			err = c.socket.Close()
+		}
+	})
+	return err
 }
 
 func (c *clientConn) allowRead(now time.Time) bool {

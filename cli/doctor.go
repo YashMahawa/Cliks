@@ -16,95 +16,153 @@ type doctorIssue struct {
 	commands []string
 }
 
-func runDoctor() error {
-	cfg := loadConfig()
-	var issues []doctorIssue
-	fmt.Println("Cliks doctor")
-	fmt.Println("")
-	fmt.Println("Privacy:")
-	fmt.Println("- Cliks sends only event kind: keyboard or mouse.")
-	fmt.Println("- Cliks relays coarse timing offsets inside each 500ms batch.")
-	fmt.Println("- Cliks does not send key values, key codes, words, coordinates, windows, or app names.")
-	fmt.Println("")
-	fmt.Println("System:")
-	fmt.Printf("- Runtime: Go %s\n", runtime.Version())
+type doctorCheck struct {
+	label  string
+	status string
+}
+
+type doctorReport struct {
+	privacy        []string
+	checks         []doctorCheck
+	recommendation []string
+	issues         []doctorIssue
+}
+
+func buildDoctorReport(cfg CliksConfig) doctorReport {
+	report := doctorReport{privacy: []string{
+		"Cliks sends only event kind: keyboard or mouse.",
+		"Cliks relays coarse timing offsets inside each 500ms batch.",
+		"Cliks does not send key values, key codes, words, coordinates, windows, or app names.",
+	}}
+	report.checks = append(report.checks, doctorCheck{"Runtime", "Go " + runtime.Version()})
+
 	player, spatial, hint, commands := getAudioPlayerStatus(cfg.Listening.AudioDevice)
 	if player != "" {
-		fmt.Printf("- Audio player: ok (%s)\n", player)
+		report.checks = append(report.checks, doctorCheck{"Audio player", "ok (" + player + ")"})
 		if cfg.Listening.AudioDevice != "" {
 			if hint == "" {
-				fmt.Printf("- Audio output: %s\n", cfg.Listening.AudioDevice)
+				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice})
 			} else {
-				issues = append(issues, doctorIssue{"Choose a supported audio output", hint, []string{"cliks set audio.device default"}})
+				report.issues = append(report.issues, doctorIssue{"Choose a supported audio output", hint, []string{"cliks set audio.device default"}})
 			}
 		}
 		if spatial {
-			fmt.Println("- Spatial audio: stereo pan + distance")
+			report.checks = append(report.checks, doctorCheck{"Spatial audio", "stereo pan + distance"})
 		} else {
-			fmt.Println("- Spatial audio: distance volume only")
-			fmt.Println("  For stereo panning, install ffplay or mpv.")
+			report.checks = append(report.checks, doctorCheck{"Spatial audio", "distance volume only; install ffplay or mpv for stereo panning"})
 		}
 	} else {
-		fmt.Println("- Audio player: missing")
-		issues = append(issues, doctorIssue{"Install an audio playback tool", hint, append(commands, "cliks sound-test")})
+		report.checks = append(report.checks,
+			doctorCheck{"Audio player", "missing"},
+			doctorCheck{"Spatial audio", "unavailable until an audio player is installed"},
+		)
+		report.issues = append(report.issues, doctorIssue{"Install an audio playback tool", hint, append(commands, "cliks sound-test")})
 	}
-	fmt.Printf("- Platform: %s\n", runtime.GOOS)
-	fmt.Printf("- Current team: %s\n", valuePlain(cfg.CurrentTeamCode, "not joined"))
-	fmt.Printf("- Sharing keyboard: %s\n", yesNo(cfg.Sharing.Keyboard))
-	fmt.Printf("- Sharing mouse: %s\n", yesNo(cfg.Sharing.Mouse))
+
+	report.checks = append(report.checks,
+		doctorCheck{"Platform", runtime.GOOS},
+		doctorCheck{"Current team", valuePlain(cfg.CurrentTeamCode, "not joined")},
+		doctorCheck{"Sharing keyboard", yesNo(cfg.Sharing.Keyboard)},
+		doctorCheck{"Sharing mouse", yesNo(cfg.Sharing.Mouse)},
+	)
 	if cfg.CurrentTeamCode == "" {
-		issues = append(issues, doctorIssue{"Join a team", "Cliks does not have a selected team code.", []string{"cliks join CLIK-XXXXXX"}})
+		report.issues = append(report.issues, doctorIssue{"Join a team", "Cliks does not have a selected team code.", []string{"cliks join CLIK-XXXXXX"}})
 	}
 	if !cfg.Sharing.Keyboard {
-		issues = append(issues, doctorIssue{"Turn keyboard sharing on", "Your keyboard activity will not reach teammates while share.keyboard is off.", []string{"cliks set share.keyboard on"}})
+		report.issues = append(report.issues, doctorIssue{"Turn keyboard sharing on", "Your keyboard activity will not reach teammates while share.keyboard is off.", []string{"cliks set share.keyboard on"}})
 	}
 	if !cfg.Sharing.Mouse {
-		issues = append(issues, doctorIssue{"Turn mouse sharing on", "Your mouse activity will not reach teammates while share.mouse is off.", []string{"cliks set share.mouse on"}})
+		report.issues = append(report.issues, doctorIssue{"Turn mouse sharing on", "Your mouse activity will not reach teammates while share.mouse is off.", []string{"cliks set share.mouse on"}})
 	}
+
 	if runtime.GOOS == "linux" {
 		input := linuxInputStatus()
-		fmt.Printf("- Linux input devices: %s\n", yesNo(input.hasInputDir))
+		report.checks = append(report.checks, doctorCheck{"Linux input devices", yesNo(input.hasInputDir)})
 		if input.hasInputDir {
-			fmt.Printf("- Readable event devices: %d/%d\n", input.readableCount, input.eventCount)
-			fmt.Printf("- Active input group: %s\n", yesNo(input.inputGroupActive))
+			report.checks = append(report.checks,
+				doctorCheck{"Readable event devices", fmt.Sprintf("%d/%d", input.readableCount, input.eventCount)},
+				doctorCheck{"Active input group", yesNo(input.inputGroupActive)},
+			)
 		}
-		if !input.hasInputDir {
-			issues = append(issues, doctorIssue{"Global capture is unavailable here", "Cliks cannot see /dev/input. This is normal in containers, SSH sessions, and locked-down environments.", []string{"Use a normal desktop terminal", "cliks start --terminal --self"}})
-		} else if input.eventCount == 0 {
-			issues = append(issues, doctorIssue{"No input event devices found", "Cliks found /dev/input, but no /dev/input/event* devices.", []string{"ls -l /dev/input", "Try again from the real desktop session"}})
-		} else if input.readableCount == 0 {
-			issues = append(issues, doctorIssue{"Allow Cliks to read input events", "Linux global capture needs permission to read /dev/input/event*. Cliks still sends only event type and timing, never key values.", []string{"sudo usermod -aG input " + input.username, "Log out and back in, or reboot", "cliks doctor"}})
+		switch {
+		case !input.hasInputDir:
+			report.issues = append(report.issues, doctorIssue{"Global capture is unavailable here", "Cliks cannot see /dev/input. This is normal in containers, SSH sessions, and locked-down environments.", []string{"Use a normal desktop terminal", "cliks start --terminal --self"}})
+		case input.eventCount == 0:
+			report.issues = append(report.issues, doctorIssue{"No input event devices found", "Cliks found /dev/input, but no /dev/input/event* devices.", []string{"ls -l /dev/input", "Try again from the real desktop session"}})
+		case input.readableCount == 0:
+			report.issues = append(report.issues, doctorIssue{"Allow Cliks to read input events", "Linux global capture needs permission to read /dev/input/event*. Cliks still sends only event type and timing, never key values.", []string{"sudo usermod -aG input " + input.username, "Log out and back in, or reboot", "cliks doctor"}})
 		}
-		fmt.Println("")
 		if input.readableCount > 0 {
-			fmt.Println("Recommended run command:")
-			fmt.Println("  cliks start --evdev")
+			report.recommendation = []string{"Recommended run command:", "cliks start --evdev"}
 		} else {
-			fmt.Println("Recommended local test:")
-			fmt.Println("  cliks start --terminal --self")
+			report.recommendation = []string{"Recommended local test:", "cliks start --terminal --self"}
 		}
 	} else if runtime.GOOS == "darwin" {
-		issues = append(issues, doctorIssue{"Allow Accessibility permission", "macOS global input capture needs Accessibility permission for the terminal app. Native capture is still being polished in the Go CLI.", []string{"Open System Settings > Privacy & Security > Accessibility", "Allow your terminal app", "cliks capture-test"}})
+		report.issues = append(report.issues, doctorIssue{"Allow Accessibility permission", "macOS global input capture needs Accessibility permission for the terminal app. Native capture is still being polished in the Go CLI.", []string{"Open System Settings > Privacy & Security > Accessibility", "Allow your terminal app", "cliks capture-test"}})
 	} else if runtime.GOOS == "windows" {
-		fmt.Println("")
-		fmt.Println("Recommended run command:")
-		fmt.Println("  cliks start")
+		report.recommendation = []string{"Recommended run command:", "cliks start"}
 	}
-	fmt.Println("")
-	if len(issues) == 0 {
-		fmt.Println("No blocking issues detected.")
-		fmt.Println("Test playback: cliks sound-test")
-		return nil
+	return report
+}
+
+func doctorReportLines(report doctorReport) []string {
+	lines := []string{"Cliks doctor", "", "Privacy:"}
+	for _, item := range report.privacy {
+		lines = append(lines, "- "+item)
 	}
-	fmt.Println("Fixes:")
-	for _, issue := range issues {
-		fmt.Println("")
-		fmt.Println(issue.title + ":")
-		fmt.Println("  " + issue.detail)
-		for _, command := range issue.commands {
-			fmt.Println("  " + command)
+	lines = append(lines, "", "System:")
+	for _, check := range report.checks {
+		lines = append(lines, fmt.Sprintf("- %s: %s", check.label, check.status))
+	}
+	if len(report.recommendation) > 0 {
+		lines = append(lines, "", report.recommendation[0])
+		for _, command := range report.recommendation[1:] {
+			lines = append(lines, "  "+command)
 		}
 	}
+	lines = append(lines, "")
+	if len(report.issues) == 0 {
+		return append(lines, "No blocking issues detected.", "Test playback: cliks sound-test")
+	}
+	lines = append(lines, "Fixes:")
+	for _, issue := range report.issues {
+		lines = append(lines, "", issue.title+":", "  "+issue.detail)
+		for _, command := range issue.commands {
+			lines = append(lines, "  "+command)
+		}
+	}
+	return lines
+}
+
+func doctorSummary(report doctorReport) string {
+	if len(report.issues) == 0 {
+		return "Doctor OK. No blocking issues detected."
+	}
+	if len(report.issues) == 1 {
+		return "Found 1 setup item. Review the steps below."
+	}
+	return fmt.Sprintf("Found %d setup items. Review the steps below.", len(report.issues))
+}
+
+func passiveDoctorWarning(report doctorReport) string {
+	var titles []string
+	for _, issue := range report.issues {
+		if issue.title == "Join a team" || issue.title == "Turn keyboard sharing on" || issue.title == "Turn mouse sharing on" {
+			continue
+		}
+		titles = append(titles, issue.title)
+		if len(titles) == 2 {
+			break
+		}
+	}
+	if len(titles) == 0 {
+		return ""
+	}
+	return "Setup note: " + strings.Join(titles, "; ") + ". Open Diagnostics in Cliks or run cliks doctor."
+}
+
+func runDoctor() error {
+	fmt.Println(strings.Join(doctorReportLines(buildDoctorReport(loadConfig())), "\n"))
 	return nil
 }
 
@@ -156,6 +214,7 @@ func linuxInputStatus() inputStatus {
 
 func runSoundTest() error {
 	audio := newAudioEngine(loadConfig().Listening)
+	defer audio.Close()
 	if err := audio.preview(); err != nil {
 		return err
 	}

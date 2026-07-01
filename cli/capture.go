@@ -127,7 +127,7 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 			}
 			text := string(buf[:n])
 			if text == "\x03" {
-				_ = os.Stdin.Close()
+				c.cancel()
 				return
 			}
 			withoutMouse := terminalMousePattern.ReplaceAllStringFunc(text, func(match string) string {

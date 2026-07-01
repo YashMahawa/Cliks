@@ -123,6 +123,9 @@ func cmdJoin(args []string) error {
 	}
 	if !autoStart {
 		fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
+		if warning := passiveDoctorWarning(buildDoctorReport(cfg)); warning != "" {
+			fmt.Println(warning)
+		}
 		return nil
 	}
 	message, err := startBackgroundForTeam(team.Code)
@@ -130,6 +133,9 @@ func cmdJoin(args []string) error {
 		return fmt.Errorf("joined %s, but could not start Cliks in the background: %w", formatTeamLabel(team.Name, team.Code), err)
 	}
 	fmt.Printf("Joined %s.\n%s\n", formatTeamLabel(team.Name, team.Code), message)
+	if warning := passiveDoctorWarning(buildDoctorReport(cfg)); warning != "" {
+		fmt.Println(warning)
+	}
 	return nil
 }
 
@@ -573,7 +579,7 @@ Usage:
   %[1]s start            Start coworking ambience
   %[1]s start CODE       Join/select a code and start immediately
   %[1]s settings         Open the control screen
-  %[1]s doctor           Check setup and permissions
+  %[1]s doctor           Print the full setup and permission report
   %[1]s sound-test       Play local sample sounds
   %[1]s capture-test     Verify local activity capture
   %[1]s autostart ...    Manage background autoconnect

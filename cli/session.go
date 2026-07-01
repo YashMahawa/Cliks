@@ -21,6 +21,8 @@ type StartOptions struct {
 	SelfMonitor bool
 }
 
+const clientWebSocketReadTimeout = 75 * time.Second
+
 type sessionExitAction string
 
 const (
@@ -64,6 +66,7 @@ type sessionController struct {
 	local          chan LocalActivityEvent
 	instance       *sessionInstance
 	lastStateWrite time.Time
+	stopOnce       sync.Once
 	mu             sync.Mutex
 	wsMu           sync.Mutex
 	ws             *websocket.Conn
@@ -141,12 +144,13 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 	ctx, cancel := context.WithCancel(context.Background())
 	listening := cfg.Listening
 	listening.Self = opts.SelfMonitor
+	setupNotice := passiveDoctorWarning(buildDoctorReport(cfg))
 	controller := &sessionController{
 		cfg:      cfg,
 		opts:     opts,
 		ctx:      ctx,
 		cancel:   cancel,
-		audio:    newAudioEngine(listening),
+		audio:    newAudioEngineWithContext(ctx, listening),
 		updates:  make(chan SessionViewState, 32),
 		local:    make(chan LocalActivityEvent, 1024),
 		instance: instance,
@@ -158,6 +162,7 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 			CaptureMode:      "starting",
 			Listening:        listening,
 			HearingSelf:      listening.Self,
+			Notice:           setupNotice,
 		},
 	}
 	return controller
@@ -195,14 +200,17 @@ func (s *sessionController) start() error {
 }
 
 func (s *sessionController) stop() {
-	s.cancel()
-	s.wsMu.Lock()
-	if s.ws != nil {
-		_ = s.ws.Close()
-	}
-	s.wsMu.Unlock()
-	s.writeSessionState(true)
-	s.instance.release()
+	s.stopOnce.Do(func() {
+		s.cancel()
+		s.wsMu.Lock()
+		if s.ws != nil {
+			_ = s.ws.Close()
+		}
+		s.wsMu.Unlock()
+		s.audio.Close()
+		s.writeSessionState(true)
+		s.instance.release()
+	})
 }
 
 func (s *sessionController) viewState() SessionViewState {
@@ -425,8 +433,11 @@ func (s *sessionController) connectLoop() {
 		attempt = 0
 		s.wsMu.Lock()
 		s.ws = conn
-		s.wsMu.Unlock()
-		_ = conn.WriteJSON(map[string]any{
+		_ = conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
+		conn.SetPongHandler(func(string) error {
+			return conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
+		})
+		err = conn.WriteJSON(map[string]any{
 			"type":     "join",
 			"teamCode": s.cfg.CurrentTeamCode,
 			"nickname": sanitizeNickname(s.cfg.Nickname),
@@ -436,9 +447,26 @@ func (s *sessionController) connectLoop() {
 				"features": []string{"compact-v1"},
 			},
 		})
+		s.wsMu.Unlock()
+		if err != nil {
+			_ = conn.Close()
+			s.wsMu.Lock()
+			if s.ws == conn {
+				s.ws = nil
+			}
+			s.wsMu.Unlock()
+			attempt++
+			delay := reconnectDelay(attempt)
+			s.set(func(state *SessionViewState) {
+				state.ConnectionStatus = fmt.Sprintf("offline; retrying in %ds", int(delay.Seconds()))
+			})
+			sleepContext(s.ctx, delay)
+			continue
+		}
 		s.set(func(state *SessionViewState) { state.ConnectionStatus = "connected" })
 		closed := make(chan struct{})
 		go s.pingLoop(conn, closed)
+		go closeWebSocketOnContext(s.ctx, conn, closed)
 		fatal := s.readLoop(conn)
 		close(closed)
 		s.wsMu.Lock()
@@ -481,6 +509,7 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 		if err != nil {
 			return false
 		}
+		_ = conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
 		var envelope struct {
 			Type           string                `json:"type"`
 			Message        string                `json:"message,omitempty"`
@@ -554,6 +583,14 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 				state.Notice = "Server: " + envelope.Message
 			})
 		}
+	}
+}
+
+func closeWebSocketOnContext(ctx context.Context, conn *websocket.Conn, closed <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+		_ = conn.Close()
+	case <-closed:
 	}
 }
 

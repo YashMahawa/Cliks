@@ -11,6 +11,50 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestClientConnClosesInsteadOfBlockingOnFullOutboundBuffer(t *testing.T) {
+	conn := newClientConn("slow-peer", nil, "test")
+	conn.outbound = make(chan outboundFrame, 1)
+	conn.outbound <- outboundFrame{messageType: websocket.TextMessage, data: []byte("{}")}
+
+	result := make(chan bool, 1)
+	go func() {
+		result <- conn.sendJSON(map[string]string{"type": "presence"})
+	}()
+
+	select {
+	case sent := <-result:
+		if sent {
+			t.Fatal("sendJSON accepted a frame after the bounded buffer filled")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("sendJSON blocked on a slow peer")
+	}
+	select {
+	case <-conn.done:
+	default:
+		t.Fatal("slow peer was not closed")
+	}
+}
+
+func TestHeartbeatTickDoesNotBlockOnSlowPeer(t *testing.T) {
+	hub := NewRoomHub(NewMemoryTeamStore())
+	conn := newClientConn("slow-heartbeat", nil, "test")
+	conn.outbound = make(chan outboundFrame, 1)
+	conn.outbound <- outboundFrame{messageType: websocket.TextMessage, data: []byte("{}")}
+	hub.conns[conn.id] = conn
+
+	done := make(chan struct{})
+	go func() {
+		hub.heartbeatTick()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("heartbeat blocked on a slow peer")
+	}
+}
+
 func TestWebSocketAllowsMaxLegitimateActivityBatch(t *testing.T) {
 	url, closeServer := testWebSocketURL(t)
 	defer closeServer()

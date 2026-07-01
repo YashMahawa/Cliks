@@ -73,7 +73,7 @@ func defaultConfig() CliksConfig {
 			Spatial:           true,
 			FatigueProtection: true,
 			Density:           0.8,
-			DynamicPlacement:  false,
+			DynamicPlacement:  true,
 			ShuffleMinutes:    10,
 		},
 		BatchWindowMs: 500,

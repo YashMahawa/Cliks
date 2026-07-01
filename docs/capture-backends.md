@@ -8,7 +8,7 @@ Cliks should eventually use OS-native global input backends. One library is unli
 - `cliks start`: on Linux tries `/dev/input` evdev capture first. macOS and Windows native global capture hooks are still future work in the Go CLI.
 - `cliks start --evdev`: Linux-only global capture through readable `/dev/input/event*` devices.
 
-Terminal mode captures and restores the original terminal state and disables mouse reporting on close, error, process exit, and top-level CLI failures. If a terminal is already in a bad state, run `cliks fix-terminal`.
+Terminal mode captures and restores the original terminal state and disables mouse reporting on close or error. In raw mode, `Ctrl+C` cancels capture without closing stdin, allowing the deferred restore to use the original terminal file descriptor. Bubble Tea owns equivalent alternate-screen and mouse cleanup for TUI sessions. If a terminal is already in a bad state, run `cliks fix-terminal`.
 
 Linux evdev mouse capture is deliberately narrow:
 
