@@ -441,8 +441,8 @@ func (a *AudioEngine) recordAndGetFatigueGain() float64 {
 }
 
 func fatigueThreshold(peerCount int) int {
-	peerCount = clampInt(peerCount, 1, 10)
-	return 24 + int(math.Round(24*float64(peerCount-1)/9))
+	peerCount = clampInt(peerCount, 1, 20)
+	return 24 * peerCount
 }
 
 func fatigueTargetGain(eventCount int, peerCount int) float64 {
@@ -451,8 +451,8 @@ func fatigueTargetGain(eventCount int, peerCount int) float64 {
 	if overload == 0 {
 		return 1
 	}
-	pressure := float64(overload) / float64(threshold)
-	return clamp(1-math.Pow(pressure, 1.35)*0.9, 0.35, 1)
+	pressure := float64(overload) / float64(2*threshold)
+	return clamp(1-math.Pow(pressure, 1.35)*0.65, 0.35, 1)
 }
 
 func (a *AudioEngine) warnUnavailableOnce() {

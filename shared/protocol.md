@@ -142,11 +142,11 @@ Compact event kind `k` means keyboard and `m` means mouse. Compact mouse buttons
 
 ## Connection health
 
-The relay sends WebSocket pings and removes peers that miss heartbeats. Both sides use a rolling 75-second read deadline that is extended by traffic and pong responses. The CLI also sends pings, links socket closure to session cancellation, and reconnects when heartbeat responses time out. Reconnect delays use exponential backoff with bounded jitter and a 30-second cap so many clients do not retry in lockstep after an outage.
+The relay sends WebSocket pings every 10 seconds. A connection is marked pending before a ping and is removed if it has not answered by the next heartbeat, so stale presence is bounded to roughly 20 seconds even when an underlying TCP failure is not reported immediately. Both sides also use a rolling 75-second read deadline that is extended by traffic and pong responses. The CLI sends its own pings, links socket closure to session cancellation, and reconnects when heartbeat responses time out. Reconnect delays use exponential backoff with bounded jitter and a 30-second cap so many clients do not retry in lockstep after an outage.
 
 ## Team deletion
 
-When a team is deleted successfully, the relay closes any live room for that code. Connected peers receive:
+When a team is deleted successfully, the relay closes any live room for that code. Join and delete operations for the same team are serialized through a per-team lifecycle gate, so a join cannot publish stale team data after deletion. Connected peers receive:
 
 ```json
 { "type": "team_deleted", "teamCode": "CLIK-842KQ9", "message": "This team was deleted." }
@@ -163,7 +163,7 @@ The socket is then closed and future lookups for that team code return 404. If a
 }
 ```
 
-The CLI should remove that team from local config, disable launch-at-login, stop the current session, and avoid reconnecting to that code.
+The CLI should remove that team from local config, disable launch-at-login, stop the current session, and avoid reconnecting to that code. Generic server/store errors are retryable and must not remove the saved team.
 
 ## Room limits
 

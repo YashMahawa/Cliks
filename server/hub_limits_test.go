@@ -55,6 +55,29 @@ func TestHeartbeatTickDoesNotBlockOnSlowPeer(t *testing.T) {
 	}
 }
 
+func TestHeartbeatEvictsPeerAfterMissedPong(t *testing.T) {
+	hub := NewRoomHub(NewMemoryTeamStore())
+	conn := newClientConn("stale-peer", nil, "test")
+	team := Team{Code: "CLIK-LOCAL", Name: "Local Test Room"}
+	hub.conns[conn.id] = conn
+	hub.rooms[team.Code] = &room{
+		team: team,
+		peers: map[string]*peer{
+			conn.id: {id: conn.id, conn: conn, team: team},
+		},
+	}
+	conn.roomCode = team.Code
+
+	hub.heartbeatTick()
+	if got := hub.TotalPeers(); got != 1 {
+		t.Fatalf("peers after first heartbeat = %d, want 1", got)
+	}
+	hub.heartbeatTick()
+	if got := hub.TotalPeers(); got != 0 {
+		t.Fatalf("peers after missed pong = %d, want 0", got)
+	}
+}
+
 func TestWebSocketAllowsMaxLegitimateActivityBatch(t *testing.T) {
 	url, closeServer := testWebSocketURL(t)
 	defer closeServer()

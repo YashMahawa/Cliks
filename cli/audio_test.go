@@ -94,11 +94,20 @@ func TestFatigueThresholdScalesWithRoomPopulation(t *testing.T) {
 	if got := fatigueThreshold(1); got != 24 {
 		t.Fatalf("single-peer threshold = %d, want 24", got)
 	}
-	if got := fatigueThreshold(10); got != 48 {
-		t.Fatalf("ten-peer threshold = %d, want 48", got)
+	if got := fatigueThreshold(10); got != 240 {
+		t.Fatalf("ten-peer threshold = %d, want 240", got)
+	}
+	if got := fatigueThreshold(20); got != 480 {
+		t.Fatalf("twenty-peer threshold = %d, want 480", got)
 	}
 	if got := fatigueTargetGain(25, 1); got >= 1 || got <= 0.965 {
 		t.Fatalf("first overloaded event gain = %.4f, want a soft reduction under 3.5%%", got)
+	}
+	if got := fatigueTargetGain(250, 10); got < 0.99 {
+		t.Fatalf("typical ten-peer activity gain = %.4f, want at least .99", got)
+	}
+	if got := fatigueTargetGain(480, 10); got <= 0.7 || got >= 0.8 {
+		t.Fatalf("heavy ten-peer activity gain = %.4f, want a gradual reduction", got)
 	}
 	if got := fatigueTargetGain(1000, 10); got != 0.35 {
 		t.Fatalf("fatigue floor = %.2f, want .35", got)

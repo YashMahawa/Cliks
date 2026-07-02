@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultPort        = "8787"
-	heartbeatInterval  = 30 * time.Second
+	heartbeatInterval  = 10 * time.Second
 	maxRequestBodySize = 1 << 20
 )
 
@@ -156,7 +156,7 @@ func (s *apiServer) handleTeamByCode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid delete request.")
 			return
 		}
-		deleted, err := s.store.DeleteTeam(r.Context(), DeleteTeamInput{Code: code, DeletePassword: input.DeletePassword})
+		deleted, err := s.hub.DeleteTeam(r.Context(), DeleteTeamInput{Code: code, DeletePassword: input.DeletePassword})
 		if err != nil {
 			log.Printf("delete team: %v", err)
 			writeError(w, http.StatusInternalServerError, "Could not delete that team.")
@@ -166,7 +166,6 @@ func (s *apiServer) handleTeamByCode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "Could not delete that team.")
 			return
 		}
-		s.hub.CloseRoom(code, "This team was deleted.")
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

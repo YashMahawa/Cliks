@@ -71,13 +71,20 @@ type room struct {
 	peers map[string]*peer
 }
 
+type teamGate struct {
+	mu   sync.Mutex
+	refs int
+}
+
 type RoomHub struct {
-	store    TeamStore
-	upgrader websocket.Upgrader
-	mu       sync.Mutex
-	conns    map[string]*clientConn
-	rooms    map[string]*room
-	joinRate *rateLimiter
+	store     TeamStore
+	upgrader  websocket.Upgrader
+	mu        sync.Mutex
+	conns     map[string]*clientConn
+	rooms     map[string]*room
+	joinRate  *rateLimiter
+	gateMu    sync.Mutex
+	teamGates map[string]*teamGate
 }
 
 func NewRoomHub(store TeamStore, joinLimiters ...*rateLimiter) *RoomHub {
@@ -86,8 +93,9 @@ func NewRoomHub(store TeamStore, joinLimiters ...*rateLimiter) *RoomHub {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		conns: map[string]*clientConn{},
-		rooms: map[string]*room{},
+		conns:     map[string]*clientConn{},
+		rooms:     map[string]*room{},
+		teamGates: map[string]*teamGate{},
 	}
 	if len(joinLimiters) > 0 {
 		hub.joinRate = joinLimiters[0]
@@ -199,6 +207,8 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 		h.rejectUnavailableJoin(conn, teamCode)
 		return
 	}
+	unlockTeam := h.lockTeam(teamCode)
+	defer unlockTeam()
 	team, err := h.store.GetTeamByCode(ctx, teamCode)
 	if err != nil {
 		conn.sendJSONAndClose(serverError("Could not load team."))
@@ -324,8 +334,19 @@ func (h *RoomHub) forwardActivity(peerID string, teamCode string, batchStartedAt
 	}
 }
 
-func (h *RoomHub) CloseRoom(teamCode string, message string) {
-	teamCode = normalizeTeamCode(teamCode)
+func (h *RoomHub) DeleteTeam(ctx context.Context, input DeleteTeamInput) (bool, error) {
+	input.Code = normalizeTeamCode(input.Code)
+	unlockTeam := h.lockTeam(input.Code)
+	defer unlockTeam()
+	deleted, err := h.store.DeleteTeam(ctx, input)
+	if err != nil || !deleted {
+		return deleted, err
+	}
+	h.closeRoom(input.Code, "This team was deleted.")
+	return true, nil
+}
+
+func (h *RoomHub) closeRoom(teamCode string, message string) {
 	var peers []*peer
 	h.mu.Lock()
 	if room := h.rooms[teamCode]; room != nil {
@@ -339,6 +360,28 @@ func (h *RoomHub) CloseRoom(teamCode string, message string) {
 	payload := deletedPayload(teamCode, message)
 	for _, p := range peers {
 		p.conn.sendJSONAndClose(payload)
+	}
+}
+
+func (h *RoomHub) lockTeam(teamCode string) func() {
+	h.gateMu.Lock()
+	gate := h.teamGates[teamCode]
+	if gate == nil {
+		gate = &teamGate{}
+		h.teamGates[teamCode] = gate
+	}
+	gate.refs++
+	h.gateMu.Unlock()
+
+	gate.mu.Lock()
+	return func() {
+		gate.mu.Unlock()
+		h.gateMu.Lock()
+		gate.refs--
+		if gate.refs == 0 && h.teamGates[teamCode] == gate {
+			delete(h.teamGates, teamCode)
+		}
+		h.gateMu.Unlock()
 	}
 }
 
