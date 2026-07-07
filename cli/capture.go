@@ -78,11 +78,8 @@ func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, m
 	if mode == "evdev" {
 		return CaptureState{Mode: "off", PermissionHint: "Linux evdev capture is only available on Linux desktops with readable /dev/input/event* devices."}
 	}
-	if runtime.GOOS == "darwin" {
-		return CaptureState{Mode: "off", PermissionHint: "macOS global capture will use native Event Tap in a future Go build. For now use: cliks start --terminal --self"}
-	}
-	if runtime.GOOS == "windows" {
-		return CaptureState{Mode: "off", PermissionHint: "Windows global capture will use native low-level hooks in a future Go build. For now use: cliks start --terminal --self"}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return c.startGlobalHook(ctx, sharing)
 	}
 	return CaptureState{Mode: "off", PermissionHint: "Global capture is not available in this environment. Try: cliks start --terminal --self"}
 }
