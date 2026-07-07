@@ -39,6 +39,55 @@ if ! command -v git >/dev/null 2>&1; then
   fi
 fi
 
+install_system_deps() {
+  case "$(uname -s)" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        if ! command -v mpv >/dev/null 2>&1; then
+          echo "Installing mpv for macOS spatial audio..."
+          brew install mpv
+        fi
+      else
+        echo "Homebrew was not found. Please install mpv manually for spatial audio."
+      fi
+      ;;
+    Linux)
+      if is_termux; then
+        if command -v pkg >/dev/null 2>&1; then
+          pkg install -y mpv termux-api
+        else
+          apt-get update
+          apt-get install -y mpv termux-api
+        fi
+      elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard
+      elif command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update
+        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils
+      elif command -v zypper >/dev/null 2>&1; then
+        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils
+      elif command -v apk >/dev/null 2>&1; then
+        sudo apk add mpv xclip wl-clipboard
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v winget.exe >/dev/null 2>&1; then
+        if ! command -v mpv >/dev/null 2>&1; then
+          echo "Installing mpv for Windows spatial audio..."
+          winget.exe install --id mpv.mpv -e --accept-package-agreements --accept-source-agreements
+        fi
+      elif command -v choco.exe >/dev/null 2>&1; then
+        if ! command -v mpv >/dev/null 2>&1; then
+          echo "Installing mpv for Windows spatial audio..."
+          choco.exe install mpv -y
+        fi
+      fi
+      ;;
+  esac
+}
+
 install_go() {
   echo "Go is not installed. Cliks will try to install it now."
   case "$(uname -s)" in
@@ -102,6 +151,8 @@ if ! command -v go >/dev/null 2>&1; then
   echo "Open a new terminal or add Go to PATH, then rerun this script."
   exit 1
 fi
+
+install_system_deps
 
 if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" pull --ff-only
