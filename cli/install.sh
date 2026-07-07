@@ -42,13 +42,18 @@ fi
 install_system_deps() {
   case "$(uname -s)" in
     Darwin)
-      if command -v brew >/dev/null 2>&1; then
-        if ! command -v mpv >/dev/null 2>&1; then
-          echo "Installing mpv for macOS spatial audio..."
-          brew install mpv
+      if ! command -v brew >/dev/null 2>&1; then
+        echo "Homebrew was not found. Installing Homebrew..."
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        if [ -x /opt/homebrew/bin/brew ]; then
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -x /usr/local/bin/brew ]; then
+          eval "$(/usr/local/bin/brew shellenv)"
         fi
-      else
-        echo "Homebrew was not found. Please install mpv manually for spatial audio."
+      fi
+      if ! command -v mpv >/dev/null 2>&1; then
+        echo "Installing mpv for macOS spatial audio..."
+        brew install mpv
       fi
       ;;
     Linux)
@@ -73,6 +78,12 @@ install_system_deps() {
       fi
       ;;
     MINGW*|MSYS*|CYGWIN*)
+      if ! command -v winget.exe >/dev/null 2>&1 && ! command -v choco.exe >/dev/null 2>&1 && ! command -v scoop >/dev/null 2>&1; then
+        echo "No package manager found. Installing Scoop..."
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression"
+        export PATH="$HOME/scoop/shims:$PATH"
+      fi
+
       if command -v winget.exe >/dev/null 2>&1; then
         if ! command -v mpv >/dev/null 2>&1; then
           echo "Installing mpv for Windows spatial audio..."
@@ -83,6 +94,11 @@ install_system_deps() {
           echo "Installing mpv for Windows spatial audio..."
           choco.exe install mpv -y
         fi
+      elif command -v scoop >/dev/null 2>&1; then
+        if ! command -v mpv >/dev/null 2>&1; then
+          echo "Installing mpv for Windows spatial audio..."
+          scoop install mpv
+        fi
       fi
       ;;
   esac
@@ -92,10 +108,19 @@ install_go() {
   echo "Go is not installed. Cliks will try to install it now."
   case "$(uname -s)" in
     Darwin)
+      if ! command -v brew >/dev/null 2>&1; then
+        echo "Homebrew was not found. Installing Homebrew..."
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        if [ -x /opt/homebrew/bin/brew ]; then
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -x /usr/local/bin/brew ]; then
+          eval "$(/usr/local/bin/brew shellenv)"
+        fi
+      fi
       if command -v brew >/dev/null 2>&1; then
         brew install go
       else
-        echo "Homebrew was not found. Install Go from https://go.dev/dl/ or install Homebrew, then rerun this script."
+        echo "Failed to install Homebrew. Install Go from https://go.dev/dl/, then rerun this script."
         exit 1
       fi
       ;;
@@ -129,8 +154,10 @@ install_go() {
         winget.exe install --id GoLang.Go -e --accept-package-agreements --accept-source-agreements
       elif command -v choco.exe >/dev/null 2>&1; then
         choco.exe install golang -y
+      elif command -v scoop >/dev/null 2>&1; then
+        scoop install go
       else
-        echo "Could not find winget or Chocolatey to install Go automatically."
+        echo "Could not find a package manager to install Go automatically."
         echo "Install Go from https://go.dev/dl/, reopen this shell, then rerun this script."
         exit 1
       fi
