@@ -98,7 +98,7 @@ The CLI uses bundled real WAV samples, not generated placeholder clicks.
 Current pack:
 
 - 5 keyboard samples in `cli/assets/sounds/keyboard`
-- 2 mouse samples in `cli/assets/sounds/mouse` (real recorded clicks from Pixabay, trimmed to ~0.25s to match keyboard length)
+- 1 mouse sample in `cli/assets/sounds/mouse` (real recorded click from Pixabay, trimmed; higher-pitch sample removed)
 
 The audio engine randomly picks one sample per event. Mouse samples are real recorded click sounds and should remain audibly distinct from keyboard samples. Source/license details are in `cli/assets/sounds/NOTICE.md`. The website mirror in `site/public/sounds/` must stay in sync with both packs.
 

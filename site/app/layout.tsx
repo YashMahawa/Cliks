@@ -1,25 +1,28 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Syne, JetBrains_Mono } from "next/font/google";
 import { AcousticProvider } from "../components/AcousticProvider";
 import "./styles.css";
 
-const geist = Geist({
-  variable: "--font-geist",
+const display = Syne({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = JetBrains_Mono({
+  variable: "--font-mono-face",
   subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  title: "Cliks — work alone, together",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  title: "Cliks - work alone, together",
   description:
     "A free, open-source CLI that turns your remote team's typing into ambient background sound. No keystrokes shared, no microphones, just presence.",
   icons: { icon: "/images/cliks-keycap.png" },
   openGraph: {
-    title: "Cliks — work alone, together",
+    title: "Cliks - work alone, together",
     description:
       "Free, open-source ambient coworking. Hear your team get things done, without sharing a single keystroke.",
     images: ["/images/warm_desk_workspace.png"],
@@ -28,8 +31,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geist.variable} ${geistMono.variable}`}>
-      <body className="antialiased min-h-[100dvh] grain">
+    // suppressHydrationWarning: browser extensions (Dark Reader, etc.) inject
+    // attributes on <html>/<body> before React hydrates. That is not app state.
+    <html lang="en" className={`${display.variable} ${mono.variable}`} suppressHydrationWarning>
+      <body className="min-h-[100dvh] bg-page text-fg antialiased" suppressHydrationWarning>
         <AcousticProvider>{children}</AcousticProvider>
       </body>
     </html>

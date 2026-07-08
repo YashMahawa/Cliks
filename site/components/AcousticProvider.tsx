@@ -1,12 +1,10 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useRef } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef } from "react";
 
 interface AcousticContextProps {
   triggerSound: () => void;
   triggerMouseSound: () => void;
-  pulseActive: boolean;
-  triggerPulse: () => void;
 }
 
 const AcousticContext = createContext<AcousticContextProps | undefined>(undefined);
@@ -27,57 +25,73 @@ const keyboardUrls = [
   "/sounds/keyboard/key-05.wav",
 ];
 
-const mouseUrls = ["/sounds/mouse/mouse-01.wav", "/sounds/mouse/mouse-02.wav"];
+const mouseUrls = ["/sounds/mouse/mouse-01.wav"];
+
+/** Flash a CSS hook without React re-renders (avoids lag on rapid keystrokes). */
+function flashPresence() {
+  const root = document.documentElement;
+  root.dataset.cliksPulse = "1";
+  window.clearTimeout((flashPresence as { t?: number }).t);
+  (flashPresence as { t?: number }).t = window.setTimeout(() => {
+    delete root.dataset.cliksPulse;
+  }, 160);
+}
 
 export function AcousticProvider({ children }: { children: React.ReactNode }) {
-  const [pulseActive, setPulseActive] = useState<boolean>(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const keyboardBuffersRef = useRef<AudioBuffer[]>([]);
   const mouseBuffersRef = useRef<AudioBuffer[]>([]);
+  const readyRef = useRef(false);
 
-  // Preload sound files on mount
   useEffect(() => {
+    let cancelled = false;
+
     const loadAudio = async () => {
       try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AudioContextClass) return;
         const ctx = new AudioContextClass();
+        if (cancelled) {
+          void ctx.close();
+          return;
+        }
         audioCtxRef.current = ctx;
 
         const decode = async (url: string) => {
           const response = await fetch(url);
-          if (!response.ok) throw new Error();
+          if (!response.ok) throw new Error("audio fetch failed");
           return ctx.decodeAudioData(await response.arrayBuffer());
         };
 
-        // Load both packs independently so a failure in one fails silently.
         const [keyboard, mouse] = await Promise.all([
           Promise.all(keyboardUrls.map(decode)).catch(() => [] as AudioBuffer[]),
           Promise.all(mouseUrls.map(decode)).catch(() => [] as AudioBuffer[]),
         ]);
 
+        if (cancelled) return;
         keyboardBuffersRef.current = keyboard;
         mouseBuffersRef.current = mouse;
-      } catch (error) {
+        readyRef.current = true;
+      } catch {
         // AUDIO INTEGRITY: fail silently, never fall back to synthesized beeps.
       }
     };
 
-    loadAudio();
+    void loadAudio();
+    return () => {
+      cancelled = true;
+      const ctx = audioCtxRef.current;
+      audioCtxRef.current = null;
+      if (ctx) void ctx.close();
+    };
   }, []);
 
-  const triggerPulse = () => {
-    setPulseActive(true);
-    setTimeout(() => setPulseActive(false), 200);
-  };
-
-  // Play a random sample from a pack with organic gain/pitch jitter, like cli/src/audio.ts.
-  const play = (buffers: AudioBuffer[]) => {
+  const play = useCallback((buffers: AudioBuffer[]) => {
     const ctx = audioCtxRef.current;
     if (!ctx || buffers.length === 0) return;
 
     if (ctx.state === "suspended") {
-      ctx.resume();
+      void ctx.resume();
     }
 
     const now = ctx.currentTime;
@@ -86,33 +100,43 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
     source.buffer = buffer;
 
     const gainNode = ctx.createGain();
-    const volumeMod = 0.85 + Math.random() * 0.3; // 0.85–1.15
+    const volumeMod = 0.85 + Math.random() * 0.3;
     gainNode.gain.setValueAtTime(volumeMod * 0.6, now);
 
-    const pitchMod = 0.92 + Math.random() * 0.16; // 0.92–1.08
+    const pitchMod = 0.92 + Math.random() * 0.16;
     source.playbackRate.setValueAtTime(pitchMod, now);
 
     source.connect(gainNode);
     gainNode.connect(ctx.destination);
     source.start(now);
-  };
+  }, []);
 
-  const triggerSound = () => play(keyboardBuffersRef.current);
-  const triggerMouseSound = () => play(mouseBuffersRef.current);
+  const triggerSound = useCallback(() => {
+    play(keyboardBuffersRef.current);
+    flashPresence();
+  }, [play]);
+
+  const triggerMouseSound = useCallback(() => {
+    play(mouseBuffersRef.current);
+    flashPresence();
+  }, [play]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore standard modifier keys
+      if (e.repeat) return;
       if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
         return;
       }
+      // Don't play over form fields typing... actually product wants page-wide demo
+      // including forms - keep global. Skip if composing IME.
+      if (e.isComposing) return;
       triggerSound();
-      triggerPulse();
     };
 
-    const handleMouseDown = () => {
+    const handleMouseDown = (e: MouseEvent) => {
+      // Only primary button for mouse sample (matches CLI left/right click intent)
+      if (e.button !== 0 && e.button !== 2) return;
       triggerMouseSound();
-      triggerPulse();
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -122,17 +146,10 @@ export function AcousticProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleMouseDown);
     };
-  }, []);
+  }, [triggerSound, triggerMouseSound]);
 
   return (
-    <AcousticContext.Provider
-      value={{
-        triggerSound,
-        triggerMouseSound,
-        pulseActive,
-        triggerPulse,
-      }}
-    >
+    <AcousticContext.Provider value={{ triggerSound, triggerMouseSound }}>
       {children}
     </AcousticContext.Provider>
   );

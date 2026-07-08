@@ -24,4 +24,5 @@ match the keyboard sample length (trailing near-silence removed).
 - License: Pixabay Content License (free for commercial use, attribution not required)
 - Files used:
   - `mouse/mouse-01.wav` — "mouse-click" by matthewvakaliuk73627 (Pixabay #290204)
-  - `mouse/mouse-02.wav` — "mouse-click" by dragon-studio (Pixabay #405462)
+- Removed (higher pitch / less natural):
+  - `mouse/mouse-02.wav` — backed up under `backups/sounds-*/`
