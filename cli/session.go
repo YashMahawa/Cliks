@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,21 +59,25 @@ type PeerActivityStatus struct {
 }
 
 type sessionController struct {
-	cfg            CliksConfig
-	opts           StartOptions
-	ctx            context.Context
-	cancel         context.CancelFunc
-	audio          *AudioEngine
-	updates        chan SessionViewState
-	local          chan LocalActivityEvent
-	instance       *sessionInstance
-	lastStateWrite time.Time
-	stopOnce       sync.Once
-	mu             sync.Mutex
-	wsMu           sync.Mutex
-	ws             *websocket.Conn
-	state          SessionViewState
-	ownPeerID      string
+	cfg               CliksConfig
+	opts              StartOptions
+	ctx               context.Context
+	cancel            context.CancelFunc
+	audio             *AudioEngine
+	updates           chan SessionViewState
+	local             chan LocalActivityEvent
+	instance          *sessionInstance
+	lastStateWrite    time.Time
+	stateWriteTimer   *time.Timer
+	stateWriteMu      sync.Mutex
+	stopOnce          sync.Once
+	mu                sync.Mutex
+	wsMu              sync.Mutex
+	ws                *websocket.Conn
+	state             SessionViewState
+	ownPeerID         string
+	capture           *ActivityCapture
+	rateLimitedUntil  time.Time
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
@@ -144,7 +150,15 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 	ctx, cancel := context.WithCancel(context.Background())
 	listening := cfg.Listening
 	listening.Self = opts.SelfMonitor
-	setupNotice := passiveDoctorWarning(buildDoctorReport(cfg))
+	// Use the lightweight doctor path so session start stays snappy (no hook self-tests).
+	setupNotice := quickDoctorWarning(cfg)
+	if platformNotice := platformStartupCaptureNotice(); platformNotice != "" {
+		if setupNotice != "" {
+			setupNotice = setupNotice + " " + platformNotice
+		} else {
+			setupNotice = platformNotice
+		}
+	}
 	controller := &sessionController{
 		cfg:      cfg,
 		opts:     opts,
@@ -169,46 +183,83 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 }
 
 func (s *sessionController) start() error {
-	captureState := CaptureState{Mode: "terminal"}
-	if !(s.opts.CaptureMode == "terminal" && term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))) {
-		capture := newActivityCapture()
-		captureState = capture.start(s.ctx, s.cfg.Sharing, s.opts.CaptureMode)
-		go func() {
-			for {
-				select {
-				case <-s.ctx.Done():
-					return
-				case event := <-capture.Events:
-					s.recordLocalActivity(event)
-				}
-			}
-		}()
-		go func() {
-			<-s.ctx.Done()
-			capture.stop()
-		}()
-	}
+	// Capture init can block on OS hooks; keep the TUI responsive by warming it up in the background.
 	s.set(func(state *SessionViewState) {
-		state.CaptureMode = captureState.Mode
-		state.PermissionHint = captureState.PermissionHint
+		state.CaptureMode = "starting"
 	})
 	s.writeSessionState(true)
+	go s.startCaptureAsync()
 	go s.batchLoop(s.local)
 	go s.configLoop()
 	go s.connectLoop()
 	return nil
 }
 
+func (s *sessionController) startCaptureAsync() {
+	captureState := CaptureState{Mode: "terminal"}
+	// In a pure terminal session with --terminal, let the live TUI own keyboard/mouse capture.
+	if s.opts.CaptureMode == "terminal" && term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
+		s.set(func(state *SessionViewState) {
+			state.CaptureMode = "terminal"
+			state.PermissionHint = ""
+		})
+		return
+	}
+	capture := newActivityCapture()
+	captureState = capture.start(s.ctx, s.cfg.Sharing, s.opts.CaptureMode)
+	// If global capture failed, fall back to terminal mode when interactive so users are not stuck silent.
+	if captureState.Mode == "off" && term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) && s.opts.CaptureMode != "evdev" {
+		if err := capture.startTerminal(s.ctx, s.cfg.Sharing); err == nil {
+			hint := captureState.PermissionHint
+			if hint != "" {
+				hint += " "
+			}
+			hint += "Fell back to terminal capture for this session."
+			captureState = CaptureState{Mode: "terminal", PermissionHint: hint}
+		}
+	}
+	s.mu.Lock()
+	s.capture = capture
+	s.mu.Unlock()
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case event, ok := <-capture.Events:
+				if !ok {
+					return
+				}
+				s.recordLocalActivity(event)
+			}
+		}
+	}()
+	go func() {
+		<-s.ctx.Done()
+		capture.stop()
+	}()
+	s.set(func(state *SessionViewState) {
+		state.CaptureMode = captureState.Mode
+		state.PermissionHint = captureState.PermissionHint
+	})
+}
+
 func (s *sessionController) stop() {
 	s.stopOnce.Do(func() {
 		s.cancel()
+		s.mu.Lock()
+		capture := s.capture
+		s.mu.Unlock()
+		if capture != nil {
+			capture.stop()
+		}
 		s.wsMu.Lock()
 		if s.ws != nil {
 			_ = s.ws.Close()
 		}
 		s.wsMu.Unlock()
 		s.audio.Close()
-		s.writeSessionState(true)
+		s.flushSessionState()
 		s.instance.release()
 	})
 }
@@ -221,10 +272,17 @@ func (s *sessionController) viewState() SessionViewState {
 
 func (s *sessionController) set(mutator func(*SessionViewState)) {
 	s.mu.Lock()
+	prevStatus := s.state.ConnectionStatus
+	prevCapture := s.state.CaptureMode
+	prevNotice := s.state.Notice
 	mutator(&s.state)
+	// Lifecycle transitions must not be swallowed by the write throttle.
+	force := s.state.ConnectionStatus != prevStatus ||
+		s.state.CaptureMode != prevCapture ||
+		s.state.Notice != prevNotice
 	state := s.state
 	s.mu.Unlock()
-	s.writeSessionState(false)
+	s.writeSessionState(force)
 	select {
 	case s.updates <- state:
 	default:
@@ -236,10 +294,36 @@ func (s *sessionController) writeSessionState(force bool) {
 		return
 	}
 	now := time.Now()
-	if !force && now.Sub(s.lastStateWrite) < time.Second {
+	if force || now.Sub(s.lastStateWrite) >= time.Second {
+		s.flushSessionState()
 		return
 	}
-	s.lastStateWrite = now
+	// Trailing-edge debounce: always persist the final state after a burst of updates.
+	s.stateWriteMu.Lock()
+	defer s.stateWriteMu.Unlock()
+	if s.stateWriteTimer != nil {
+		s.stateWriteTimer.Stop()
+	}
+	delay := time.Second - now.Sub(s.lastStateWrite)
+	if delay < 50*time.Millisecond {
+		delay = 50 * time.Millisecond
+	}
+	s.stateWriteTimer = time.AfterFunc(delay, func() {
+		s.flushSessionState()
+	})
+}
+
+func (s *sessionController) flushSessionState() {
+	if s.instance == nil {
+		return
+	}
+	s.stateWriteMu.Lock()
+	if s.stateWriteTimer != nil {
+		s.stateWriteTimer.Stop()
+		s.stateWriteTimer = nil
+	}
+	s.stateWriteMu.Unlock()
+	s.lastStateWrite = time.Now()
 	s.instance.update(s.viewState())
 }
 
@@ -415,13 +499,40 @@ func (s *sessionController) connectLoop() {
 			return
 		default:
 		}
+		if remaining := time.Until(s.rateLimitedUntil); remaining > 0 {
+			s.set(func(state *SessionViewState) {
+				state.ConnectionStatus = fmt.Sprintf("rate limited; resume in %s", formatCountdown(remaining))
+				state.Notice = "Rate limited by the server. Waiting before reconnecting."
+			})
+			sleepContext(s.ctx, remaining)
+			if s.ctx.Err() != nil {
+				return
+			}
+			s.rateLimitedUntil = time.Time{}
+		}
 		status := "connecting"
 		if attempt > 0 {
 			status = fmt.Sprintf("reconnecting (%d)", attempt)
 		}
-		s.set(func(state *SessionViewState) { state.ConnectionStatus = status })
-		conn, _, err := websocket.DefaultDialer.Dial(s.cfg.WSURL, nil)
+		// Clear stale error notices so reconnecting is not shown under an old failure banner.
+		s.set(func(state *SessionViewState) {
+			state.ConnectionStatus = status
+			if strings.Contains(strings.ToLower(state.Notice), "rate limit") ||
+				strings.Contains(strings.ToLower(state.Notice), "server:") ||
+				strings.Contains(strings.ToLower(state.Notice), "offline") {
+				state.Notice = ""
+			}
+		})
+		conn, resp, err := websocket.DefaultDialer.Dial(s.cfg.WSURL, nil)
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			if isRateLimitResponse(resp, err) {
+				s.enterRateLimit(attempt, resp)
+				attempt++
+				continue
+			}
 			attempt++
 			delay := reconnectDelay(attempt)
 			s.set(func(state *SessionViewState) {
@@ -463,7 +574,10 @@ func (s *sessionController) connectLoop() {
 			sleepContext(s.ctx, delay)
 			continue
 		}
-		s.set(func(state *SessionViewState) { state.ConnectionStatus = "connected" })
+		s.set(func(state *SessionViewState) {
+			state.ConnectionStatus = "connected"
+			state.Notice = ""
+		})
 		closed := make(chan struct{})
 		go s.pingLoop(conn, closed)
 		go closeWebSocketOnContext(s.ctx, conn, closed)
@@ -486,6 +600,54 @@ func (s *sessionController) connectLoop() {
 		})
 		sleepContext(s.ctx, delay)
 	}
+}
+
+func (s *sessionController) enterRateLimit(attempt int, resp *http.Response) {
+	wait := rateLimitWait(resp)
+	s.rateLimitedUntil = time.Now().Add(wait)
+	s.set(func(state *SessionViewState) {
+		state.ConnectionStatus = fmt.Sprintf("rate limited; resume in %s", formatCountdown(wait))
+		state.Notice = "Rate limited (HTTP 429). Pausing automatic reconnects until the window ends."
+	})
+	sleepContext(s.ctx, wait)
+	s.rateLimitedUntil = time.Time{}
+	_ = attempt
+}
+
+func isRateLimitResponse(resp *http.Response, err error) bool {
+	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") || strings.Contains(msg, "rate limit") || strings.Contains(msg, "too many requests")
+}
+
+func rateLimitWait(resp *http.Response) time.Duration {
+	if resp != nil {
+		if retry := strings.TrimSpace(resp.Header.Get("Retry-After")); retry != "" {
+			if seconds, err := strconv.Atoi(retry); err == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+	// Server blocks for about five minutes; wait that window instead of spinning reconnects.
+	return 5 * time.Minute
+}
+
+func formatCountdown(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second).Seconds())
+	minutes := total / 60
+	seconds := total % 60
+	if minutes > 0 {
+		return fmt.Sprintf("%d:%02d", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func (s *sessionController) pingLoop(conn *websocket.Conn, closed <-chan struct{}) {
@@ -579,8 +741,17 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			s.handleTeamUnavailable(envelope.TeamCode, envelope.Message)
 			return true
 		case "error":
+			msg := strings.TrimSpace(envelope.Message)
+			if isRateLimitMessage(msg) {
+				s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
+				s.set(func(state *SessionViewState) {
+					state.ConnectionStatus = "rate limited; resume in 5:00"
+					state.Notice = "Rate limited: " + msg
+				})
+				return false
+			}
 			s.set(func(state *SessionViewState) {
-				state.Notice = "Server: " + envelope.Message
+				state.Notice = "Server: " + msg
 			})
 		}
 	}
@@ -685,6 +856,13 @@ func markPeerActive(current []PeerActivityStatus, peerID string, nickname string
 
 func reconnectDelay(attempt int) time.Duration {
 	return randomizedRetryDelay(attempt)
+}
+
+func isRateLimitMessage(message string) bool {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "too many") ||
+		strings.Contains(msg, "429")
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) {

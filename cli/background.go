@@ -67,7 +67,7 @@ func startBackgroundForTeam(code string) (string, error) {
 	_ = writeBackgroundPID(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
-	return fmt.Sprintf("Cliks is running in the background for %s.\nStatus: cliks background status\nStop:   cliks background stop", code), nil
+	return fmt.Sprintf("Cliks is running in the background for %s.\nStatus: cliks service status\nStop:   cliks service stop\n(Aliases: cliks background status|stop)", code), nil
 }
 
 func stopBackground() (string, error) {

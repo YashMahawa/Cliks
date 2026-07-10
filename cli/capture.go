@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,9 +182,33 @@ func (c *ActivityCapture) startEvdev(ctx context.Context, sharing SharingConfig)
 		if hint == "" {
 			hint = "Linux global capture could not open /dev/input/event*. Try: sudo usermod -aG input $USER, then log out and back in."
 		}
+		if linuxSandboxHint := linuxCaptureSandboxHint(); linuxSandboxHint != "" {
+			hint = hint + " " + linuxSandboxHint
+		}
 		return CaptureState{Mode: "off", PermissionHint: hint}
 	}
 	return CaptureState{Mode: "evdev", PermissionHint: hint}
+}
+
+func linuxCaptureSandboxHint() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	// Wayland + sandboxed sessions often cannot read /dev/input even with the input group.
+	wayland := os.Getenv("WAYLAND_DISPLAY") != "" || strings.Contains(strings.ToLower(os.Getenv("XDG_SESSION_TYPE")), "wayland")
+	flatpak := os.Getenv("FLATPAK_ID") != "" || os.Getenv("container") != "" || fileExists("/.flatpak-info")
+	if flatpak {
+		return "This looks like a sandboxed session (Flatpak/container). Prefer host terminal install, or use: cliks start --terminal --self"
+	}
+	if wayland {
+		return "On Wayland, if input group membership still fails, use terminal capture: cliks start --terminal --self"
+	}
+	return ""
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing SharingConfig) {
@@ -265,8 +291,27 @@ func (c *ActivityCapture) emit(event LocalActivityEvent) {
 }
 
 func repairTerminal() {
+	// Best-effort reset for raw mode leftovers after crashes or forced exits.
+	// Covers mouse reporting, bracketed paste, focus events, cursor, and SGR state.
+	fmt.Print("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1004l\x1b[?25h\x1b[0m\r\n")
 	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Print("\x1b[?1000l\x1b[?1006l")
+		// If we still hold a saved raw state, restore it.
+		// Otherwise try a platform-friendly "sane" reset when available.
+		restoreTerminalBestEffort()
+	}
+}
+
+func restoreTerminalBestEffort() {
+	// stty is available on most Unix shells; ignore failures on Windows or minimal envs.
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if path, err := exec.LookPath("stty"); err == nil {
+		cmd := exec.Command(path, "sane")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
 	}
 }
 

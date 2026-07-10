@@ -13,8 +13,8 @@ type configSettingMetadata struct {
 }
 
 var configSettingCatalog = []configSettingMetadata{
-	{Key: "autostart", Label: "Launch at login", Description: "connect the selected team after sign-in (on/off)"},
-	{Key: "keep.running", Label: "Keep Running", Description: "let active sessions survive terminal close (on/off)"},
+	{Key: "autostart", Label: "Launch at login", Description: "service enable: connect the selected team after sign-in (on/off). CLI: cliks service enable|disable"},
+	{Key: "keep.running", Label: "Keep Running", Description: "hand a live session off to the background service when the terminal closes (on/off). Related: cliks service start|stop"},
 	{Key: "nickname", Label: "Nickname", Description: "display name shared with teammates (10 characters max)"},
 	{Key: "name", Label: "Nickname", Description: "alias for nickname"},
 	{Key: "volume", Label: "Volume", Description: "local playback volume from 0 to 1"},

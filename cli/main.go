@@ -13,10 +13,19 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.2.1"
+const version = "0.2.2"
 
 func main() {
+	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			repairTerminal()
+			fmt.Fprintf(os.Stderr, "cliks crashed: %v\nRun: cliks fix-terminal\n", recovered)
+			os.Exit(1)
+		}
+	}()
 	if err := run(os.Args); err != nil {
+		repairTerminal()
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -63,9 +72,13 @@ func run(args []string) error {
 		return printConfig()
 	case "preset":
 		return cmdPreset(rest[1:])
+	case "service":
+		return cmdService(rest[1:])
 	case "autostart":
+		// Legacy alias: prefer `cliks service enable|disable|status`.
 		return cmdAutostart(rest[1:])
 	case "background":
+		// Legacy alias: prefer `cliks service start|stop|status`.
 		return cmdBackground(rest[1:])
 	case "set":
 		return cmdSet(rest[1:])
@@ -76,6 +89,27 @@ func run(args []string) error {
 		return fmt.Errorf("unknown command: %s\nrun %s help", rest[0], commandName)
 	}
 	return nil
+}
+
+// cmdService is the canonical interface for long-running / persistence behavior.
+// start/stop/status manage the background session; enable/disable manage login autostart.
+func cmdService(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: cliks service start|stop|status|enable|disable [team-code]\n\n" +
+			"  start|stop|status   run Cliks in the background (same as cliks background ...)\n" +
+			"  enable|disable      launch at login (same as cliks autostart ...)\n" +
+			"  keep.running        set with: cliks set keep.running on|off")
+	}
+	switch args[0] {
+	case "start", "stop", "status":
+		return cmdBackground(args)
+	case "enable", "disable":
+		return cmdAutostart(args)
+	case "login-status":
+		return cmdAutostart([]string{"status"})
+	default:
+		return fmt.Errorf("unknown service action %q\nusage: cliks service start|stop|status|enable|disable", args[0])
+	}
 }
 
 func cmdJoin(args []string) error {
@@ -123,7 +157,7 @@ func cmdJoin(args []string) error {
 	}
 	if !autoStart {
 		fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
-		if warning := passiveDoctorWarning(buildDoctorReport(cfg)); warning != "" {
+		if warning := quickDoctorWarning(cfg); warning != "" {
 			fmt.Println(warning)
 		}
 		return nil
@@ -133,7 +167,7 @@ func cmdJoin(args []string) error {
 		return fmt.Errorf("joined %s, but could not start Cliks in the background: %w", formatTeamLabel(team.Name, team.Code), err)
 	}
 	fmt.Printf("Joined %s.\n%s\n", formatTeamLabel(team.Name, team.Code), message)
-	if warning := passiveDoctorWarning(buildDoctorReport(cfg)); warning != "" {
+	if warning := quickDoctorWarning(cfg); warning != "" {
 		fmt.Println(warning)
 	}
 	return nil
@@ -570,7 +604,7 @@ func printHelp(commandName string) {
 	fmt.Printf(`Cliks ambient coworking CLI
 
 Usage:
-  %[1]s                  Open the Bubble Tea interface
+  %[1]s                  Open the control interface
   %[1]s create           Create a team
   %[1]s delete [CODE]    Delete a team
   %[1]s join CODE        Save, select, and start a background session
@@ -582,13 +616,18 @@ Usage:
   %[1]s doctor           Print the full setup and permission report
   %[1]s sound-test       Play local sample sounds
   %[1]s capture-test     Verify local activity capture
-  %[1]s autostart ...    Manage background autoconnect
-  %[1]s background ...   Start, stop, or inspect background Cliks
+  %[1]s service ...      Canonical service control (background + login)
+  %[1]s service start|stop|status [CODE]
+  %[1]s service enable|disable [CODE]
+  %[1]s background ...   Alias for service start|stop|status
+  %[1]s autostart ...    Alias for service enable|disable (+ status)
   %[1]s config           Show settings and launch-at-login state
   %[1]s set --list       List every setting key and TUI label
   %[1]s set autostart on|off
   %[1]s set audio.device DEVICE|default
   %[1]s set keep.running on|off
+                         Keep a live session running after the terminal closes
+                         (hands off to a background service when enabled)
 
 `, commandName)
 }

@@ -29,6 +29,12 @@ type doctorReport struct {
 }
 
 func buildDoctorReport(cfg CliksConfig) doctorReport {
+	return buildDoctorReportOptions(cfg, true)
+}
+
+// buildDoctorReportOptions builds diagnostics. When thorough is false, skip probes that
+// start global hooks so passive startup notices stay instant.
+func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 	report := doctorReport{privacy: []string{
 		"Cliks sends only event kind: keyboard or mouse.",
 		"Cliks relays coarse timing offsets inside each 500ms batch.",
@@ -75,33 +81,7 @@ func buildDoctorReport(cfg CliksConfig) doctorReport {
 		report.issues = append(report.issues, doctorIssue{"Turn mouse sharing on", "Your mouse activity will not reach teammates while share.mouse is off.", []string{"cliks set share.mouse on"}})
 	}
 
-	if runtime.GOOS == "linux" {
-		input := linuxInputStatus()
-		report.checks = append(report.checks, doctorCheck{"Linux input devices", yesNo(input.hasInputDir)})
-		if input.hasInputDir {
-			report.checks = append(report.checks,
-				doctorCheck{"Readable event devices", fmt.Sprintf("%d/%d", input.readableCount, input.eventCount)},
-				doctorCheck{"Active input group", yesNo(input.inputGroupActive)},
-			)
-		}
-		switch {
-		case !input.hasInputDir:
-			report.issues = append(report.issues, doctorIssue{"Global capture is unavailable here", "Cliks cannot see /dev/input. This is normal in containers, SSH sessions, and locked-down environments.", []string{"Use a normal desktop terminal", "cliks start --terminal --self"}})
-		case input.eventCount == 0:
-			report.issues = append(report.issues, doctorIssue{"No input event devices found", "Cliks found /dev/input, but no /dev/input/event* devices.", []string{"ls -l /dev/input", "Try again from the real desktop session"}})
-		case input.readableCount == 0:
-			report.issues = append(report.issues, doctorIssue{"Allow Cliks to read input events", "Linux global capture needs permission to read /dev/input/event*. Cliks still sends only event type and timing, never key values.", []string{"sudo usermod -aG input " + input.username, "Log out and back in, or reboot", "cliks doctor"}})
-		}
-		if input.readableCount > 0 {
-			report.recommendation = []string{"Recommended run command:", "cliks start --evdev"}
-		} else {
-			report.recommendation = []string{"Recommended local test:", "cliks start --terminal --self"}
-		}
-	} else if runtime.GOOS == "darwin" {
-		report.issues = append(report.issues, doctorIssue{"Allow Accessibility permission", "macOS global input capture needs Accessibility permission for the terminal app. Native capture is still being polished in the Go CLI.", []string{"Open System Settings > Privacy & Security > Accessibility", "Allow your terminal app", "cliks capture-test"}})
-	} else if runtime.GOOS == "windows" {
-		report.recommendation = []string{"Recommended run command:", "cliks start"}
-	}
+	appendPlatformCaptureChecks(&report, thorough)
 	return report
 }
 
@@ -164,6 +144,10 @@ func passiveDoctorWarning(report doctorReport) string {
 func runDoctor() error {
 	fmt.Println(strings.Join(doctorReportLines(buildDoctorReport(loadConfig())), "\n"))
 	return nil
+}
+
+func quickDoctorWarning(cfg CliksConfig) string {
+	return passiveDoctorWarning(buildDoctorReportOptions(cfg, false))
 }
 
 type inputStatus struct {

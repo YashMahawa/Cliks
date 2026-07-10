@@ -47,7 +47,7 @@ type alreadyRunningError struct {
 }
 
 func (e alreadyRunningError) Error() string {
-	return fmt.Sprintf("Cliks is already running for %s (%s, pid %d). Use `cliks background status` or `cliks background stop`.", valuePlain(e.state.TeamCode, "a team"), modeLabel(e.state.Mode), e.state.PID)
+	return fmt.Sprintf("Cliks is already running for %s (%s, pid %d). Use `cliks service status` or `cliks service stop`.", valuePlain(e.state.TeamCode, "a team"), modeLabel(e.state.Mode), e.state.PID)
 }
 
 func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, error) {

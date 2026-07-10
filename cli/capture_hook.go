@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	hook "github.com/robotn/gohook"
@@ -11,6 +12,12 @@ import (
 
 func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig) CaptureState {
 	evChan := hook.Start()
+	if evChan == nil {
+		return CaptureState{
+			Mode:           "off",
+			PermissionHint: globalHookPermissionHint(),
+		}
+	}
 
 	go func() {
 		defer hook.End()
@@ -42,8 +49,23 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 		}
 	}()
 
+	hint := globalHookPermissionHint()
+	if notice := platformStartupCaptureNotice(); notice != "" {
+		hint = notice
+	}
 	return CaptureState{
 		Mode:           "background",
-		PermissionHint: "If capture is not working, please ensure the application has Accessibility (macOS) or Input permissions.",
+		PermissionHint: hint,
+	}
+}
+
+func globalHookPermissionHint() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "If capture is quiet, allow Accessibility for this terminal (System Settings → Privacy & Security → Accessibility), then run: cliks capture-test"
+	case "windows":
+		return "If capture pauses on elevated windows, that is UIPI. Capture resumes on normal windows, or relaunch Cliks elevated if needed."
+	default:
+		return "If capture is not working, check input permissions and run: cliks doctor"
 	}
 }
