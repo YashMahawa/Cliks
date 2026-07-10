@@ -466,6 +466,11 @@ func (a *AudioEngine) warnUnavailableOnce() {
 }
 
 func detectAudioPlayer() *audioPlayer {
+	// Prefer players that can stereo-pan teammates (spatial desk feel).
+	// Order: mpv (best cross-platform), ffplay, then OS-native fallbacks.
+	if _, err := exec.LookPath("mpv"); err == nil {
+		return mpvAudioPlayer()
+	}
 	if _, err := exec.LookPath("ffplay"); err == nil {
 		return &audioPlayer{
 			Command: "ffplay",
@@ -475,15 +480,14 @@ func detectAudioPlayer() *audioPlayer {
 			},
 		}
 	}
-	if _, err := exec.LookPath("mpv"); err == nil {
-		return mpvAudioPlayer()
-	}
 	if runtime.GOOS == "darwin" {
+		// afplay is always present; distance via volume only (no stereo pan).
 		return &audioPlayer{Command: "afplay", Spatial: false, ArgsFor: func(job playbackJob) []string {
 			return withAudioDevice("afplay", []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
 		}}
 	}
 	if runtime.GOOS == "windows" {
+		// Last-resort Windows player when mpv is missing. No stereo pan.
 		return &audioPlayer{Command: "powershell.exe", Spatial: false, ArgsFor: func(job playbackJob) []string {
 			return withAudioDevice("powershell.exe", []string{"-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();", job.File}, job.Device)
 		}}
@@ -522,7 +526,17 @@ func detectAudioPlayerForDevice(device string) *audioPlayer {
 
 func mpvAudioPlayer() *audioPlayer {
 	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
-		return withAudioDevice("mpv", []string{"--no-video", "--really-quiet", "--no-terminal", fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)), fmt.Sprintf("--audio-pan=%.3f", clamp(job.Pan, -1, 1)), job.File}, job.Device)
+		// mpv has no --audio-pan flag; use lavfi pan (same math as ffplay) for stereo placement.
+		args := []string{
+			"--no-video",
+			"--really-quiet",
+			"--no-terminal",
+			"--keep-open=no",
+			fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)),
+			"--af=lavfi=[" + ffmpegSpatialFilter(1, job.Pan) + "]",
+			job.File,
+		}
+		return withAudioDevice("mpv", args, job.Device)
 	}}
 }
 
@@ -592,26 +606,38 @@ func getAudioPlayerStatus(device ...string) (player string, spatial bool, hint s
 }
 
 func audioInstallHint() string {
-	if runtime.GOOS == "linux" {
-		return "no audio player found. Install PulseAudio/PipeWire playback tools such as pulseaudio-utils, pipewire-utils, or alsa-utils."
+	switch runtime.GOOS {
+	case "darwin":
+		return "install mpv for stereo spatial sound: brew install mpv (Cliks can still play via afplay without pan)."
+	case "windows":
+		return "install mpv for stereo spatial sound (winget install mpv.mpv), or re-run the Cliks installer."
+	case "linux":
+		return "install mpv for stereo spatial sound, or a basic player (pulseaudio-utils / pipewire-utils)."
+	default:
+		return "no supported audio player found on this system."
 	}
-	return "no supported audio player found on this system."
 }
 
 func audioInstallCommands() []string {
-	if runtime.GOOS != "linux" {
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"brew install mpv"}
+	case "windows":
+		return []string{"winget install --id mpv.mpv -e", "scoop install mpv"}
+	case "linux":
+		if _, err := exec.LookPath("pacman"); err == nil {
+			return []string{"sudo pacman -S --needed mpv"}
+		}
+		if _, err := exec.LookPath("apt"); err == nil || hasCommand("apt-get") {
+			return []string{"sudo apt update", "sudo apt install -y mpv"}
+		}
+		if _, err := exec.LookPath("dnf"); err == nil {
+			return []string{"sudo dnf install -y mpv"}
+		}
+		return []string{"sudo apt install -y mpv  # or: sudo dnf install mpv / sudo pacman -S mpv"}
+	default:
 		return nil
 	}
-	if _, err := exec.LookPath("pacman"); err == nil {
-		return []string{"sudo pacman -S --needed libpulse"}
-	}
-	if _, err := exec.LookPath("apt"); err == nil {
-		return []string{"sudo apt update", "sudo apt install -y pulseaudio-utils"}
-	}
-	if _, err := exec.LookPath("dnf"); err == nil {
-		return []string{"sudo dnf install pulseaudio-utils"}
-	}
-	return nil
 }
 
 func audioInstallMessage() string {

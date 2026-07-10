@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,24 @@ func TestFFmpegSpatialFilterUsesMonoSampleForStereoPan(t *testing.T) {
 	want := "pan=stereo|c0=0.250*c0|c1=0.500*c0"
 	if filter != want {
 		t.Fatalf("filter = %q, want %q", filter, want)
+	}
+}
+
+func TestMpvArgsUseLavfiPanNotBrokenFlag(t *testing.T) {
+	player := mpvAudioPlayer()
+	args := player.ArgsFor(playbackJob{File: "/tmp/sample.wav", Gain: 0.5, Pan: 0.5})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--audio-pan") {
+		t.Fatalf("mpv still uses invalid --audio-pan: %v", args)
+	}
+	found := false
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--af=lavfi=[") && strings.Contains(arg, "pan=stereo") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("mpv args missing lavfi pan filter: %v", args)
 	}
 }
 

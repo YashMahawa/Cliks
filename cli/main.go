@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.2.2"
+const version = "0.2.3"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -55,6 +55,8 @@ func run(args []string) error {
 		return cmdStart(rest[1:])
 	case "settings", "ui":
 		return runHomeTUI(loadConfig())
+	case "setup":
+		return cmdSetup(rest[1:])
 	case "doctor":
 		return runDoctor()
 	case "sound-test":
@@ -582,22 +584,22 @@ func parseOnOff(value string) (bool, error) {
 func printFirstRunHelp() {
 	fmt.Println("Cliks is installed.")
 	fmt.Println("")
+	fmt.Println("First time on this computer? Run once:")
+	fmt.Println("   cliks setup")
+	fmt.Println("")
+	fmt.Println("Then:")
 	fmt.Println("1. Create or get a team code from the Cliks website.")
 	fmt.Println("2. Join it here:")
 	fmt.Println("   cliks join CLIK-XXXXXX")
 	fmt.Println("   This starts one background Cliks session automatically.")
 	fmt.Println("")
-	fmt.Println("Manual path:")
-	fmt.Println("   cliks join --no-start CLIK-XXXXXX")
-	fmt.Println("   cliks start")
-	fmt.Println("")
-	fmt.Println("Or open the interface:")
+	fmt.Println("Or open the friendly interface:")
 	fmt.Println("   cliks")
 	fmt.Println("")
 	fmt.Println("Useful checks:")
-	fmt.Println("   cliks doctor")
+	fmt.Println("   cliks setup")
 	fmt.Println("   cliks sound-test")
-	fmt.Println("   cliks capture-test")
+	fmt.Println("   cliks doctor")
 }
 
 func printHelp(commandName string) {
@@ -613,6 +615,7 @@ Usage:
   %[1]s start            Start coworking ambience
   %[1]s start CODE       Join/select a code and start immediately
   %[1]s settings         Open the control screen
+  %[1]s setup            One-time easy setup (sound + capture)
   %[1]s doctor           Print the full setup and permission report
   %[1]s sound-test       Play local sample sounds
   %[1]s capture-test     Verify local activity capture

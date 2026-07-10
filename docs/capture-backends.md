@@ -1,36 +1,65 @@
-# Capture Backends
+# Capture backends
 
-Cliks should eventually use OS-native global input backends. One library is unlikely to cover every desktop perfectly.
+Cliks captures **activity kinds only** (keyboard activity, left/right click). It never sends key values, coordinates, window titles, or app names.
 
-## Current prototype
+For non-technical setup, start with **[setup.md](./setup.md)** and `cliks setup`.
 
-- `cliks start --terminal --self`: reliable local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal only.
-- `cliks start`: on Linux tries `/dev/input` evdev capture first. macOS and Windows native global capture hooks are still future work in the Go CLI.
-- `cliks start --evdev`: Linux-only global capture through readable `/dev/input/event*` devices.
+## What ships today
 
-Terminal mode captures and restores the original terminal state and disables mouse reporting on close or error. In raw mode, `Ctrl+C` cancels capture without closing stdin, allowing the deferred restore to use the original terminal file descriptor. Bubble Tea owns equivalent alternate-screen and mouse cleanup for TUI sessions. If a terminal is already in a bad state, run `cliks fix-terminal`.
+| Platform | Default (`cliks start`) | Fallback |
+|----------|-------------------------|----------|
+| **Linux** | Readable `/dev/input/event*` (evdev) | Terminal mode if devices are locked down |
+| **macOS** | Global hooks (`gohook` / OS event hooks) after Accessibility | Terminal mode; soft prompt to open Settings |
+| **Windows** | Global hooks for normal-privilege apps | Terminal mode; elevated windows may pause capture (UIPI) |
 
-Linux evdev mouse capture is deliberately narrow:
+### Commands
 
-- physical `BTN_LEFT` and `BTN_RIGHT` presses emit left/right mouse activity
-- short stationary one-finger touchpad tap emits left click
-- short stationary two-finger touchpad tap emits right click
-- long press, cursor movement, scroll/wheel, side buttons, three-or-more-finger gestures, and pointer coordinates are ignored
-- if a touch gesture also produces a physical button event, the tap heuristic suppresses its duplicate event
+```bash
+cliks start                 # auto backend
+cliks start --evdev         # Linux global via /dev/input
+cliks start --terminal --self
+cliks capture-test
+cliks setup                 # grant access / check readiness
+```
 
-This keeps touchpad click users working without turning ordinary cursor movement or gestures into coworking noise.
+### Terminal mode
 
-Readable evdev files are consumed with interruptible exponential retry delays plus bounded +/-10% jitter after non-EOF read errors. Delays start at roughly 0.9-1.1 seconds and remain capped at 30 seconds. This prevents a disconnected or permission-changing device from driving a 100% CPU busy loop, spreads recovery across machines/devices, and still allows transient failures to recover. Capture and session handoff use bounded 1024-event channels with cancellation-aware backpressure, so ordinary fast typing/click bursts are not silently dropped and shutdown cannot deadlock behind a full channel.
+- Captures keys and terminal mouse reports **only in the focused terminal**
+- Restores cooked mode and disables mouse reporting on exit
+- After a crash: `cliks fix-terminal`
+
+### Linux evdev details
+
+- `BTN_LEFT` / `BTN_RIGHT` → left/right click
+- Short stationary one-finger touchpad tap → left click
+- Short stationary two-finger tap → right click
+- Movement, scroll, multi-finger gestures ignored
+- Device read errors use exponential backoff + jitter (no busy loop)
+
+**Permissions (installer + `cliks setup` try to do this for you):**
+
+1. Session ACL on `/dev/input/event*` when `setfacl` + sudo work  
+2. Permanent: user in the `input` group (log out/in once)
+
+Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop session or terminal mode.
+
+### macOS
+
+- Accessibility permission is required for global hooks (OS rule — apps cannot skip the dialog)
+- `cliks setup` and the installer open System Settings to the right pane
+- Enable your **terminal app**, then rerun `cliks setup`
+
+### Windows
+
+- No special permission dialog for standard-user global hooks
+- **UIPI:** while an *elevated* window is focused, hooks may pause; capture resumes on normal windows  
+- This is a tip, not a setup failure
 
 ## Production direction
 
-- Windows: low-level keyboard and mouse hooks through `SetWindowsHookEx`.
-- macOS: Event Tap APIs with Accessibility permission prompts.
-- Linux Xorg: XRecord/XInput or a maintained native hook.
-- Linux Wayland: no normal app can universally observe global keyboard/mouse events by design. Practical options are:
-  - a small privileged `evdev`/`libinput` helper with clear permission setup,
-  - compositor-specific integrations,
-  - future portal support if a standard global-input portal becomes available,
-  - or terminal/app-specific capture as a limited mode.
+- Windows: keep low-level hooks; optional elevated helper for Admin-window coverage  
+- macOS: optional native Event Tap / helper binary without third-party hooks  
+- Linux Wayland: XDG InputCapture portal when distros expose it widely  
+- Privilege-separated helpers remain optional; default path stays simple for non-tech users  
 
-The privacy promise remains the same regardless of backend: never send key values, coordinates, window names, or typed content. Only send event kind plus coarse timing offsets.
+Privacy promise is unchanged on every backend: event kind + coarse timing only.

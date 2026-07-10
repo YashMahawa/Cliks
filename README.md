@@ -14,11 +14,13 @@ Open the Cliks website, create a team code, and copy the install or join command
 
 The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything.
 
-Install the CLI:
+Install the CLI (macOS, Windows Git Bash, or Linux):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
+
+The installer prepares **spatial sound** (mpv when possible) and **background capture** access, then runs `cliks setup`. Full per-OS notes: [docs/setup.md](docs/setup.md).
 
 Then create or join a room:
 
@@ -86,18 +88,23 @@ Open the site, create a team, then join it from the CLI:
 cliks join CLIK-XXXXXX
 ```
 
-On Linux, for global capture across apps on both Wayland and Xorg, use:
+**Prefer the easy path** — no OS-specific commands required for most people:
 
 ```bash
-cliks doctor
-cliks start --evdev
+cliks setup          # one-time: sound + capture readiness
+cliks sound-test     # hear sample clicks
+cliks join CLIK-XXXXXX
 ```
 
-If permission is needed, `cliks doctor` shows the setup command. Cliks still does not send which key was pressed.
+- **macOS:** if capture is quiet, enable your Terminal app under System Settings → Privacy & Security → Accessibility (the installer opens this pane).
+- **Windows:** capture works for normal apps with no extra permission dialog.
+- **Linux:** the installer/`cliks setup` request input-device access; log out/in once only if permanent group membership was just added.
 
-Local playback uses common system audio tools. `cliks doctor` checks playback, reports whether full stereo spatial audio is available, checks `/dev/input` permissions on Linux, and prints commands to fix detected issues. The same complete, scrollable report is available under More > Diagnostics without leaving the TUI. Joining stays fast and non-blocking, but Cliks now prints or displays a setup note when audio or input permissions are missing. For the best spatial sound, install `ffplay`/FFmpeg or `mpv`; otherwise Cliks falls back to volume-aware native players where available.
+Cliks still does not send which key was pressed — only activity kind + coarse timing.
 
-For local testing where you want to hear your own typing:
+**Spatial sound:** best with **mpv** (stereo pan + distance). Installer installs it when possible. Without mpv/ffplay, Cliks falls back to basic system players (distance/volume only). Details: [docs/setup.md](docs/setup.md).
+
+For a local self-test where you hear your own typing:
 
 ```bash
 cliks sound-test
@@ -129,17 +136,16 @@ cliks nickname "YourName"
 cliks start
 cliks start CLIK-XXXXXX
 cliks settings
+cliks setup
 cliks preset deep
 cliks teams
 cliks switch CLIK-XXXXXX
 cliks config
 cliks set --list
-cliks autostart enable
+cliks service start|stop|status
+cliks service enable|disable
 cliks set autostart on
 cliks set audio.device default
-cliks background start
-cliks background status
-cliks background stop
 cliks sound-test
 cliks capture-test
 cliks fix-terminal
@@ -179,8 +185,8 @@ cliks set audio.device default
 If teammates can hear you connect but cannot hear your keystrokes, run:
 
 ```bash
-cliks doctor
-cliks capture-test --evdev
+cliks setup
+cliks capture-test
 ```
 
 While `cliks start` is running, the status screen also shows connection state plus local captured and sent event counts. If captured stays at 0 while you type, fix capture permissions/settings. If captured increases but sent stays at 0, check whether the CLI is reconnecting to the backend.
@@ -225,7 +231,18 @@ Install the CLI with:
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer points `cliks` at the hosted Cliks backend by default and installs a user-local command wrapper. It builds the Go CLI from source and tries to install Go automatically with the system package manager when Go is missing. On desktop Linux it also checks whether global input capture needs permission and shows the relevant setup step. On macOS it reminds you to grant Accessibility permission to your terminal for global capture. On Windows, run it from Git Bash or another MSYS-style shell and add the printed `bin` directory to PATH if needed. In Termux, the wrapper is installed into `$PREFIX/bin` and desktop input-device permission prompts are skipped.
+Designed for non-technical users. It:
+
+- installs Go if needed and builds the CLI
+- installs **mpv** for stereo spatial sound when a package manager is available
+- adds `~/.local/bin` (or platform equivalent) to common shell PATH files
+- prepares Linux input access automatically when possible
+- opens macOS Accessibility settings when needed
+- runs `cliks setup` and prints plain next steps
+
+On Windows, run it from **Git Bash** (or another MSYS-style shell). Open a new terminal afterward if `cliks` is not found. In Termux, the wrapper goes to `$PREFIX/bin` and desktop input-group steps are skipped.
+
+See [docs/setup.md](docs/setup.md) for a full macOS / Windows / Linux walkthrough.
 
 ## Self-Hosting
 

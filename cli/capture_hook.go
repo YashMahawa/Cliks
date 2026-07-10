@@ -49,8 +49,11 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 		}
 	}()
 
-	hint := globalHookPermissionHint()
-	if notice := platformStartupCaptureNotice(); notice != "" {
+	// Do not surface scary permission text when hooks started cleanly.
+	// Soft tips only appear if capture stays silent or doctor/setup is run.
+	hint := ""
+	if notice := platformStartupCaptureNotice(); notice != "" && runtime.GOOS == "darwin" {
+		// macOS Accessibility is the one OS dialog users may still need.
 		hint = notice
 	}
 	return CaptureState{
@@ -62,10 +65,10 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 func globalHookPermissionHint() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "If capture is quiet, allow Accessibility for this terminal (System Settings → Privacy & Security → Accessibility), then run: cliks capture-test"
+		return "If capture is quiet: System Settings → Privacy & Security → Accessibility → enable your terminal, then cliks setup"
 	case "windows":
-		return "If capture pauses on elevated windows, that is UIPI. Capture resumes on normal windows, or relaunch Cliks elevated if needed."
+		return "Capture may pause only while an Administrator window is focused (Windows security)."
 	default:
-		return "If capture is not working, check input permissions and run: cliks doctor"
+		return "If capture is quiet, run: cliks setup"
 	}
 }

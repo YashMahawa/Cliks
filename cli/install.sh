@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
+# Cliks one-line installer — designed for non-technical users.
+# Installs the CLI, spatial audio (mpv), and prepares capture access.
 set -euo pipefail
 
 REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
+# When piped from curl, default to non-interactive auto setup.
+AUTO_YES="${CLIKS_AUTO_YES:-}"
+if [ -z "$AUTO_YES" ]; then
+  if [ ! -t 0 ]; then
+    AUTO_YES=1
+  else
+    AUTO_YES=0
+  fi
+fi
+
+say() { printf '%s\n' "$*"; }
+ok() { printf '  ✓ %s\n' "$*"; }
+tip() { printf '  · %s\n' "$*"; }
 
 is_termux() {
   case "${PREFIX:-}:${TERMUX_VERSION:-}:$(uname -o 2>/dev/null || true):$HOME" in
@@ -23,9 +38,13 @@ case "$(uname -s)" in
     ;;
 esac
 
+say "Installing Cliks..."
+say ""
+
+# --- git ---
 if ! command -v git >/dev/null 2>&1; then
   if is_termux; then
-    echo "Git is not installed. Installing it with Termux package manager..."
+    say "Installing git..."
     if command -v pkg >/dev/null 2>&1; then
       pkg install -y git
     else
@@ -33,83 +52,18 @@ if ! command -v git >/dev/null 2>&1; then
       apt-get install -y git
     fi
   else
-    echo "Cliks needs git to install or update the CLI."
-    echo "Install git, then rerun this script."
+    say "Cliks needs git. Install git, then rerun this command."
     exit 1
   fi
 fi
 
-install_system_deps() {
-  case "$(uname -s)" in
-    Darwin)
-      if ! command -v brew >/dev/null 2>&1; then
-        echo "Homebrew was not found. Installing Homebrew..."
-        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        if [ -x /opt/homebrew/bin/brew ]; then
-          eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [ -x /usr/local/bin/brew ]; then
-          eval "$(/usr/local/bin/brew shellenv)"
-        fi
-      fi
-      if ! command -v mpv >/dev/null 2>&1; then
-        echo "Installing mpv for macOS spatial audio..."
-        brew install mpv
-      fi
-      ;;
-    Linux)
-      if is_termux; then
-        if command -v pkg >/dev/null 2>&1; then
-          pkg install -y mpv termux-api
-        else
-          apt-get update
-          apt-get install -y mpv termux-api
-        fi
-      elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard
-      elif command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update
-        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils
-      elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils
-      elif command -v zypper >/dev/null 2>&1; then
-        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils
-      elif command -v apk >/dev/null 2>&1; then
-        sudo apk add mpv xclip wl-clipboard
-      fi
-      ;;
-    MINGW*|MSYS*|CYGWIN*)
-      if ! command -v winget.exe >/dev/null 2>&1 && ! command -v choco.exe >/dev/null 2>&1 && ! command -v scoop >/dev/null 2>&1; then
-        echo "No package manager found. Installing Scoop..."
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression"
-        export PATH="$HOME/scoop/shims:$PATH"
-      fi
-
-      if command -v winget.exe >/dev/null 2>&1; then
-        if ! command -v mpv >/dev/null 2>&1; then
-          echo "Installing mpv for Windows spatial audio..."
-          winget.exe install --id mpv.mpv -e --accept-package-agreements --accept-source-agreements
-        fi
-      elif command -v choco.exe >/dev/null 2>&1; then
-        if ! command -v mpv >/dev/null 2>&1; then
-          echo "Installing mpv for Windows spatial audio..."
-          choco.exe install mpv -y
-        fi
-      elif command -v scoop >/dev/null 2>&1; then
-        if ! command -v mpv >/dev/null 2>&1; then
-          echo "Installing mpv for Windows spatial audio..."
-          scoop install mpv
-        fi
-      fi
-      ;;
-  esac
-}
-
+# --- go ---
 install_go() {
-  echo "Go is not installed. Cliks will try to install it now."
+  say "Installing Go (needed to build Cliks)..."
   case "$(uname -s)" in
     Darwin)
       if ! command -v brew >/dev/null 2>&1; then
-        echo "Homebrew was not found. Installing Homebrew..."
+        say "Installing Homebrew..."
         NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         if [ -x /opt/homebrew/bin/brew ]; then
           eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -117,12 +71,7 @@ install_go() {
           eval "$(/usr/local/bin/brew shellenv)"
         fi
       fi
-      if command -v brew >/dev/null 2>&1; then
-        brew install go
-      else
-        echo "Failed to install Homebrew. Install Go from https://go.dev/dl/, then rerun this script."
-        exit 1
-      fi
+      brew install go
       ;;
     Linux)
       if is_termux; then
@@ -144,8 +93,7 @@ install_go() {
       elif command -v apk >/dev/null 2>&1; then
         sudo apk add go
       else
-        echo "Could not find a supported package manager to install Go automatically."
-        echo "Install Go from https://go.dev/dl/, then rerun this script."
+        say "Install Go from https://go.dev/dl/ then rerun this script."
         exit 1
       fi
       ;;
@@ -157,13 +105,14 @@ install_go() {
       elif command -v scoop >/dev/null 2>&1; then
         scoop install go
       else
-        echo "Could not find a package manager to install Go automatically."
-        echo "Install Go from https://go.dev/dl/, reopen this shell, then rerun this script."
+        say "Install Go from https://go.dev/dl/, reopen this shell, then rerun."
         exit 1
       fi
+      # Common Windows Go install path
+      export PATH="/c/Program Files/Go/bin:$HOME/go/bin:$PATH"
       ;;
     *)
-      echo "Install Go from https://go.dev/dl/, then rerun this script."
+      say "Install Go from https://go.dev/dl/ then rerun this script."
       exit 1
       ;;
   esac
@@ -173,24 +122,101 @@ if ! command -v go >/dev/null 2>&1; then
   install_go
 fi
 
+# Refresh PATH for common Go locations after fresh install.
+export PATH="$HOME/go/bin:/usr/local/go/bin:/c/Program Files/Go/bin:$PATH"
+
 if ! command -v go >/dev/null 2>&1; then
-  echo "Go still was not found on PATH after installation."
-  echo "Open a new terminal or add Go to PATH, then rerun this script."
+  say "Go is installed but not on PATH yet. Open a new terminal and rerun this command."
   exit 1
 fi
+ok "Go ready"
+
+# --- spatial audio (mpv) + helpers ---
+install_system_deps() {
+  case "$(uname -s)" in
+    Darwin)
+      if ! command -v brew >/dev/null 2>&1; then
+        say "Installing Homebrew..."
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        if [ -x /opt/homebrew/bin/brew ]; then
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -x /usr/local/bin/brew ]; then
+          eval "$(/usr/local/bin/brew shellenv)"
+        fi
+      fi
+      if ! command -v mpv >/dev/null 2>&1; then
+        say "Installing mpv for stereo spatial sound..."
+        brew install mpv
+      fi
+      ok "Spatial audio (mpv)"
+      ;;
+    Linux)
+      if is_termux; then
+        if command -v pkg >/dev/null 2>&1; then
+          pkg install -y mpv termux-api
+        else
+          apt-get update
+          apt-get install -y mpv termux-api
+        fi
+      elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard
+      elif command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update
+        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils || \
+          sudo apt-get install -y mpv
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils || sudo dnf install -y mpv
+      elif command -v zypper >/dev/null 2>&1; then
+        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils || sudo zypper install -y mpv
+      elif command -v apk >/dev/null 2>&1; then
+        sudo apk add mpv xclip wl-clipboard
+      fi
+      if command -v mpv >/dev/null 2>&1; then
+        ok "Spatial audio (mpv)"
+      else
+        tip "mpv not installed — Cliks will use basic system sound if available"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if ! command -v winget.exe >/dev/null 2>&1 && ! command -v choco.exe >/dev/null 2>&1 && ! command -v scoop >/dev/null 2>&1; then
+        say "Installing Scoop package manager..."
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression" || true
+        export PATH="$HOME/scoop/shims:$PATH"
+      fi
+      if ! command -v mpv >/dev/null 2>&1; then
+        say "Installing mpv for stereo spatial sound..."
+        if command -v winget.exe >/dev/null 2>&1; then
+          winget.exe install --id mpv.mpv -e --accept-package-agreements --accept-source-agreements || true
+        elif command -v choco.exe >/dev/null 2>&1; then
+          choco.exe install mpv -y || true
+        elif command -v scoop >/dev/null 2>&1; then
+          scoop install mpv || true
+        fi
+      fi
+      if command -v mpv >/dev/null 2>&1; then
+        ok "Spatial audio (mpv)"
+      else
+        tip "If sound has no left/right placement later, install mpv: winget install mpv.mpv"
+      fi
+      ;;
+  esac
+}
 
 install_system_deps
 
+# --- clone / update source ---
 if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" pull --ff-only
 else
   rm -rf "$INSTALL_DIR"
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
+ok "Source ready"
 
-cd "$INSTALL_DIR"
-cd cli
+# --- build ---
+cd "$INSTALL_DIR/cli"
 go build -o dist/cliks .
+ok "Built cliks"
 
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/cliks" <<EOF
@@ -199,63 +225,98 @@ exec "$INSTALL_DIR/cli/dist/cliks" "\$@"
 EOF
 chmod +x "$BIN_DIR/cliks"
 
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    echo ""
-    echo "Add this directory to PATH if 'cliks' is not found in new terminals:"
-    echo "  $BIN_DIR"
-    if is_termux; then
-      echo "Termux usually includes this directory by default. If this shell was opened before install, run:"
-      echo "  hash -r"
+# --- PATH for new terminals ---
+ensure_path_export() {
+  local export_line='export PATH="$HOME/.local/bin:$PATH" # cliks'
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      export_line="export PATH=\"$BIN_DIR:\$PATH\" # cliks"
+      ;;
+  esac
+  if is_termux; then
+    return 0
+  fi
+  local rc
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile"; do
+    if [ -f "$rc" ] || [ "$rc" = "$HOME/.profile" ]; then
+      if [ ! -f "$rc" ]; then
+        touch "$rc" 2>/dev/null || continue
+      fi
+      if ! grep -q '# cliks' "$rc" 2>/dev/null; then
+        printf '\n%s\n' "$export_line" >> "$rc" 2>/dev/null || true
+      fi
     fi
-    ;;
-esac
+  done
+}
 
-"$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND"
+export PATH="$BIN_DIR:$PATH"
+ensure_path_export
+ok "Command: $BIN_DIR/cliks"
 
-echo ""
-echo "Cliks installed."
-echo "Default backend: $DEFAULT_BACKEND"
-echo "Command installed at: $BIN_DIR/cliks"
-echo ""
-"$BIN_DIR/cliks" doctor || true
+"$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND" >/dev/null 2>&1 || true
 
+# --- Linux input access (auto, no scary prompts) ---
 if [ "$(uname -s)" = "Linux" ] && ! is_termux && [ -d /dev/input ]; then
-  if ! id -nG "${USER:-$(id -un)}" | tr ' ' '\n' | grep -qx input; then
-    echo ""
-    echo "Linux global capture needs permission to read input-device events."
-    echo "Cliks still sends only event type and coarse timing, never key values."
-    printf "Add your user to the input group now? [y/N] "
-    read -r answer
-    case "$answer" in
-      y|Y|yes|YES)
-        sudo usermod -aG input "${USER:-$(id -un)}"
-        echo "Done. Log out and back in before using global capture."
-        ;;
-      *)
-        echo "Skipped. You can run later: sudo usermod -aG input \\$USER"
-        ;;
-    esac
+  USER_NAME="${USER:-$(id -un)}"
+  readable=0
+  for f in /dev/input/event*; do
+    [ -e "$f" ] || continue
+    if [ -r "$f" ]; then
+      readable=$((readable + 1))
+    fi
+  done
+  if [ "$readable" -eq 0 ]; then
+    # Session ACLs so capture works immediately without logout.
+    if command -v setfacl >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+      for f in /dev/input/event*; do
+        [ -e "$f" ] || continue
+        sudo -n setfacl -m "u:${USER_NAME}:r" "$f" 2>/dev/null || true
+      done
+    fi
+    # Permanent group membership.
+    if ! id -nG "$USER_NAME" 2>/dev/null | tr ' ' '\n' | grep -qx input; then
+      if [ "$AUTO_YES" = "1" ]; then
+        sudo -n usermod -aG input "$USER_NAME" 2>/dev/null && \
+          tip "Added you to the input group (log out/in once later for permanence)" || true
+      else
+        printf "Allow background keyboard/mouse ambience? (one-time, never reads key values) [Y/n] "
+        read -r answer || answer=Y
+        case "$answer" in
+          n|N|no|NO) tip "Skipped. You can run later: cliks setup" ;;
+          *)
+            sudo usermod -aG input "$USER_NAME" 2>/dev/null && \
+              tip "Added to input group — log out/in once for permanence" || \
+              tip "Could not change groups automatically. Run: cliks setup"
+            ;;
+        esac
+      fi
+    fi
+  else
+    ok "Background capture access"
   fi
 fi
 
-case "$(uname -s)" in
-  Darwin)
-    echo ""
-    echo "macOS global capture needs Accessibility permission for your terminal app."
-    echo "Open System Settings > Privacy & Security > Accessibility, allow the terminal, then run:"
-    echo "  cliks capture-test"
-    ;;
-  MINGW*|MSYS*|CYGWIN*)
-    echo ""
-    echo "Windows note: this installer is for Git Bash/MSYS-style shells."
-    echo "If PowerShell cannot find cliks, add this to your user PATH:"
-    echo "  $BIN_DIR"
-    ;;
-esac
+# --- macOS Accessibility nudge (open Settings; cannot fully automate) ---
+if [ "$(uname -s)" = "Darwin" ]; then
+  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility" 2>/dev/null || \
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
+  tip "If a Settings window opened: enable your Terminal app under Accessibility (once)."
+fi
 
-echo ""
-echo "Create a team on the Cliks website, then run:"
-echo "  cliks join CLIK-XXXXXX"
-echo "  cliks start"
+# --- final guided setup ---
+say ""
+say "Running easy setup..."
+"$BIN_DIR/cliks" setup || true
+
+say ""
+say "Cliks is ready."
+say "Default backend: $DEFAULT_BACKEND"
+say ""
+say "Next steps:"
+say "  1. Create a team on the Cliks website"
+say "  2. cliks join CLIK-XXXXXX"
+say "  3. Keep typing — teammates only hear soft clicks, never your keys"
+say ""
+if ! command -v cliks >/dev/null 2>&1; then
+  tip "If 'cliks' is not found, open a new terminal or run: export PATH=\"$BIN_DIR:\$PATH\""
+fi

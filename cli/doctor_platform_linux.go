@@ -33,21 +33,20 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 
 	switch {
 	case !input.hasInputDir:
-		detail := "Cliks cannot see /dev/input. This is normal in containers, SSH sessions, and locked-down environments."
+		detail := "No /dev/input here (common in containers or SSH). On your normal desktop, run cliks setup."
 		if sandbox {
-			detail = "Sandboxed session cannot access /dev/input. Install Cliks on the host desktop session, or use terminal capture."
+			detail = "Sandboxed session cannot access input devices. Use Cliks in a normal desktop terminal."
 		}
-		report.issues = append(report.issues, doctorIssue{"Global capture is unavailable here", detail, []string{"Use a normal desktop terminal", "cliks start --terminal --self"}})
+		report.issues = append(report.issues, doctorIssue{"Use a desktop session for ambient capture", detail, []string{"cliks setup", "cliks start --terminal --self"}})
 	case input.eventCount == 0:
-		report.issues = append(report.issues, doctorIssue{"No input event devices found", "Cliks found /dev/input, but no /dev/input/event* devices.", []string{"ls -l /dev/input", "Try again from the real desktop session"}})
+		report.issues = append(report.issues, doctorIssue{"No input devices found", "Open Cliks from a real desktop session (not a remote shell).", []string{"cliks setup"}})
 	case input.readableCount == 0:
-		commands := []string{"sudo usermod -aG input " + input.username, "Log out and back in, or reboot", "cliks doctor"}
-		detail := "Linux global capture needs permission to read /dev/input/event*. Cliks still sends only event type and timing, never key values."
+		commands := []string{"cliks setup", "sudo usermod -aG input " + input.username, "Log out and back in once"}
+		detail := "One-time permission so Cliks can sense activity kinds (never key values). Easiest: cliks setup"
 		if wayland || sandbox {
-			detail += " Wayland and sandboxed sessions may still block device access even after joining the input group."
-			commands = append(commands, "cliks start --terminal --self")
+			detail += " On some Wayland/sandbox setups you may need a normal host session."
 		}
-		report.issues = append(report.issues, doctorIssue{"Allow Cliks to read input events", detail, commands})
+		report.issues = append(report.issues, doctorIssue{"Allow background capture (one-time)", detail, commands})
 	}
 
 	if input.readableCount > 0 {

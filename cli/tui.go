@@ -106,6 +106,7 @@ const (
 	actionStart            homeAction = "start"
 	actionCreate           homeAction = "create"
 	actionDelete           homeAction = "delete"
+	actionSetup            homeAction = "setup"
 	actionDoctor           homeAction = "doctor"
 	actionSoundTest        homeAction = "sound-test"
 	actionBackgroundStart  homeAction = "background-start"
@@ -189,6 +190,8 @@ func runHomeTUI(cfg CliksConfig) error {
 		return cmdCreate(nil)
 	case actionDelete:
 		return cmdDelete(nil)
+	case actionSetup:
+		return cmdSetup(nil)
 	case actionDoctor:
 		return runDoctor()
 	case actionSoundTest:
@@ -541,6 +544,10 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		cycleTeam(&m.cfg, 1)
 		_ = saveConfig(m.cfg)
 		m.message = fmt.Sprintf("Selected %s.", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "no team"))
+	case "setup":
+		m.busy = true
+		m.message = "Running easy setup..."
+		return m, setupSummaryCmd()
 	case "doctor":
 		m.busy = true
 		m.message = "Checking setup..."
@@ -888,8 +895,9 @@ func (m homeModel) items() []homeItem {
 		}
 	case "diagnostics":
 		return []homeItem{
+			{key: "setup", label: "Easy Setup", help: "one-time sound + capture setup"},
 			{key: "sound", label: "Sound Test", help: "play keyboard and mouse samples"},
-			{key: "doctor", label: "Doctor", help: "setup and permission report"},
+			{key: "doctor", label: "Doctor", help: "detailed setup report"},
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
 	case "advanced":
@@ -1719,6 +1727,16 @@ func doctorSummaryCmd() tea.Cmd {
 	return func() tea.Msg {
 		report := buildDoctorReport(loadConfig())
 		return commandDoneMsg{message: doctorSummary(report), report: doctorReportLines(report)}
+	}
+}
+
+func setupSummaryCmd() tea.Cmd {
+	return func() tea.Msg {
+		steps := runSetupChecks(true)
+		return commandDoneMsg{
+			message: setupSummaryMessage(steps),
+			report:  setupReportLines(steps),
+		}
 	}
 }
 

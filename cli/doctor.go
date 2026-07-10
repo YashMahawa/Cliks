@@ -55,7 +55,7 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 		if spatial {
 			report.checks = append(report.checks, doctorCheck{"Spatial audio", "stereo pan + distance"})
 		} else {
-			report.checks = append(report.checks, doctorCheck{"Spatial audio", "distance volume only; install ffplay or mpv for stereo panning"})
+			report.checks = append(report.checks, doctorCheck{"Spatial audio", "distance only — run cliks setup (installs mpv for stereo pan)"})
 		}
 	} else {
 		report.checks = append(report.checks,
@@ -102,9 +102,9 @@ func doctorReportLines(report doctorReport) []string {
 	}
 	lines = append(lines, "")
 	if len(report.issues) == 0 {
-		return append(lines, "No blocking issues detected.", "Test playback: cliks sound-test")
+		return append(lines, "All good. Optional: cliks sound-test", "If something ever feels off: cliks setup")
 	}
-	lines = append(lines, "Fixes:")
+	lines = append(lines, "Easy fixes (or run: cliks setup):")
 	for _, issue := range report.issues {
 		lines = append(lines, "", issue.title+":", "  "+issue.detail)
 		for _, command := range issue.commands {
@@ -116,12 +116,12 @@ func doctorReportLines(report doctorReport) []string {
 
 func doctorSummary(report doctorReport) string {
 	if len(report.issues) == 0 {
-		return "Doctor OK. No blocking issues detected."
+		return "All good. Sound and capture look ready."
 	}
 	if len(report.issues) == 1 {
-		return "Found 1 setup item. Review the steps below."
+		return "1 easy setup step left. Prefer: cliks setup"
 	}
-	return fmt.Sprintf("Found %d setup items. Review the steps below.", len(report.issues))
+	return fmt.Sprintf("%d easy setup steps left. Prefer: cliks setup", len(report.issues))
 }
 
 func passiveDoctorWarning(report doctorReport) string {

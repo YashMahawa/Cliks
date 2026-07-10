@@ -21,15 +21,8 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 	if detail != "" {
 		report.checks = append(report.checks, doctorCheck{"Elevation check", detail})
 	}
-	report.issues = append(report.issues, doctorIssue{
-		title:  "Background capture can pause on elevated windows",
-		detail: "Windows User Interface Privilege Isolation (UIPI) blocks standard-user hooks when an Administrator window (Task Manager, elevated terminals, installers) is focused. Capture resumes when focus returns to a normal window.",
-		commands: []string{
-			"Keep Cliks running as a normal user for day-to-day work",
-			"If you need capture while elevated apps are focused, relaunch an elevated terminal and run: cliks start",
-			"cliks capture-test",
-		},
-	})
+	// Tip only — not a blocking issue. Everyday apps work without user action.
+	report.checks = append(report.checks, doctorCheck{"Elevated-window note", "capture pauses only while Admin windows are focused"})
 	report.recommendation = []string{"Recommended run command:", "cliks start"}
 }
 
