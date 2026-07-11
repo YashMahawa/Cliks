@@ -47,8 +47,22 @@ func cmdSetup(args []string) error {
 func runSetupChecks(verifySound bool) []setupStep {
 	cfg := loadConfig()
 	steps := []setupStep{}
+	if warning := lastConfigLoadWarning(); warning != "" {
+		steps = append(steps, setupStep{
+			title:  "Saved settings",
+			status: "tip",
+			detail: warning + " Open Preferences and save once to write a clean file.",
+		})
+	}
 	steps = append(steps, ensureAudioReady()...)
 	steps = append(steps, ensureCaptureReady()...)
+	if msg := repairAutostartIfEnabled(); msg != "" {
+		steps = append(steps, setupStep{
+			title:  "Launch at login",
+			status: "fixed",
+			detail: msg,
+		})
+	}
 	if verifySound {
 		steps = append(steps, verifySoundSamples(cfg))
 	}

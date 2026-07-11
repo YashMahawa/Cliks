@@ -82,6 +82,16 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 	}
 
 	appendPlatformCaptureChecks(&report, thorough)
+	if warning := lastConfigLoadWarning(); warning != "" {
+		report.issues = append([]doctorIssue{{
+			title:    "Fix or reset saved settings",
+			detail:   warning,
+			commands: []string{"Open Preferences in Cliks and press s to save", "or delete the broken config file and run cliks setup"},
+		}}, report.issues...)
+		report.checks = append(report.checks, doctorCheck{"Config file", "invalid JSON — using defaults"})
+	} else {
+		report.checks = append(report.checks, doctorCheck{"Config file", configPath()})
+	}
 	return report
 }
 

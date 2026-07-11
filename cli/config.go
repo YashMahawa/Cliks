@@ -7,12 +7,33 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 )
+
+// configLoadWarning is set when the on-disk config exists but cannot be parsed.
+// The CLI keeps running on defaults so non-technical users are not hard-blocked.
+var (
+	configLoadMu      sync.RWMutex
+	configLoadWarning string
+)
+
+func lastConfigLoadWarning() string {
+	configLoadMu.RLock()
+	defer configLoadMu.RUnlock()
+	return configLoadWarning
+}
+
+func setConfigLoadWarning(message string) {
+	configLoadMu.Lock()
+	configLoadWarning = message
+	configLoadMu.Unlock()
+}
 
 const productionAPIURL = "https://139.59.29.207.sslip.io"
 
@@ -84,6 +105,11 @@ func configPath() string {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
 		return filepath.Join(dir, "cliks", "config.json")
 	}
+	if runtime.GOOS == "windows" {
+		if appdata := strings.TrimSpace(os.Getenv("APPDATA")); appdata != "" {
+			return filepath.Join(appdata, "cliks", "config.json")
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".cliks", "config.json")
@@ -91,14 +117,49 @@ func configPath() string {
 	return filepath.Join(home, ".config", "cliks", "config.json")
 }
 
+// legacyConfigPath is the pre-migration location (Unix-style path used on Windows too).
+func legacyConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "cliks", "config.json")
+}
+
 func loadConfig() CliksConfig {
 	cfg := defaultConfig()
-	data, err := os.ReadFile(configPath())
+	path := configPath()
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg
+		// Migrate from the old Unix-style path on Windows (and any host that moved).
+		if legacy := legacyConfigPath(); legacy != "" && legacy != path {
+			if legacyData, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+				data = legacyData
+				err = nil
+				// Best-effort migrate so the next load uses the native path.
+				_ = os.MkdirAll(filepath.Dir(path), 0o755)
+				if writeErr := os.WriteFile(path, legacyData, 0o644); writeErr == nil {
+					// Keep a tiny marker note in doctor only if migration happened.
+					setConfigLoadWarning("")
+				}
+			}
+		}
 	}
-	_ = json.Unmarshal(data, &cfg)
+	if err != nil {
+		setConfigLoadWarning("")
+		return applyEnvURLOverrides(cfg)
+	}
+	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
+		setConfigLoadWarning(fmt.Sprintf("Config file has invalid JSON (%s). Using safe defaults until you save settings again.", path))
+		cfg = defaultConfig()
+	} else {
+		setConfigLoadWarning("")
+	}
 	normalizeConfig(&cfg)
+	return applyEnvURLOverrides(cfg)
+}
+
+func applyEnvURLOverrides(cfg CliksConfig) CliksConfig {
 	if apiURL := strings.TrimSpace(os.Getenv("CLIKS_API_URL")); apiURL != "" {
 		cfg.APIURL = strings.TrimRight(apiURL, "/")
 		if strings.TrimSpace(os.Getenv("CLIKS_WS_URL")) == "" {

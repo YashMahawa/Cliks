@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestForgetTeamRemovesCurrentAndSelectsNext(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -75,5 +80,90 @@ func TestParseOnOffRejectsUnknownValues(t *testing.T) {
 	}
 	if enabled, err := parseOnOff("enabled"); err != nil || !enabled {
 		t.Fatalf("parseOnOff(enabled) = %v, %v", enabled, err)
+	}
+}
+
+func TestInvalidConfigSurfacesWarningInsteadOfSilentDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "cliks", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = loadConfig()
+	warning := lastConfigLoadWarning()
+	if warning == "" {
+		t.Fatal("expected config load warning for invalid JSON")
+	}
+	// Saving a clean config should clear the warning on the next load.
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	_ = loadConfig()
+	if lastConfigLoadWarning() != "" {
+		t.Fatalf("warning still set after valid save: %q", lastConfigLoadWarning())
+	}
+}
+
+func TestConfigPathUsesAppDataOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows path layout")
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("APPDATA", `C:\Users\test\AppData\Roaming`)
+	got := configPath()
+	want := filepath.Join(`C:\Users\test\AppData\Roaming`, "cliks", "config.json")
+	if got != want {
+		t.Fatalf("configPath = %q, want %q", got, want)
+	}
+}
+
+func TestSystemdQuoteHandlesSpaces(t *testing.T) {
+	got := systemdQuote(`/home/user/My Apps/cliks`)
+	if got != `"/home/user/My Apps/cliks"` {
+		t.Fatalf("systemdQuote = %q", got)
+	}
+}
+
+func TestScaleWavFileGainReducesAmplitude(t *testing.T) {
+	samples, err := filepath.Glob("assets/sounds/keyboard/*.wav")
+	if err != nil || len(samples) == 0 {
+		t.Skip("bundled keyboard samples missing")
+	}
+	original, err := os.ReadFile(samples[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, cleanup, err := scaleWavFileGain(samples[0], 0.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	scaled, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scaled) != len(original) {
+		t.Fatalf("scaled length %d != original %d", len(scaled), len(original))
+	}
+	// Headers should match; payload should differ for a non-silent sample.
+	if string(scaled[:44]) != string(original[:44]) {
+		// Not all WAVs are exactly 44-byte headers; just ensure we wrote something.
+		if len(scaled) < 44 {
+			t.Fatal("scaled file too small")
+		}
+	}
+	same := true
+	for i := range scaled {
+		if scaled[i] != original[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Fatal("scaled WAV is identical to original at gain 0.5")
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -39,6 +40,9 @@ type audioPlayer struct {
 	Command       string
 	Spatial       bool
 	DeviceRouting bool
+	// VolumeCapable is true when ArgsFor applies job.Gain natively.
+	// When false, playWorker soft-scales the WAV before playback.
+	VolumeCapable bool
 	ArgsFor       func(playbackJob) []string
 }
 
@@ -375,7 +379,17 @@ func (a *AudioEngine) playWorker() {
 }
 
 var audioCommandRunner = func(ctx context.Context, player *audioPlayer, job playbackJob) error {
-	cmd := exec.CommandContext(ctx, player.Command, player.ArgsFor(job)...)
+	playJob := job
+	cleanup := func() {}
+	if player != nil && !player.VolumeCapable && job.Gain < 0.995 {
+		if scaled, done, err := scaleWavFileGain(job.File, job.Gain); err == nil {
+			playJob.File = scaled
+			playJob.Gain = 1
+			cleanup = done
+		}
+	}
+	defer cleanup()
+	cmd := exec.CommandContext(ctx, player.Command, player.ArgsFor(playJob)...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
@@ -473,8 +487,9 @@ func detectAudioPlayer() *audioPlayer {
 	}
 	if _, err := exec.LookPath("ffplay"); err == nil {
 		return &audioPlayer{
-			Command: "ffplay",
-			Spatial: true,
+			Command:       "ffplay",
+			Spatial:       true,
+			VolumeCapable: true,
 			ArgsFor: func(job playbackJob) []string {
 				return withAudioDevice("ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}, job.Device)
 			},
@@ -482,15 +497,13 @@ func detectAudioPlayer() *audioPlayer {
 	}
 	if runtime.GOOS == "darwin" {
 		// afplay is always present; distance via volume only (no stereo pan).
-		return &audioPlayer{Command: "afplay", Spatial: false, ArgsFor: func(job playbackJob) []string {
+		return &audioPlayer{Command: "afplay", Spatial: false, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
 			return withAudioDevice("afplay", []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
 		}}
 	}
 	if runtime.GOOS == "windows" {
-		// Last-resort Windows player when mpv is missing. No stereo pan.
-		return &audioPlayer{Command: "powershell.exe", Spatial: false, ArgsFor: func(job playbackJob) []string {
-			return withAudioDevice("powershell.exe", []string{"-NoProfile", "-Command", "(New-Object Media.SoundPlayer $args[0]).PlaySync();", job.File}, job.Device)
-		}}
+		// MediaPlayer supports Volume (0-1). Falls back to soft WAV gain if assembly load fails at runtime.
+		return windowsMediaPlayer()
 	}
 	if _, err := exec.LookPath("paplay"); err == nil {
 		return paplayAudioPlayer()
@@ -502,6 +515,23 @@ func detectAudioPlayer() *audioPlayer {
 		return alsaAudioPlayer()
 	}
 	return nil
+}
+
+func windowsMediaPlayer() *audioPlayer {
+	return &audioPlayer{
+		Command:       "powershell.exe",
+		Spatial:       false,
+		VolumeCapable: true,
+		ArgsFor: func(job playbackJob) []string {
+			// System.Windows.Media.MediaPlayer respects Volume; SoundPlayer does not.
+			path := strings.ReplaceAll(job.File, "'", "''")
+			script := fmt.Sprintf(
+				`Add-Type -AssemblyName PresentationCore; $p = New-Object System.Windows.Media.MediaPlayer; $p.Open([Uri]::new('%s')); $p.Volume = %0.3f; $p.Play(); while(-not $p.NaturalDuration.HasTimeSpan){ Start-Sleep -Milliseconds 20 }; $end = $p.NaturalDuration.TimeSpan; while($p.Position -lt $end){ Start-Sleep -Milliseconds 30 }; $p.Close()`,
+				path, clamp(job.Gain, 0, 1),
+			)
+			return []string{"-NoProfile", "-STA", "-Command", script}
+		},
+	}
 }
 
 func detectAudioPlayerForDevice(device string) *audioPlayer {
@@ -525,7 +555,7 @@ func detectAudioPlayerForDevice(device string) *audioPlayer {
 }
 
 func mpvAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
 		// mpv has no --audio-pan flag; use lavfi pan (same math as ffplay) for stereo placement.
 		args := []string{
 			"--no-video",
@@ -541,19 +571,20 @@ func mpvAudioPlayer() *audioPlayer {
 }
 
 func paplayAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "paplay", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+	return &audioPlayer{Command: "paplay", DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
 		return withAudioDevice("paplay", []string{"--volume", fmt.Sprintf("%d", int(clamp(job.Gain, 0, 1)*65536)), job.File}, job.Device)
 	}}
 }
 
 func pipewireAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "pw-play", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+	return &audioPlayer{Command: "pw-play", DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
 		return withAudioDevice("pw-play", []string{"--volume", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
 	}}
 }
 
 func alsaAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "aplay", DeviceRouting: true, ArgsFor: func(job playbackJob) []string {
+	// aplay has no volume flag — soft WAV gain is applied in playWorker.
+	return &audioPlayer{Command: "aplay", DeviceRouting: true, VolumeCapable: false, ArgsFor: func(job playbackJob) []string {
 		return withAudioDevice("aplay", []string{job.File}, job.Device)
 	}}
 }
@@ -588,6 +619,69 @@ func ffmpegSpatialFilter(gain float64, pan float64) string {
 		left *= 1 - pan
 	}
 	return fmt.Sprintf("pan=stereo|c0=%.3f*c0|c1=%.3f*c0", left, right)
+}
+
+// scaleWavFileGain writes a temporary 16-bit PCM WAV with sample amplitude * gain.
+// Used for players (e.g. aplay) that cannot take a volume flag.
+func scaleWavFileGain(path string, gain float64) (string, func(), error) {
+	gain = clamp(gain, 0, 1)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(data) < 44 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return "", nil, fmt.Errorf("not a WAV file")
+	}
+	// Find "data" chunk.
+	offset := 12
+	dataStart := -1
+	dataSize := 0
+	bitsPerSample := 16
+	for offset+8 <= len(data) {
+		chunkID := string(data[offset : offset+4])
+		chunkSize := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+		payload := offset + 8
+		if chunkID == "fmt " && payload+16 <= len(data) {
+			bitsPerSample = int(binary.LittleEndian.Uint16(data[payload+14 : payload+16]))
+		}
+		if chunkID == "data" {
+			dataStart = payload
+			dataSize = chunkSize
+			break
+		}
+		offset = payload + chunkSize
+		if chunkSize%2 == 1 {
+			offset++
+		}
+	}
+	if dataStart < 0 || bitsPerSample != 16 || dataStart+dataSize > len(data) {
+		return "", nil, fmt.Errorf("unsupported WAV layout")
+	}
+	out := append([]byte(nil), data...)
+	for i := dataStart; i+1 < dataStart+dataSize; i += 2 {
+		sample := int16(binary.LittleEndian.Uint16(out[i : i+2]))
+		scaled := int(float64(sample) * gain)
+		if scaled > 32767 {
+			scaled = 32767
+		}
+		if scaled < -32768 {
+			scaled = -32768
+		}
+		binary.LittleEndian.PutUint16(out[i:i+2], uint16(int16(scaled)))
+	}
+	tmp, err := os.CreateTemp("", "cliks-vol-*.wav")
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", nil, err
+	}
+	_ = tmp.Close()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	return tmpPath, cleanup, nil
 }
 
 func getAudioPlayerStatus(device ...string) (player string, spatial bool, hint string, commands []string) {

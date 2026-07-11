@@ -50,7 +50,30 @@ func currentExecutable() string {
 	if err != nil {
 		return "cliks"
 	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil && resolved != "" {
+		return resolved
+	}
 	return exe
+}
+
+// stableServiceExecutable prefers a PATH-based `cliks` when available so updates
+// that replace the binary under a user install dir still launch after upgrade.
+// Falls back to the absolute path of the running executable.
+func stableServiceExecutable() string {
+	if path, err := exec.LookPath("cliks"); err == nil && path != "" {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != "" {
+			return resolved
+		}
+		return path
+	}
+	return currentExecutable()
+}
+
+func systemdQuote(path string) string {
+	// systemd unit values: wrap in double quotes and escape \ and ".
+	escaped := strings.ReplaceAll(path, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 func linuxAutostart(action, code string) (string, error) {
@@ -73,6 +96,7 @@ func linuxAutostart(action, code string) (string, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
+		exe := stableServiceExecutable()
 		body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
 After=network-online.target
@@ -87,7 +111,7 @@ Environment=CLIKS_RUN_MODE=%s
 
 [Install]
 WantedBy=default.target
-`, currentExecutable(), code, runModeBoot)
+`, systemdQuote(exe), code, runModeBoot)
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
@@ -117,6 +141,7 @@ func macAutostart(action, code string) (string, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
+		exe := stableServiceExecutable()
 		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -145,7 +170,7 @@ func macAutostart(action, code string) (string, error) {
   <string>%s</string>
 </dict>
 </plist>
-`, launchAgentID, currentExecutable(), code, runModeBoot, filepath.Join(home, "Library", "Logs", "cliks.log"), filepath.Join(home, "Library", "Logs", "cliks.err.log"))
+`, launchAgentID, exe, code, runModeBoot, filepath.Join(home, "Library", "Logs", "cliks.log"), filepath.Join(home, "Library", "Logs", "cliks.err.log"))
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
@@ -165,22 +190,37 @@ func windowsAutostart(action, code string) (string, error) {
 		return "", fmt.Errorf("could not locate Windows Startup folder")
 	}
 	dir := filepath.Join(startup, "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-	path := filepath.Join(dir, "Cliks.cmd")
+	// Prefer silent VBScript; remove legacy .cmd that flashed a console.
+	vbsPath := filepath.Join(dir, "Cliks.vbs")
+	cmdPath := filepath.Join(dir, "Cliks.cmd")
 	switch action {
 	case "status":
-		return autostartStatusText(path, "Startup script"), nil
+		if _, err := os.Stat(vbsPath); err == nil {
+			return autostartStatusText(vbsPath, "Startup script (silent)"), nil
+		}
+		return autostartStatusText(cmdPath, "Startup script"), nil
 	case "disable":
-		_ = os.Remove(path)
+		_ = os.Remove(vbsPath)
+		_ = os.Remove(cmdPath)
 		return "Cliks autostart disabled.", nil
 	case "enable":
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
-		body := fmt.Sprintf("@echo off\r\nset CLIKS_AUTOSTART_TEAM=%s\r\nset CLIKS_RUN_MODE=%s\r\nstart \"Cliks\" /min \"%s\" start\r\n", code, runModeBoot, currentExecutable())
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		exe := stableServiceExecutable()
+		// WindowStyle 0 = hidden. No console flash at login.
+		body := fmt.Sprintf(
+			"Set sh = CreateObject(\"Wscript.Shell\")\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_AUTOSTART_TEAM\") = \"%s\"\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_RUN_MODE\") = \"%s\"\r\n"+
+				"sh.Run \"\"\"%s\"\" start\", 0, False\r\n",
+			code, runModeBoot, strings.ReplaceAll(exe, `"`, `""`),
+		)
+		if err := os.WriteFile(vbsPath, []byte(body), 0o644); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Cliks autostart enabled for %s. It will start after your next sign-in.", code), nil
+		_ = os.Remove(cmdPath)
+		return fmt.Sprintf("Cliks autostart enabled for %s. It will start silently after your next sign-in.", code), nil
 	default:
 		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}
@@ -198,4 +238,24 @@ func autostartEnabled() bool {
 	cfg := loadConfig()
 	message, err := autostartAction([]string{"status", cfg.CurrentTeamCode})
 	return err == nil && strings.Contains(message, "enabled")
+}
+
+// repairAutostartIfEnabled rewrites login launchers with the current binary path.
+// Safe no-op when autostart is disabled or no team is selected.
+func repairAutostartIfEnabled() string {
+	if !autostartEnabled() {
+		return ""
+	}
+	cfg := loadConfig()
+	if cfg.CurrentTeamCode == "" {
+		return ""
+	}
+	message, err := autostartAction([]string{"enable", cfg.CurrentTeamCode})
+	if err != nil {
+		return ""
+	}
+	if message == "" {
+		return "Refreshed launch-at-login path."
+	}
+	return "Refreshed launch-at-login: " + message
 }

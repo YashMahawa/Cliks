@@ -50,6 +50,8 @@ No key values are ever read or sent — only “keyboard activity” / “mouse 
 |------|-----------------|-------------------------|
 | Spatial sound | Installer installs **mpv** via winget/scoop/choco when possible | Reopen the terminal if `mpv` is new on PATH |
 | Background capture | Works for normal apps with **no** special Windows permission dialog | Nothing for everyday use |
+| Settings location | Config lives under `%APPDATA%\cliks\` (native Windows path) | Older installs auto-migrate from `.config\cliks` |
+| Launch at login | Silent VBScript startup (no console flash) | `cliks service enable` once |
 
 **Note (not an error):** if you focus Task Manager or another *Administrator* window, Windows security may pause capture until you leave that window. Normal apps are fine.
 
@@ -154,6 +156,8 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 | macOS capture silent | Accessibility for your terminal app, then restart Cliks |
 | Linux capture silent after install | Log out/in once if you were added to the `input` group |
 | Terminal looks weird after a crash | `cliks fix-terminal` |
+| Volume keys do nothing | Install mpv (`cliks setup`) — fallbacks still scale gain where possible |
+| Autostart broke after updating Cliks | `cliks setup` refreshes the launch path |
 
 ---
 

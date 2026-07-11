@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -93,6 +94,14 @@ func backgroundStatusText() string {
 func stateDir() string {
 	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
 		return filepath.Join(dir, "cliks")
+	}
+	if runtime.GOOS == "windows" {
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, "cliks")
+		}
+		if appdata := strings.TrimSpace(os.Getenv("APPDATA")); appdata != "" {
+			return filepath.Join(appdata, "cliks", "state")
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

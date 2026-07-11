@@ -18,30 +18,22 @@ import (
 )
 
 var (
-	// Warm, low-noise palette: ember accent on stone, easy on long sessions.
-	colorAccent = lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#E8A87C"}
-	colorDim    = lipgloss.AdaptiveColor{Light: "#6B6560", Dark: "#8A847C"}
-	colorWarn   = lipgloss.AdaptiveColor{Light: "#9A3412", Dark: "#F0B27A"}
-	colorOK     = lipgloss.AdaptiveColor{Light: "#166534", Dark: "#6FCF97"}
-	colorPanel  = lipgloss.AdaptiveColor{Light: "#A8A29E", Dark: "#3F3A36"}
-	colorSelect = lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#D97746"}
-	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFBEB", Dark: "#1A1612"}
-	colorMuted  = lipgloss.AdaptiveColor{Light: "#78716C", Dark: "#6B6560"}
-	colorBorder = lipgloss.AdaptiveColor{Light: "#D6D3D1", Dark: "#2A2622"}
+	colorAccent = lipgloss.AdaptiveColor{Light: "#006D7D", Dark: "#33D6E8"}
+	colorDim    = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+	colorWarn   = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+	colorOK     = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
+	colorPanel  = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#159BB5"}
+	colorSelect = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#33D6E8"}
+	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
 
-	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 2)
+	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
 	styleAccent   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleDim      = lipgloss.NewStyle().Foreground(colorDim)
 	styleWarn     = lipgloss.NewStyle().Foreground(colorWarn)
 	styleOK       = lipgloss.NewStyle().Foreground(colorOK)
-	styleMuted    = lipgloss.NewStyle().Foreground(colorMuted)
-	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(1, 2)
+	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(1, 2)
 	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
 	styleFocused  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleSection  = lipgloss.NewStyle().Foreground(colorDim).Bold(true)
-	styleBadgeOK  = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorOK).Padding(0, 1)
-	styleBadgeWait = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorWarn).Padding(0, 1)
-	styleBadgeIdle = lipgloss.NewStyle().Foreground(colorDim).Border(lipgloss.HiddenBorder()).Padding(0, 1)
 )
 
 type shortcutHelp struct {
@@ -415,8 +407,7 @@ func (m homeModel) View() string {
 	} else {
 		body = m.itemView()
 	}
-	header := styleTitle.Render(" Cliks ") + "  " + styleMuted.Render("ambient coworking")
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, m.statusFooterView())
+	return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks"), body, m.statusFooterView())
 }
 
 func (m *homeModel) move(delta int) {
@@ -617,30 +608,20 @@ func (m *homeModel) changeSetting(delta int) {
 func (m homeModel) itemView() string {
 	items := m.items()
 	lines := m.itemPrefixLines()
-	if m.mode == "home" || m.mode == "menu" {
-		lines = append(lines, styleSection.Render("Actions"))
-	}
 	for i, item := range items {
-		marker := "  "
-		label := fmt.Sprintf("%-14s", item.label)
-		help := styleDim.Render(item.help)
-		line := marker + label + " " + help
+		line := fmt.Sprintf("%-12s %s", item.label, item.help)
 		if i == m.cursor {
 			if m.mouseOver {
-				line = styleSelected.Render(" › " + item.label + "  " + item.help + " ")
+				line = styleSelected.Render(" " + line + " ")
 			} else {
-				line = styleFocused.Render(" › " + label + " " + item.help)
+				line = styleFocused.Render("> " + line)
 			}
 		}
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	if m.busy {
-		lines = append(lines, styleWarn.Render("… working"))
-	} else if strings.TrimSpace(m.message) != "" {
-		lines = append(lines, styleDim.Render(m.message))
-	}
-	lines = append(lines, styleMuted.Render("↑↓ move  ·  enter select  ·  ? help  ·  q quit"))
+	lines = append(lines, styleDim.Render("? shortcuts"))
+	lines = append(lines, styleDim.Render(m.message))
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
@@ -648,7 +629,7 @@ func (m homeModel) itemPrefixLines() []string {
 	title, intro := m.viewHeader()
 	lines := []string{styleAccent.Render(title)}
 	if intro != "" {
-		lines = append(lines, styleDim.Render(intro))
+		lines = append(lines, intro)
 	}
 	if m.mode == "home" {
 		lines = append(lines, "")
@@ -656,73 +637,42 @@ func (m homeModel) itemPrefixLines() []string {
 		if m.activeOK && m.activeTeamLabel() != "" {
 			teamText = m.activeTeamLabel()
 		}
-		statusBadge := styleBadgeIdle.Render("idle")
+		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(teamText, "not joined")))
+		lines = append(lines, "Connection: "+m.connectionSummary())
 		if m.activeOK {
-			status := strings.ToLower(valuePlain(m.active.ConnectionStatus, "starting"))
-			if status == "connected" {
-				statusBadge = styleBadgeOK.Render("live")
-			} else if strings.Contains(status, "rate limit") {
-				statusBadge = styleBadgeWait.Render("limited")
-			} else if strings.Contains(status, "connect") || strings.Contains(status, "start") {
-				statusBadge = styleBadgeWait.Render("joining")
-			} else {
-				statusBadge = styleBadgeWait.Render(truncateRunes(status, 12))
-			}
-		}
-		lines = append(lines, fmt.Sprintf("%s  %s", statusBadge, valueOr(teamText, "not joined")))
-		lines = append(lines, "Connection  "+m.connectionSummary())
-		if m.activeOK {
-			lines = append(lines, fmt.Sprintf("Room        %s  ·  %d↑ %d→",
-				peopleSummary(m.active.ActiveCount),
-				m.active.LocalCapturedEvents,
-				m.active.LocalSentEvents,
-			))
+			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
+			lines = append(lines, fmt.Sprintf("Activity: %d captured, %d sent", m.active.LocalCapturedEvents, m.active.LocalSentEvents))
 		}
 	}
 	return append(lines, "")
 }
 
-func truncateRunes(value string, max int) string {
-	runes := []rune(value)
-	if len(runes) <= max {
-		return value
-	}
-	if max <= 1 {
-		return string(runes[:max])
-	}
-	return string(runes[:max-1]) + "…"
-}
 
 func (m homeModel) preferencesView() string {
 	rows := settingsRows(m.cfg)
 	start, end := settingsWindow(len(rows), m.settingsCursor, m.height)
 	var lines []string
 	lines = append(lines, styleAccent.Render("Preferences"))
-	lines = append(lines, styleDim.Render("Sound, sharing, and room feel — changes save immediately."))
 	lines = append(lines, "")
 	for i := start; i < end; i++ {
 		row := rows[i]
-		line := fmt.Sprintf("%-18s %-20s %s", row.label, row.value(m.cfg), styleMuted.Render(row.help))
+		line := fmt.Sprintf("%-18s %-24s %s", row.label, row.value(m.cfg), styleDim.Render(row.help))
 		if i == m.settingsCursor {
 			if m.mouseOver {
-				line = styleSelected.Render(" " + fmt.Sprintf("%-18s %-20s %s", row.label, row.value(m.cfg), row.help) + " ")
+				line = styleSelected.Render(" " + line + " ")
 			} else {
-				line = styleFocused.Render(" › " + line)
+				line = styleFocused.Render("> " + line)
 			}
-		} else {
-			line = "   " + line
 		}
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	footer := "←/→ adjust  ·  enter toggle  ·  s save  ·  q back"
+	footer := "Left/right adjusts. Enter toggles. s saves. q returns."
 	if start > 0 || end < len(rows) {
-		footer = fmt.Sprintf("%d–%d of %d  ·  ↑↓ more  ·  q back", start+1, end, len(rows))
+		footer = fmt.Sprintf("Showing %d-%d of %d. Up/down reveals more. q returns.", start+1, end, len(rows))
 	}
-	lines = append(lines, styleMuted.Render(footer))
-	if strings.TrimSpace(m.message) != "" {
-		lines = append(lines, styleDim.Render(m.message))
-	}
+	lines = append(lines, styleDim.Render(footer))
+	lines = append(lines, styleDim.Render(m.message))
 	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
@@ -840,7 +790,7 @@ func (m homeModel) statusFooterView() string {
 			}
 		}
 	}
-	return styleMuted.Render(line)
+	return styleDim.Render(line)
 }
 
 type homeItem struct {
@@ -869,12 +819,12 @@ func (m homeModel) items() []homeItem {
 	switch m.mode {
 	case "menu":
 		return []homeItem{
-			{key: "preferences", label: "Preferences", help: "volume, density, mute, spatial, fade"},
-			{key: "team", label: "Team", help: "join, create, switch, nickname"},
-			{key: "connection", label: "Service", help: "background session and launch at login"},
-			{key: "diagnostics", label: "Diagnostics", help: "sound test and setup doctor"},
-			{key: "advanced", label: "Advanced", help: "audio device and batch window"},
-			{key: "back", label: "Back", help: "return home"},
+			{key: "preferences", label: "Preferences", help: "sound, sharing, spatial audio, and fatigue fade"},
+			{key: "advanced", label: "Advanced", help: "nickname, audio output, and batching"},
+			{key: "team", label: "Team", help: "create, delete, or switch the selected team"},
+			{key: "connection", label: "Connection", help: "background mode and launch-at-login"},
+			{key: "diagnostics", label: "Diagnostics", help: "sound test and setup check"},
+			{key: "back", label: "Back", help: "return to the greeting screen"},
 		}
 	case "team":
 		return []homeItem{
@@ -897,14 +847,14 @@ func (m homeModel) items() []homeItem {
 		return []homeItem{
 			{key: "setup", label: "Easy Setup", help: "one-time sound + capture setup"},
 			{key: "sound", label: "Sound Test", help: "play keyboard and mouse samples"},
-			{key: "doctor", label: "Doctor", help: "detailed setup report"},
+			{key: "doctor", label: "Doctor", help: "quick setup and permission check"},
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
 	case "advanced":
 		return []homeItem{
-			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "anonymous")},
-			{key: "audio-device", label: "Audio Output", help: valuePlain(m.cfg.Listening.AudioDevice, "default")},
-			{key: "batch-window", label: "Batch Window", help: fmt.Sprintf("%d ms", m.cfg.BatchWindowMs)},
+			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "anonymous") + " (CLI key: nickname)"},
+			{key: "audio-device", label: "Audio Output", help: valuePlain(m.cfg.Listening.AudioDevice, "default") + " (CLI key: audio.device)"},
+			{key: "batch-window", label: "Batch Window", help: fmt.Sprintf("%d ms (CLI key: batch.ms)", m.cfg.BatchWindowMs)},
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
 	default:
@@ -914,8 +864,8 @@ func (m homeModel) items() []homeItem {
 				{key: "create", label: "Create Team", help: "make a room and copy its code"},
 				{key: "sound", label: "Sound Check", help: "play keyboard and mouse samples"},
 				{key: "doctor", label: "Setup Check", help: "check audio and input permissions"},
-				{key: "menu", label: "More", help: "preferences and service options"},
-				{key: "quit", label: "Quit", help: "close this screen"},
+				{key: "menu", label: "More", help: "preferences, diagnostics, and connection options"},
+				{key: "quit", label: "Quit", help: "close this control screen"},
 			}
 		}
 		items := []homeItem{
@@ -926,8 +876,8 @@ func (m homeModel) items() []homeItem {
 			items = append(items, homeItem{key: "stop-connection", label: "Stop", help: m.stopConnectionHelp()})
 		}
 		items = append(items,
-			homeItem{key: "menu", label: "More", help: "team, preferences, diagnostics, service"},
-			homeItem{key: "quit", label: "Quit", help: "leave the control screen"},
+			homeItem{key: "menu", label: "More", help: "teams, preferences, diagnostics, and boot options"},
+			homeItem{key: "quit", label: "Quit", help: "close this control screen"},
 		)
 		return items
 	}
@@ -936,20 +886,20 @@ func (m homeModel) items() []homeItem {
 func (m homeModel) viewHeader() (string, string) {
 	switch m.mode {
 	case "menu":
-		return "More", "Team, sound, service, and diagnostics — all in one place."
+		return "More", "Everything here stays in this control screen."
 	case "team":
 		return "Team", fmt.Sprintf("Selected: %s", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "not joined"))
 	case "connection":
-		return "Service", "One background session per device. Login start is optional."
+		return "Connection", "Cliks allows one local connection per device."
 	case "diagnostics":
-		return "Diagnostics", "Quick checks without leaving the interface."
+		return "Diagnostics", "Quick checks without leaving the TUI."
 	case "advanced":
-		return "Advanced", "Local-only controls. Script every key with: cliks set --list"
+		return "Advanced", "These controls stay on this device. Run cliks set --list for every scriptable key."
 	default:
 		if m.cfg.CurrentTeamCode == "" {
 			return "Set up Cliks", "Join a team first, then Cliks opens the live room automatically."
 		}
-		return "Home", "Hear the room. No keystrokes shared."
+		return "Welcome back", "Ambient coworking, no keystrokes shared."
 	}
 }
 
@@ -1937,7 +1887,7 @@ func (m sessionModel) View() string {
 		if m.mode == "settings" {
 			context = "live-preferences"
 		}
-		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render(" Shortcuts "), shortcutHelpView(context, m.width))
+		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks Shortcuts"), shortcutHelpView(context, m.width))
 	}
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
@@ -1948,9 +1898,8 @@ func (m sessionModel) View() string {
 	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
 	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
 	controls := m.liveControlsStyle().Width(width).Render(m.liveControlsLine())
-	header := styleTitle.Render(" Live ") + "  " + styleMuted.Render("room presence")
 	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
+		styleTitle.Render("Cliks Live"),
 		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
 		controls,
 	)
@@ -1972,14 +1921,15 @@ func (m sessionModel) livePanelLines() ([]string, []string, int) {
 	}
 	if m.height > 0 && m.height < 24 {
 		left := []string{
-			styleAccent.Render(teamName) + "  " + codeValue,
-			"You  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
-			"Link " + connectionStyle(state.ConnectionStatus),
-			"Room " + roomPeopleSummary(state),
-			"Type " + typingSummary(state, m.now),
-			"Flow " + flowBadge(state, m.now),
-			"Health " + healthSummary(state, m.now),
-			fmt.Sprintf("Activity %d↑ %d→", state.LocalCapturedEvents, state.LocalSentEvents),
+			"Team: " + styleAccent.Render(teamName),
+			"Code: " + codeValue,
+			"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
+			"Connection: " + connectionStyle(state.ConnectionStatus),
+			"People: " + roomPeopleSummary(state),
+			"Typing: " + typingSummary(state, m.now),
+			"Flow: " + flowBadge(state, m.now),
+			"Health: " + healthSummary(state, m.now),
+			fmt.Sprintf("Activity: %d captured, %d sent", state.LocalCapturedEvents, state.LocalSentEvents),
 		}
 		if state.Notice != "" {
 			left = append(left, styleWarn.Render(state.Notice))
@@ -1987,54 +1937,53 @@ func (m sessionModel) livePanelLines() ([]string, []string, int) {
 			left = append(left, styleWarn.Render(state.PermissionHint))
 		}
 		right := []string{
-			styleSection.Render("Sound"),
-			"Vol  " + muteAwareBar(state.Listening),
-			"Den  " + bar(state.Listening.Density),
+			"Sound",
+			"Volume  " + muteAwareBar(state.Listening),
+			"Density " + bar(state.Listening.Density),
 			fmt.Sprintf("Mute %s  Spatial %s", onOff(state.Listening.Muted), onOff(state.Listening.Spatial)),
 			fmt.Sprintf("Fade %s  Keep %s", onOff(state.Listening.FatigueProtection), onOff(m.controller.cfg.KeepRunning)),
-			styleMuted.Render("↑↓ vol  ←→ density  ? help"),
+			"↑/↓ volume  ←/→ density  ? help",
 		}
 		return left, right, 1
 	}
 	left := []string{
-		styleSection.Render("Room"),
-		"Team  " + styleAccent.Render(teamName),
-		"Code  " + codeValue,
-		"You   " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
+		"Team: " + styleAccent.Render(teamName),
+		"Code: " + codeValue,
+		"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
 		"",
-		"Link  " + connectionStyle(state.ConnectionStatus),
-		"People  " + roomPeopleSummary(state),
-		"Typing  " + typingSummary(state, m.now),
+		"Connection: " + connectionStyle(state.ConnectionStatus),
+		"People: " + roomPeopleSummary(state),
+		"Typing: " + typingSummary(state, m.now),
 		"Flow: " + flowBadge(state, m.now),
 		"Health: " + healthSummary(state, m.now),
-		"Capture " + styleDim.Render(valuePlain(state.CaptureMode, "…")),
+		"Capture: " + state.CaptureMode,
 		"",
-		fmt.Sprintf("Captured  %d", state.LocalCapturedEvents),
-		fmt.Sprintf("Sent      %d", state.LocalSentEvents),
+		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
+		fmt.Sprintf("Sent:     %d", state.LocalSentEvents),
 	}
-	// Prefer one notice at a time so the panel stays calm.
 	if state.Notice != "" {
 		left = append(left, "", styleWarn.Render(state.Notice))
-	} else if state.PermissionHint != "" {
-		left = append(left, "", styleWarn.Render(state.PermissionHint))
 	}
 	if m.message != "" {
 		left = append(left, styleDim.Render(m.message))
 	}
+	if state.PermissionHint != "" {
+		left = append(left, "", styleWarn.Render(state.PermissionHint))
+	}
 	right := []string{
-		styleSection.Render("Sound"),
+		"Sound",
 		"",
-		"Volume   " + muteAwareBar(state.Listening),
-		"Density  " + bar(state.Listening.Density),
-		"Muted    " + onOff(state.Listening.Muted),
-		"Spatial  " + onOff(state.Listening.Spatial),
-		"Fade     " + onOff(state.Listening.FatigueProtection),
-		"Keep     " + onOff(m.controller.cfg.KeepRunning),
+		"Volume  " + muteAwareBar(state.Listening),
+		"Density " + bar(state.Listening.Density),
+		"Muted   " + onOff(state.Listening.Muted),
+		"Spatial " + onOff(state.Listening.Spatial),
+		"Fade    " + onOff(state.Listening.FatigueProtection),
+		"Keep    " + onOff(m.controller.cfg.KeepRunning),
 		"",
-		styleMuted.Render("↑/↓ volume   ←/→ density"),
-		styleMuted.Render("m mute  s spatial  f fade"),
-		styleMuted.Render("Tab prefs  ·  Esc back  ·  x stop"),
-		styleMuted.Render("? shortcuts  ·  wheel volume"),
+		"Keys: ↑/↓ volume  ←/→ density",
+		"m mute  s spatial  f fade  Tab prefs",
+		"Esc/q/back returns  x stop  ? shortcuts",
+		"Mouse: wheel volume; click hovered controls",
 	}
 	return left, right, 1
 }
@@ -2062,13 +2011,11 @@ func liveButtons() []liveButton {
 func (m sessionModel) liveControlsLine() string {
 	parts := []string{}
 	for index, button := range liveButtons() {
-		// Keep plain width stable for mouse hit-testing: "[ Label ]"
-		plain := "[ " + button.label + " ]"
+		part := "[ " + button.label + " ]"
 		if index == m.buttonHover {
-			parts = append(parts, styleSelected.Render(plain))
-		} else {
-			parts = append(parts, styleMuted.Render(plain))
+			part = styleSelected.Render(part)
 		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, " ")
 }
@@ -2277,23 +2224,17 @@ func connectionStyle(value string) string {
 	if value == "connected" {
 		return styleOK.Render(value)
 	}
-	if strings.Contains(lower, "rate limit") {
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "error") || strings.Contains(lower, "offline") || strings.Contains(lower, "stopped") {
 		return styleWarn.Render(value)
-	}
-	if strings.Contains(lower, "error") || strings.Contains(lower, "offline") || strings.Contains(lower, "stopped") {
-		return styleWarn.Render(value)
-	}
-	if strings.Contains(lower, "connect") || strings.Contains(lower, "start") || strings.Contains(lower, "retry") {
-		return styleAccent.Render(value)
 	}
 	return styleAccent.Render(value)
 }
 
 func welcomeMessage(cfg CliksConfig) string {
 	if cfg.CurrentTeamCode == "" {
-		return "Create or join a team to hear the room."
+		return "Desk is warm. Create or join a team to start hearing the room."
 	}
-	return fmt.Sprintf("%s ready — press Enter for Open Live.", teamLabel(cfg, cfg.CurrentTeamCode))
+	return fmt.Sprintf("Desk is warm for %s. Press Enter to start.", teamLabel(cfg, cfg.CurrentTeamCode))
 }
 
 func backgroundSummary() string {
