@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.2.4"
+const version = "0.2.5"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -355,7 +355,12 @@ func printConfig() error {
 		CliksConfig
 		AutostartEnabled bool `json:"autostartEnabled"`
 	}
-	data, err := json.MarshalIndent(configSummary{CliksConfig: loadConfig(), AutostartEnabled: autostartEnabled()}, "", "  ")
+	cfg := loadConfig()
+	if warning := lastConfigLoadWarning(); warning != "" {
+		// Always surface on `cliks config` even if the once-flag already fired.
+		fmt.Fprintln(os.Stderr, "Warning:", warning)
+	}
+	data, err := json.MarshalIndent(configSummary{CliksConfig: cfg, AutostartEnabled: autostartEnabled()}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ That is usually enough. The installer:
 | Need | What Cliks does | What you might do once |
 |------|-----------------|-------------------------|
 | Spatial sound | Installer adds **mpv** via Homebrew when possible; falls back to built-in `afplay` (distance only) | Nothing if install finished cleanly |
-| Background capture | Uses system hooks | **One** permission: System Settings → Privacy & Security → **Accessibility** → enable your **Terminal** (or iTerm / Warp / VS Code) |
+| Background capture | Uses system hooks | **One** permission: System Settings → Privacy & Security → **Accessibility** → enable the **terminal app that launches Cliks** (Terminal / iTerm / Warp / VS Code). Permission is **per app** — if you switch terminals, enable the new one too. |
 
 After granting Accessibility:
 

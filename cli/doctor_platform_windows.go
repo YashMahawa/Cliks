@@ -58,5 +58,6 @@ func platformStartupCaptureNotice() string {
 	if elevated {
 		return ""
 	}
-	return "Windows: running as a standard user. Capture may pause while elevated apps are focused (UIPI)."
+	// UIPI is silent at the OS level — surface it so users know capture is not broken.
+	return "Windows tip: capture may pause while an Administrator window is focused (UIPI); it resumes on normal apps."
 }

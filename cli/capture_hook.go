@@ -65,7 +65,7 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 func globalHookPermissionHint() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "If capture is quiet: System Settings → Privacy & Security → Accessibility → enable your terminal, then cliks setup"
+		return "If capture is quiet: System Settings → Privacy & Security → Accessibility → enable the terminal that launches Cliks (per-app if you switch terminals), then cliks setup"
 	case "windows":
 		return "Capture may pause only while an Administrator window is focused (Windows security)."
 	default:

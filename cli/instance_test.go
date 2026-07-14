@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -21,6 +22,46 @@ func TestSessionInstancePreventsDuplicateLocalConnection(t *testing.T) {
 	}
 	if already.state.PID == 0 || already.state.TeamCode != "CLIK-LOCAL" {
 		t.Fatalf("already running state = %+v", already.state)
+	}
+}
+
+func TestClassifySessionLockTreatsYoungEmptyLockAsWait(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := sessionLockPath()
+	// Simulate O_EXCL create before metadata is written.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+
+	action, _ := classifySessionLock(path)
+	if action != lockWait {
+		t.Fatalf("action = %v, want lockWait for young empty lock", action)
+	}
+}
+
+func TestClassifySessionLockTreatsDeadPIDAsStale(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// PID 1 is usually init/systemd and looks alive; use an absurd high PID instead.
+	deadPID := 2147483000
+	if processLooksAlive(deadPID) {
+		t.Skip("unexpectedly live high pid")
+	}
+	state := ActiveSessionState{PID: deadPID, TeamCode: "CLIK-DEAD", Mode: runModeForeground}
+	data, _ := json.MarshalIndent(state, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	action, _ := classifySessionLock(sessionLockPath())
+	if action != lockStale {
+		t.Fatalf("action = %v, want lockStale", action)
 	}
 }
 

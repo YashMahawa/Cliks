@@ -35,6 +35,20 @@ func setConfigLoadWarning(message string) {
 	configLoadMu.Unlock()
 }
 
+// printConfigLoadWarningOnce prints the invalid-config notice once per process
+// so join/start/service/TUI are not silent when JSON is broken.
+var configLoadWarnOnce sync.Once
+
+func printConfigLoadWarningOnce() {
+	warning := lastConfigLoadWarning()
+	if warning == "" {
+		return
+	}
+	configLoadWarnOnce.Do(func() {
+		fmt.Fprintln(os.Stderr, "Warning:", warning)
+	})
+}
+
 const productionAPIURL = "https://139.59.29.207.sslip.io"
 
 type TeamConfig struct {
@@ -138,7 +152,7 @@ func loadConfig() CliksConfig {
 				err = nil
 				// Best-effort migrate so the next load uses the native path.
 				_ = os.MkdirAll(filepath.Dir(path), 0o755)
-				if writeErr := os.WriteFile(path, legacyData, 0o644); writeErr == nil {
+				if writeErr := atomicWriteFile(path, legacyData, 0o644); writeErr == nil {
 					// Keep a tiny marker note in doctor only if migration happened.
 					setConfigLoadWarning("")
 				}
@@ -152,6 +166,8 @@ func loadConfig() CliksConfig {
 	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
 		setConfigLoadWarning(fmt.Sprintf("Config file has invalid JSON (%s). Using safe defaults until you save settings again.", path))
 		cfg = defaultConfig()
+		// Surface once on stderr so everyday commands are not silent about bad config.
+		printConfigLoadWarningOnce()
 	} else {
 		setConfigLoadWarning("")
 	}
@@ -183,7 +199,11 @@ func saveConfig(cfg CliksConfig) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	if err := atomicWriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	setConfigLoadWarning("")
+	return nil
 }
 
 func rememberTeam(code string, name string) (CliksConfig, error) {

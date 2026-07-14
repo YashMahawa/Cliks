@@ -73,32 +73,110 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	if err != nil {
 		return nil, err
 	}
+	payload := append(data, '\n')
 	path := sessionLockPath()
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		if os.IsExist(err) {
-			cleanupStaleSession()
-			file, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+
+	// Exclusive create + full payload write. On collision, never blindly delete a
+	// young lock (another process may still be writing metadata into it).
+	const maxAttempts = 5
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			if _, writeErr := file.Write(payload); writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(path)
+				return nil, writeErr
+			}
+			// Flush so concurrent readers never see a zero-byte lock as "stale".
+			if syncErr := file.Sync(); syncErr != nil {
+				_ = file.Close()
+				_ = os.Remove(path)
+				return nil, syncErr
+			}
+			if closeErr := file.Close(); closeErr != nil {
+				_ = os.Remove(path)
+				return nil, closeErr
+			}
+			instance := &sessionInstance{path: path, state: state}
+			_ = writeActiveSessionState(state)
+			return instance, nil
 		}
-		if err != nil {
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		switch action, live := classifySessionLock(path); action {
+		case lockLive:
+			return nil, alreadyRunningError{state: live}
+		case lockWait:
+			time.Sleep(50 * time.Millisecond)
+			continue
+		case lockStale:
+			cleanupStaleSession()
+			continue
+		default:
+			// Unknown — re-check active session and fail closed.
 			if active, ok := activeSession(); ok {
 				return nil, alreadyRunningError{state: active}
 			}
-			return nil, err
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	if _, err := file.Write(append(data, '\n')); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return nil, err
+	if active, ok := activeSession(); ok {
+		return nil, alreadyRunningError{state: active}
 	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(path)
-		return nil, err
+	return nil, fmt.Errorf("could not acquire session lock at %s", path)
+}
+
+type sessionLockAction int
+
+const (
+	lockLive sessionLockAction = iota
+	lockWait
+	lockStale
+)
+
+// classifySessionLock decides whether an existing session.lock is held by a live
+// process, still being written, or safe to remove.
+func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
+	info, statErr := os.Stat(path)
+	data, readErr := os.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		// Unreadable but present — wait briefly instead of deleting under a race.
+		if statErr == nil && time.Since(info.ModTime()) < 2*time.Second {
+			return lockWait, ActiveSessionState{}
+		}
+		return lockStale, ActiveSessionState{}
 	}
-	instance := &sessionInstance{path: path, state: state}
-	_ = writeActiveSessionState(state)
-	return instance, nil
+	if os.IsNotExist(readErr) {
+		return lockStale, ActiveSessionState{}
+	}
+
+	var state ActiveSessionState
+	parseOK := json.Unmarshal(data, &state) == nil && state.PID > 0
+	if parseOK {
+		if processLooksAlive(state.PID) {
+			// Prefer richer session.json metadata when available.
+			if richer, ok := readSessionFile(sessionStatePath()); ok && richer.PID == state.PID {
+				richer.PID = state.PID
+				if richer.Mode == "" {
+					richer.Mode = state.Mode
+				}
+				if richer.TeamCode == "" {
+					richer.TeamCode = state.TeamCode
+				}
+				return lockLive, richer
+			}
+			return lockLive, state
+		}
+		return lockStale, state
+	}
+
+	// Empty or corrupt lock: another process may have just created it with O_EXCL
+	// and not finished writing. Only treat as stale after a short grace window.
+	if statErr == nil && time.Since(info.ModTime()) < 2*time.Second {
+		return lockWait, ActiveSessionState{}
+	}
+	return lockStale, ActiveSessionState{}
 }
 
 func (s *sessionInstance) update(view SessionViewState) {
@@ -240,7 +318,7 @@ func writeActiveSessionState(state ActiveSessionState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sessionStatePath(), append(data, '\n'), 0o644)
+	return atomicWriteFile(sessionStatePath(), append(data, '\n'), 0o644)
 }
 
 func readSessionFile(path string) (ActiveSessionState, bool) {
@@ -311,7 +389,7 @@ func scheduleDeferredStop(pid int) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(deferredStopPath(), append(data, '\n'), 0o644)
+	return atomicWriteFile(deferredStopPath(), append(data, '\n'), 0o644)
 }
 
 func clearDeferredStop() error {

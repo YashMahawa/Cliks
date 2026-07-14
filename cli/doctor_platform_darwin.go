@@ -18,10 +18,10 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 		report.checks = append(report.checks, doctorCheck{"macOS Accessibility", "unknown — run capture-test"})
 		report.issues = append(report.issues, doctorIssue{
 			title:  "Verify Accessibility permission",
-			detail: "Cliks could not confirm Accessibility access. Global capture needs your terminal app allowed under Privacy & Security.",
+			detail: "Cliks could not confirm Accessibility access. Global capture needs the app that launches Cliks allowed under Privacy & Security. Permission is per terminal — switching from Terminal to iTerm/Warp/VS Code requires enabling that app too.",
 			commands: []string{
 				"Open System Settings > Privacy & Security > Accessibility",
-				"Allow your terminal app (Terminal, iTerm, Warp, VS Code, etc.)",
+				"Allow the terminal you actually use (Terminal, iTerm, Warp, VS Code, etc.)",
 				"cliks capture-test",
 			},
 		})
@@ -29,10 +29,10 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 		report.checks = append(report.checks, doctorCheck{"macOS Accessibility", "not confirmed (" + method + ")"})
 		report.issues = append(report.issues, doctorIssue{
 			title:  "Allow Accessibility permission",
-			detail: "macOS global input capture needs Accessibility permission for the terminal app that launches Cliks.",
+			detail: "macOS grants Accessibility per app. The terminal that launches Cliks must be enabled; if you switch terminals, enable the new one as well.",
 			commands: []string{
 				"Open System Settings > Privacy & Security > Accessibility",
-				"Allow your terminal app",
+				"Allow the terminal app you use to start Cliks",
 				"cliks capture-test",
 			},
 		})
@@ -97,7 +97,7 @@ func platformStartupCaptureNotice() string {
 	if trusted {
 		return ""
 	}
-	return "macOS: if capture is quiet, allow Accessibility for this terminal, then run cliks capture-test."
+	return "macOS: allow Accessibility for the terminal that launches Cliks (per-app). If you switched terminals, enable the new one, then run cliks capture-test."
 }
 
 func truncate(value string, max int) string {

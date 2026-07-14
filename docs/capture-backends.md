@@ -46,8 +46,9 @@ Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop se
 ### macOS
 
 - Accessibility permission is required for global hooks (OS rule — apps cannot skip the dialog)
+- Permission is **per parent app**: if you switch from Terminal to iTerm/Warp/VS Code, enable Accessibility for the new app
 - `cliks setup` and the installer open System Settings to the right pane
-- Enable your **terminal app**, then rerun `cliks setup`
+- Enable the **terminal that launches Cliks**, then rerun `cliks setup`
 
 ### Windows
 

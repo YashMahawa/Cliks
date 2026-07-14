@@ -22,9 +22,9 @@ func platformCaptureSetup() []setupStep {
 	opened := openMacAccessibilitySettings()
 	detail := "macOS needs one permission so Cliks can sense keyboard/mouse activity kinds (never what you type)."
 	if opened {
-		detail += " System Settings was opened for you — turn on your Terminal app (or iTerm / Warp / VS Code) under Privacy & Security → Accessibility, then come back and run: cliks setup"
+		detail += " System Settings was opened for you — enable the terminal you use to start Cliks (Terminal / iTerm / Warp / VS Code). Permission is per app: switch terminals → enable the new one too. Then run: cliks setup"
 	} else {
-		detail += " Open System Settings → Privacy & Security → Accessibility, enable your terminal app, then run: cliks setup"
+		detail += " Open System Settings → Privacy & Security → Accessibility, enable the terminal that launches Cliks (per-app if you switch apps), then run: cliks setup"
 	}
 	steps = append(steps, setupStep{
 		title:  "Background capture",

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,30 @@ func TestInvalidConfigSurfacesWarningInsteadOfSilentDefaults(t *testing.T) {
 	_ = loadConfig()
 	if lastConfigLoadWarning() != "" {
 		t.Fatalf("warning still set after valid save: %q", lastConfigLoadWarning())
+	}
+}
+
+func TestSaveConfigIsAtomicAndReadable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.Nickname = "Atomic"
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded := loadConfig()
+	if loaded.Nickname != "Atomic" {
+		t.Fatalf("nickname = %q", loaded.Nickname)
+	}
+	// No leftover temp files next to the real config.
+	entries, err := os.ReadDir(filepath.Dir(configPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.Contains(name, ".tmp-") || strings.Contains(name, ".tmp.") {
+			t.Fatalf("leftover temp file: %s", name)
+		}
 	}
 }
 

@@ -130,5 +130,5 @@ func writeBackgroundPID(pid int) error {
 	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(backgroundPIDPath(), []byte(strconv.Itoa(pid)+"\n"), 0o644)
+	return atomicWriteFile(backgroundPIDPath(), []byte(strconv.Itoa(pid)+"\n"), 0o644)
 }

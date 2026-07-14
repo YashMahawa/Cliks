@@ -660,7 +660,14 @@ func (s *sessionController) pingLoop(conn *websocket.Conn, closed <-chan struct{
 		case <-closed:
 			return
 		case <-ticker.C:
-			_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			// Gorilla WebSocket requires a single concurrent writer; heartbeats must
+			// take the same mutex as activity batches and profile updates.
+			s.wsMu.Lock()
+			active := s.ws
+			if active == conn {
+				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			}
+			s.wsMu.Unlock()
 		}
 	}
 }
