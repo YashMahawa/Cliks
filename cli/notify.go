@@ -7,15 +7,43 @@ import (
 	"strings"
 )
 
-func notifyWave(cfg CliksConfig, sender string) error {
+func notifyReaction(cfg CliksConfig, sender string, reaction string) error {
 	if !cfg.Notifications.Enabled || cfg.PresenceStatus == "focus" || cfg.PresenceStatus == "dnd" {
 		return nil
 	}
+	title, body := reactionNotificationContent(sender, reaction)
+	return sendNativeNotification(title, body, cfg.Notifications.Sound)
+}
+
+func reactionNotificationContent(sender string, reaction string) (string, string) {
 	sender = strings.TrimSpace(sender)
 	if sender == "" {
 		sender = "A teammate"
 	}
-	return sendNativeNotification("Cliks", sender+" waved to you", cfg.Notifications.Sound)
+	return sender + " " + reactionGlyph(reaction) + " " + reactionPhrase(reaction), "Cliks quick signal"
+}
+
+func notifyWave(cfg CliksConfig, sender string) error {
+	return notifyReaction(cfg, sender, "wave")
+}
+
+func reactionPhrase(reaction string) string {
+	switch reaction {
+	case "wave":
+		return "Hey there!"
+	case "nice":
+		return "Nice work!"
+	case "coffee":
+		return "Coffee time?"
+	case "celebrate":
+		return "That deserves a celebration!"
+	case "break":
+		return "Let’s take a break."
+	case "focus":
+		return "Going into focus mode."
+	default:
+		return "Sent a quick signal."
+	}
 }
 
 func nativeNotificationStatus() (bool, string) {
@@ -33,7 +61,7 @@ func nativeNotificationStatus() (bool, string) {
 	case "linux":
 		if isTermuxRuntime() {
 			if _, err := exec.LookPath("termux-notification"); err == nil {
-				return true, "Android notification (Termux:API)"
+				return true, "Termux notification service"
 			}
 			return false, "install Termux:API and run: pkg install termux-api"
 		}
@@ -52,7 +80,8 @@ func runNotificationTest() error {
 		return errors.New(detail)
 	}
 	cfg := loadConfig()
-	if err := sendNativeNotification("Cliks", "Notifications are ready — waves can reach you here.", cfg.Notifications.Sound); err != nil {
+	title, body := reactionNotificationContent("Mira", "wave")
+	if err := sendNativeNotification(title, "Example: "+body, cfg.Notifications.Sound); err != nil {
 		return err
 	}
 	return nil

@@ -777,8 +777,14 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 					state.RecentReactions = state.RecentReactions[len(state.RecentReactions)-8:]
 				}
 			})
-			if envelope.Reaction == "wave" && envelope.TargetPeerID == s.ownPeerID && envelope.PeerID != s.ownPeerID && runModeFromEnv() != runModeForeground {
-				_ = notifyWave(loadConfig(), envelope.Nickname)
+			if envelope.PeerID != s.ownPeerID {
+				go func(cfg CliksConfig, nickname string, reaction string) {
+					if err := notifyReaction(cfg, nickname, reaction); err != nil {
+						s.set(func(state *SessionViewState) {
+							state.Notice = "Notification failed: " + err.Error() + ". Run cliks notification-test."
+						})
+					}
+				}(loadConfig(), envelope.Nickname, envelope.Reaction)
 			}
 		case "a":
 			events := parseCompactEvents(envelope.CompactEvents)

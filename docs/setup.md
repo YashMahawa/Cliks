@@ -92,7 +92,7 @@ pkg install termux-api mpv
 cliks setup
 ```
 
-Cliks uses `termux-media-player` when available, falls back to mpv, uses `termux-notification` for waves, and uses `termux-clipboard-set` for one-click room-code copy.
+Cliks uses `termux-media-player` when available, falls back to mpv, uses `termux-notification` for enabled quick signals, and uses `termux-clipboard-set` for one-click room-code copy.
 
 Wayland and sandboxes (Flatpak) may block `/dev/input`. Prefer a normal desktop user session. Temporary local test:
 
@@ -177,8 +177,8 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 |---------|-----|
 | `cliks: command not found` | Open a **new** terminal, or `export PATH="$HOME/.local/bin:$PATH"` |
 | No sound | `cliks setup` then `cliks sound-test` |
-| “Could not locate bundled sounds” | Update to Cliks 0.3.1 or newer; release binaries contain the WAV pack |
-| No wave notification | Enable Notifications in Preferences, then run `cliks notification-test` |
+| “Could not locate bundled sounds” | Update to Cliks 0.3.2 or newer; release binaries contain the WAV pack |
+| No signal notification | Enable Notifications in Preferences, then run `cliks notification-test`; Linux background sessions reconnect to the user D-Bus socket automatically |
 | Teammates cannot hear you | `cliks capture-test` then `cliks setup` |
 | macOS capture silent | Accessibility for your terminal app, then restart Cliks |
 | Linux capture silent after install | Log out/in once if you were added to the `input` group |

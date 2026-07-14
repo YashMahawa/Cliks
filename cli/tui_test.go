@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestHomeClickOutsideHighlightedRowDoesNotActivate(t *testing.T) {
@@ -107,12 +108,8 @@ func TestLiveActionRailHoverAndClickBack(t *testing.T) {
 	model := newSessionModel(controller)
 	model.width = 120
 	model.height = 32
-	width := panelWidth(model.width)
-	mapWidth := int(float64(width) * 0.68)
-	railX := mapWidth + 4
-	railWidth := maxInt(18, width-mapWidth-2)
-	y := 21
-	x := railX + railWidth/2
+	x, y := renderedTextPosition(t, model.View(), "[ Back ]")
+	x++
 
 	updated, cmd := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x, Y: y})
 	got := updated.(sessionModel)
@@ -155,14 +152,45 @@ func TestLiveNotificationRowTogglesDirectly(t *testing.T) {
 	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
 	model.width = 120
 	model.height = 32
-	width := panelWidth(model.width)
-	railX := int(float64(width)*0.68) + 5
-
-	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseLeft, X: railX, Y: 13})
+	x, y := renderedTextPosition(t, model.View(), "[ Notifications")
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseLeft, X: x + 2, Y: y})
 	got := updated.(sessionModel)
 	if !got.controller.cfg.Notifications.Enabled {
 		t.Fatal("clicking Notifications did not toggle it on")
 	}
+}
+
+func TestLiveReactionButtonsUseExactRenderedHitboxes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width = 120
+	model.height = 32
+	niceX, niceY := renderedTextPosition(t, model.View(), "[ 👍 Nice ]")
+	breakX, breakY := renderedTextPosition(t, model.View(), "[ 🧘 Break ]")
+	waveX, _ := renderedTextPosition(t, model.View(), "[ 👋 Wave ]")
+
+	if got := model.liveHit(niceX+2, niceY); got != "reaction-nice" {
+		t.Fatalf("nice hit = %q, want reaction-nice", got)
+	}
+	if got := model.liveHit(breakX+2, breakY); got != "reaction-break" {
+		t.Fatalf("break hit = %q, want reaction-break", got)
+	}
+	if got := model.liveHit(waveX+ansi.StringWidth("[ 👋 Wave ]")+1, niceY); got != "" {
+		t.Fatalf("gap between reaction buttons hit %q", got)
+	}
+}
+
+func renderedTextPosition(t *testing.T, view string, needle string) (int, int) {
+	t.Helper()
+	for y, line := range strings.Split(ansi.Strip(view), "\n") {
+		if index := strings.Index(line, needle); index >= 0 {
+			return ansi.StringWidth(line[:index]), y
+		}
+	}
+	t.Fatalf("rendered view is missing %q:\n%s", needle, view)
+	return 0, 0
 }
 
 func TestLiveTabOpensUnifiedPreferences(t *testing.T) {
@@ -218,6 +246,56 @@ func TestFirstLiveViewTeachesSpatialDeskWithoutNetworkPeers(t *testing.T) {
 	}
 	if !loadConfig().WelcomeSeen {
 		t.Fatal("first live view did not persist the welcome marker")
+	}
+}
+
+func TestFirstSetupOffersPermissionsNotificationsPreferencesAndServer(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "home", onboardingPending: true}
+	model.finishLaunch()
+	if model.mode != "first-setup" {
+		t.Fatalf("mode = %q, want first-setup", model.mode)
+	}
+	items := model.items()
+	wants := map[string]bool{"nickname": false, "setup": false, "notification-test": false, "preferences": false, "backend-url": false, "first-setup-done": false}
+	for _, item := range items {
+		if _, ok := wants[item.key]; ok {
+			wants[item.key] = true
+		}
+	}
+	for key, found := range wants {
+		if !found {
+			t.Fatalf("first setup is missing %q", key)
+		}
+	}
+}
+
+func TestFirstSetupNicknameReturnsToOnboarding(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", cursor: 0}
+	updated, _ := model.activate()
+	form := updated.(homeModel)
+	if form.mode != "nickname" || form.formReturnMode != "first-setup" {
+		t.Fatalf("nickname form mode=%q return=%q", form.mode, form.formReturnMode)
+	}
+	form.nicknameValue = "Mira"
+	updated, _ = form.submitForm()
+	got := updated.(homeModel)
+	if got.mode != "first-setup" || got.cfg.Nickname != "Mira" {
+		t.Fatalf("after nickname mode=%q nickname=%q", got.mode, got.cfg.Nickname)
+	}
+}
+
+func TestReactionAnimationNamesSenderInsideDesk(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	now := time.Now()
+	model.now = now
+	model.state.Peers = []PeerPresence{{PeerID: "peer-mira", Nickname: "Mira", JoinedAt: now.Add(-time.Minute).UnixMilli()}}
+	model.state.RecentReactions = []PeerReactionStatus{{PeerID: "peer-mira", Nickname: "Mira", Reaction: "break", At: now}}
+	view := model.renderSpatialDesk(80, 22)
+	if !strings.Contains(view, "Mira") || !strings.Contains(view, "🧘") || !strings.Contains(view, "Let’s take a break.") {
+		t.Fatalf("reaction animation does not identify the sender and fixed message:\n%s", view)
 	}
 }
 

@@ -107,6 +107,7 @@ type CliksConfig struct {
 	PresenceStatus  string             `json:"presenceStatus,omitempty"`
 	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
 	LaunchSeen      bool               `json:"launchSeen,omitempty"`
+	OnboardingSeen  bool               `json:"onboardingSeen,omitempty"`
 	Theme           string             `json:"theme,omitempty"`
 	KeepRunning     bool               `json:"keepRunning"`
 	Teams           []TeamConfig       `json:"teams"`

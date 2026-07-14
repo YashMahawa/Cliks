@@ -82,7 +82,7 @@ Used after join when a running CLI notices the local nickname or presence state 
 
 ### Reaction
 
-Reactions are ephemeral social signals. The relay does not persist them. The fixed allowlist is `wave`, `nice`, `coffee`, `focus`, and `celebrate`; modified clients cannot introduce arbitrary reaction text.
+Reactions are ephemeral social signals. The relay does not persist them. The fixed allowlist is `wave`, `nice`, `coffee`, `break`, `focus`, and `celebrate`; modified clients cannot introduce arbitrary reaction text.
 
 ```json
 {
@@ -136,7 +136,7 @@ Reactions are ephemeral social signals. The relay does not persist them. The fix
 }
 ```
 
-The CLI keeps only a short in-memory recent-reaction view. A background client may translate a targeted wave into an OS-native notification when the recipient explicitly enabled notifications. Focus and do-not-disturb presence suppress those native notifications locally; notification sound is a separate local preference.
+The CLI keeps only a short in-memory recent-reaction view. Any incoming allowlisted reaction may become an OS-native notification when the recipient explicitly enabled notifications. Focus and do-not-disturb presence suppress those native notifications locally; notification sound is a separate local preference. The title combines the sender's sanitized presence nickname with a fixed emoji and fixed phrase so compact OS banners still show who sent what. Reactions never carry arbitrary message text.
 
 ### Peer activity
 

@@ -731,7 +731,7 @@ func normalizePresenceStatus(value string) string {
 
 func normalizeReaction(value string) string {
 	switch value {
-	case "wave", "nice", "coffee", "focus", "celebrate":
+	case "wave", "nice", "coffee", "break", "focus", "celebrate":
 		return value
 	default:
 		return ""

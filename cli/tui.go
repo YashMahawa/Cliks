@@ -83,7 +83,7 @@ func shortcutEntries(context string) []shortcutHelp {
 	case "live":
 		return []shortcutHelp{
 			{"j / k", "select a teammate on the spatial desk"},
-			{"1 / 2 / 3 / 4", "wave, nice, coffee, or celebrate"},
+			{"1 / 2 / 3 / 4 / 5", "wave, nice, coffee, celebrate, or suggest a break"},
 			{"p", "cycle available, focus, break, and do not disturb"},
 			{"Up/+, Down/-", "raise or lower volume"},
 			{"Right/], Left/[", "raise or lower sound density"},
@@ -142,38 +142,42 @@ const (
 )
 
 type homeModel struct {
-	cfg              CliksConfig
-	active           ActiveSessionState
-	activeOK         bool
-	cursor           int
-	mouseOver        bool
-	mode             string
-	message          string
-	action           homeAction
-	settingsCursor   int
-	formCursor       int
-	formTextCursor   int
-	formReturnMode   string
-	createName       string
-	createPassword   string
-	joinCode         string
-	deleteCode       string
-	deletePassword   string
-	nicknameValue    string
-	audioDeviceValue string
-	batchWindowValue string
-	backendURLValue  string
-	stopActiveOnExit bool
-	busy             bool
-	width            int
-	height           int
-	helpOpen         bool
-	doctorLines      []string
-	doctorOffset     int
-	doctorHover      string
-	codeHover        bool
-	launchUntil      time.Time
-	firstLaunch      bool
+	cfg                   CliksConfig
+	active                ActiveSessionState
+	activeOK              bool
+	cursor                int
+	mouseOver             bool
+	mode                  string
+	message               string
+	action                homeAction
+	settingsCursor        int
+	formCursor            int
+	formTextCursor        int
+	formReturnMode        string
+	createName            string
+	createPassword        string
+	joinCode              string
+	deleteCode            string
+	deletePassword        string
+	nicknameValue         string
+	audioDeviceValue      string
+	batchWindowValue      string
+	backendURLValue       string
+	stopActiveOnExit      bool
+	busy                  bool
+	width                 int
+	height                int
+	helpOpen              bool
+	doctorLines           []string
+	doctorOffset          int
+	doctorHover           string
+	doctorReturnMode      string
+	preferencesReturnMode string
+	codeHover             bool
+	launchStartedAt       time.Time
+	launchUntil           time.Time
+	firstLaunch           bool
+	onboardingPending     bool
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -202,11 +206,11 @@ func runHomeTUI(cfg CliksConfig) error {
 		cfg.LaunchSeen = true
 		_ = saveConfig(cfg)
 	}
-	launchDuration := 2 * time.Second
+	launchDuration := 3 * time.Second
 	if firstLaunch {
-		launchDuration = 24 * time.Second
+		launchDuration = 10 * time.Second
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -264,9 +268,7 @@ type launchTickMsg time.Time
 
 func (m homeModel) Init() tea.Cmd {
 	commands := []tea.Cmd{homeTick(), launchTick()}
-	if m.firstLaunch {
-		commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
-	}
+	commands = append(commands, welcomeSoundCmd(m.cfg.Listening, m.firstLaunch))
 	return tea.Batch(commands...)
 }
 
@@ -274,12 +276,26 @@ func launchTick() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg { return launchTickMsg(t) })
 }
 
-func welcomeSoundCmd(listening ListeningConfig) tea.Cmd {
+func welcomeSoundCmd(listening ListeningConfig, firstLaunch bool) tea.Cmd {
 	return func() tea.Msg {
 		audio := newAudioEngine(listening)
 		defer audio.Close()
 		_ = audio.preview()
+		if firstLaunch {
+			time.Sleep(350 * time.Millisecond)
+			_ = audio.preview()
+		}
 		return nil
+	}
+}
+
+func (m *homeModel) finishLaunch() {
+	m.launchUntil = time.Now()
+	if m.onboardingPending {
+		m.mode = "first-setup"
+		m.cursor = 0
+		m.mouseOver = false
+		m.message = "Choose a nickname, check permissions, or keep the safe defaults."
 	}
 }
 
@@ -289,6 +305,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Now().Before(m.launchUntil) {
 			return m, launchTick()
 		}
+		m.finishLaunch()
 		return m, nil
 	case homeTickMsg:
 		m.refreshRuntime()
@@ -337,7 +354,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if time.Now().Before(m.launchUntil) {
 			if msg.Type == tea.MouseLeft {
-				m.launchUntil = time.Now()
+				m.finishLaunch()
 			}
 			return m, nil
 		}
@@ -413,7 +430,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				return m, tea.Quit
 			case "enter", " ", "esc":
-				m.launchUntil = time.Now()
+				m.finishLaunch()
 			}
 			return m, nil
 		}
@@ -515,13 +532,14 @@ func (m homeModel) View() string {
 func (m homeModel) launchView() string {
 	width := maxInt(40, panelWidth(m.width))
 	height := maxInt(14, m.height-7)
-	remaining := time.Until(m.launchUntil)
-	frame := int(remaining.Milliseconds()/90) % 4
+	elapsed := time.Since(m.launchStartedAt)
+	frame := int(elapsed.Milliseconds()/90) % 4
 	dots := []string{"·", "· ·", "· · ·", "· · · ·"}[frame]
 	var lines []string
 	if m.firstLaunch {
+		burst := []string{"✦      ·      ✦", "·   ✦  ✦  ✦   ·", "✦ ·  ✹  · ✦", "·  ✦  ·  ✦  ·"}[frame]
 		lines = []string{
-			"                 ·       ·",
+			"              " + burst,
 			"            ·       ○ Mira       ·",
 			"        ·                         ·",
 			"      ○ Noor       [ YOU ]       ○ Sam",
@@ -529,9 +547,10 @@ func (m homeModel) launchView() string {
 			"            ·       ○ Kai        ·",
 			"",
 			"Your quiet coworking room is waking up",
+			"Hear the room. Send a signal. Never share key values.",
 		}
 	} else {
-		lines = []string{"[ YOU ]"}
+		lines = []string{"       ·   ✦   ·", "          [ YOU ]", "       ·   ✦   ·", "Opening your desk"}
 	}
 	lines = append(lines, "", dots)
 	content := styleAccent.Render(strings.Join(lines, "\n"))
@@ -614,7 +633,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.message = "Delete closes the live room for everyone using this code."
 	case "nickname":
 		returnMode := m.mode
-		if returnMode != "advanced" {
+		if returnMode != "advanced" && returnMode != "first-setup" {
 			returnMode = "team"
 		}
 		m.mode = "nickname"
@@ -649,7 +668,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.message = "100-2000 ms. The default 500 ms balances latency and network use."
 	case "backend-url":
 		returnMode := m.mode
-		if returnMode != "menu" && returnMode != "advanced" {
+		if returnMode != "menu" && returnMode != "advanced" && returnMode != "preferences" && returnMode != "first-setup" {
 			returnMode = "advanced"
 		}
 		m.mode = "backend-url"
@@ -673,10 +692,20 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.mode = "home"
 		m.cursor = 0
 		m.firstLaunch = true
-		m.launchUntil = time.Now().Add(24 * time.Second)
+		m.onboardingPending = true
+		m.launchStartedAt = time.Now()
+		m.launchUntil = m.launchStartedAt.Add(10 * time.Second)
 		m.message = "Factory reset complete. Welcome back to the beginning."
-		return m, tea.Batch(launchTick(), welcomeSoundCmd(m.cfg.Listening))
+		return m, tea.Batch(launchTick(), welcomeSoundCmd(m.cfg.Listening, true))
+	case "first-setup-done":
+		m.cfg.OnboardingSeen = true
+		_ = saveConfig(m.cfg)
+		m.onboardingPending = false
+		m.mode = "home"
+		m.cursor = 0
+		m.message = "Setup saved. Open Live when you are ready."
 	case "preferences":
+		m.preferencesReturnMode = m.mode
 		m.mode = "preferences"
 		m.settingsCursor = 0
 		m.mouseOver = false
@@ -701,9 +730,14 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		_ = saveConfig(m.cfg)
 		m.message = fmt.Sprintf("Selected %s.", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "no team"))
 	case "setup":
+		m.doctorReturnMode = m.mode
 		m.busy = true
 		m.message = "Running easy setup..."
 		return m, setupSummaryCmd()
+	case "notification-test":
+		m.busy = true
+		m.message = "Sending a native test notification..."
+		return m, notificationSetupCmd()
 	case "doctor":
 		m.busy = true
 		m.message = "Checking setup..."
@@ -765,6 +799,15 @@ func (m *homeModel) changeSetting(delta int) {
 		return
 	}
 	row := rows[m.settingsCursor]
+	if row.label == "Server" {
+		m.mode = "backend-url"
+		m.formCursor = 0
+		m.formReturnMode = "preferences"
+		m.backendURLValue = m.cfg.APIURL
+		m.moveFormTextCursorToEnd()
+		m.message = "Paste a self-hosted http(s) URL, or type public."
+		return
+	}
 	row.apply(&m.cfg, delta)
 	applyTheme(m.cfg.Theme)
 	_ = saveConfig(m.cfg)
@@ -1035,6 +1078,15 @@ func (m homeModel) items() []homeItem {
 			{key: "diagnostics", label: "Diagnostics", help: "sound test and setup check"},
 			{key: "back", label: "Back", help: "return to the greeting screen"},
 		}
+	case "first-setup":
+		return []homeItem{
+			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "so A teammate can finally retire")},
+			{key: "setup", label: "Permissions", help: "open OS steps; key values are not invited"},
+			{key: "notification-test", label: "Test Notifications", help: "send yourself one polite interruption"},
+			{key: "preferences", label: "Preferences", help: "notifications, sound, sharing, theme, and server"},
+			{key: "backend-url", label: "Server", help: backendSummary(m.cfg)},
+			{key: "first-setup-done", label: "Continue", help: "safe defaults included; office coffee is not"},
+		}
 	case "team":
 		return []homeItem{
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
@@ -1056,6 +1108,7 @@ func (m homeModel) items() []homeItem {
 		return []homeItem{
 			{key: "setup", label: "Easy Setup", help: "one-time sound + capture setup"},
 			{key: "sound", label: "Sound Test", help: "play keyboard and mouse samples"},
+			{key: "notification-test", label: "Notification Test", help: "send one native notification through this OS"},
 			{key: "doctor", label: "Doctor", help: "quick setup and permission check"},
 			{key: "back", label: "Back", help: "return to the menu"},
 		}
@@ -1103,6 +1156,8 @@ func (m homeModel) viewHeader() (string, string) {
 	switch m.mode {
 	case "menu":
 		return "More", "Everything here stays in this control screen."
+	case "first-setup":
+		return "Make Cliks yours", "A quick setup. No meeting about the setup."
 	case "team":
 		return "Team", fmt.Sprintf("Selected: %s", valuePlain(teamLabel(m.cfg, m.cfg.CurrentTeamCode), "not joined"))
 	case "connection":
@@ -1245,9 +1300,12 @@ func (m *homeModel) back() {
 	fromDoctorReport := m.mode == "doctor-report"
 	switch m.mode {
 	case "doctor-report":
-		m.mode = "diagnostics"
+		m.mode = valuePlain(m.doctorReturnMode, "diagnostics")
 		m.cursor = 0
-	case "team", "connection", "diagnostics", "preferences", "advanced", "factory-reset":
+	case "preferences":
+		m.mode = valuePlain(m.preferencesReturnMode, "menu")
+		m.cursor = 0
+	case "team", "connection", "diagnostics", "advanced", "factory-reset":
 		m.mode = "menu"
 		m.cursor = 0
 	default:
@@ -1257,7 +1315,7 @@ func (m *homeModel) back() {
 	m.mouseOver = false
 	m.message = welcomeMessage(m.cfg)
 	if fromDoctorReport {
-		m.message = "Check sound or run the setup report again."
+		m.message = "Setup check complete. You can continue or adjust another option."
 	}
 }
 
@@ -1461,6 +1519,12 @@ type settingRow struct {
 
 func settingsRows(cfg CliksConfig) []settingRow {
 	return []settingRow{
+		{"Server", "open URL editor; reconnect required", func(c CliksConfig) string {
+			if usesPublicBackend(c) {
+				return "public"
+			}
+			return "self-hosted"
+		}, func(_ *CliksConfig, _ int) {}},
 		{"Volume", "overall loudness", func(c CliksConfig) string { return bar(c.Listening.Volume) }, func(c *CliksConfig, d int) {
 			c.Listening.Volume = clamp(c.Listening.Volume+float64(d)*0.05, 0, 1)
 			c.Listening.Muted = false
@@ -1949,6 +2013,22 @@ func soundTestCmd() tea.Cmd {
 	}
 }
 
+func notificationSetupCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg := loadConfig()
+		cfg.Notifications.Enabled = true
+		cfg.Notifications.Configured = true
+		if err := saveConfig(cfg); err != nil {
+			return commandDoneMsg{err: err}
+		}
+		title, body := reactionNotificationContent("Mira", "wave")
+		if err := sendNativeNotification(title, "Example: "+body, cfg.Notifications.Sound); err != nil {
+			return commandDoneMsg{err: fmt.Errorf("notification test failed: %w", err)}
+		}
+		return commandDoneMsg{message: "Notification delivered. Incoming signals are enabled."}
+	}
+}
+
 func doctorSummaryCmd() tea.Cmd {
 	return func() tea.Msg {
 		report := buildDoctorReport(loadConfig())
@@ -1998,6 +2078,7 @@ func cycleTeam(cfg *CliksConfig, delta int) {
 
 type sessionUpdateMsg SessionViewState
 type sessionTickMsg time.Time
+type notificationTestMsg struct{ err error }
 
 type sessionModel struct {
 	controller     *sessionController
@@ -2044,6 +2125,13 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.now = time.Time(msg)
 		m.state = m.controller.viewState()
 		return m, sessionTick()
+	case notificationTestMsg:
+		if msg.err != nil {
+			m.message = "Notification failed: " + msg.err.Error() + ". Run cliks notification-test."
+		} else {
+			m.message = "Notification delivered. Incoming signals will appear here too."
+		}
+		return m, nil
 	case tea.MouseMsg:
 		if m.helpOpen {
 			return m, nil
@@ -2163,6 +2251,8 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendLiveReaction("coffee")
 		case "4":
 			m.sendLiveReaction("celebrate")
+		case "5":
+			m.sendLiveReaction("break")
 		case "p":
 			m.controller.cyclePresence()
 		case "tab", "S":
@@ -2244,15 +2334,24 @@ func (m sessionModel) renderSpatialDesk(width int, height int) string {
 		}
 	}
 	put(cx-3, cy, "[ YOU ]")
+	var latestReaction *PeerReactionStatus
 	if len(m.state.RecentReactions) > 0 {
-		reaction := m.state.RecentReactions[len(m.state.RecentReactions)-1]
-		if m.now.Sub(reaction.At) < 4*time.Second {
+		reaction := &m.state.RecentReactions[len(m.state.RecentReactions)-1]
+		if m.now.Sub(reaction.At) < 5*time.Second {
+			latestReaction = reaction
 			name := valuePlain(sanitizeNickname(reaction.Nickname), "Someone")
-			bubble := reactionGlyph(reaction.Reaction) + "  " + name
-			if (m.now.UnixMilli()/300)%2 == 0 {
-				bubble = "✦ " + bubble + " ✦"
+			if reaction.PeerID == m.state.OwnPeerID {
+				name = "You"
 			}
-			put(cx-len([]rune(bubble))/2, maxInt(1, cy-3), bubble)
+			message := name + "  " + reactionGlyph(reaction.Reaction) + "  " + reactionPhrase(reaction.Reaction)
+			put(cx-len([]rune(message))/2, 1, message)
+			if reaction.PeerID == m.state.OwnPeerID {
+				burst := reactionGlyph(reaction.Reaction)
+				if (m.now.UnixMilli()/250)%2 == 0 {
+					burst = "✦ " + burst + " ✦"
+				}
+				put(cx-len([]rune(burst))/2, maxInt(2, cy-2), burst)
+			}
 		}
 	}
 	peers := sortedRemotePeers(m.state)
@@ -2289,6 +2388,15 @@ func (m sessionModel) renderSpatialDesk(width int, height int) string {
 		}
 		label := marker + " " + truncateRunes(name, 10)
 		put(x-len([]rune(label))/2, y, label)
+		if latestReaction != nil && latestReaction.PeerID == peer.PeerID {
+			burst := reactionGlyph(latestReaction.Reaction)
+			if (m.now.UnixMilli()/250)%2 == 0 {
+				burst = "· " + burst + " ✦"
+			} else {
+				burst = "✦ " + burst + " ·"
+			}
+			put(x-len([]rune(burst))/2, maxInt(2, y-1), burst)
+		}
 	}
 	if len(peers) > visible {
 		extra := len(peers) - visible
@@ -2337,13 +2445,15 @@ func reactionGlyph(value string) string {
 	case "wave":
 		return "👋"
 	case "nice":
-		return "★"
+		return "👍"
 	case "coffee":
 		return "☕"
 	case "focus":
-		return "◎"
+		return "🎯"
 	case "celebrate":
-		return "✦"
+		return "🎉"
+	case "break":
+		return "🧘"
 	}
 	return "•"
 }
@@ -2351,11 +2461,6 @@ func reactionGlyph(value string) string {
 func (m sessionModel) liveActivityView(width int) string {
 	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
-	selected := "No teammate yet"
-	if peers := sortedRemotePeers(m.state); len(peers) > 0 {
-		peer := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
-		selected = valuePlain(peer.Nickname, "Teammate")
-	}
 	lines := []string{
 		styleAccent.Render(valuePlain(team, "Your room")),
 		m.liveActionLine("copy-code", code+"  COPY"),
@@ -2370,9 +2475,10 @@ func (m sessionModel) liveActivityView(width int) string {
 		m.liveActionLine("notification-sound", "Notify sound   "+onOff(m.controller.cfg.Notifications.Sound)),
 		m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial)),
 		"",
-		styleAccent.Render("Send to ") + m.liveActionLine("select-prev", "‹") + " " + selected + " " + m.liveActionLine("select-next", "›"),
-		m.liveActionLine("reaction-wave", "👋 Wave") + "    " + m.liveActionLine("reaction-nice", "★ Nice"),
-		m.liveActionLine("reaction-coffee", "☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "✦ Celebrate"),
+		styleAccent.Render("Quick signals"),
+		m.liveActionLine("reaction-wave", "👋 Wave") + "    " + m.liveActionLine("reaction-nice", "👍 Nice"),
+		m.liveActionLine("reaction-coffee", "☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "🎉 Celebrate"),
+		m.liveActionLine("reaction-break", "🧘 Break"),
 		"",
 		m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop"),
 	}
@@ -2393,18 +2499,16 @@ func (m sessionModel) liveActionLine(action string, label string) string {
 func (m *sessionModel) sendLiveReaction(reaction string) {
 	peers := sortedRemotePeers(m.state)
 	target := ""
-	targetName := "the room"
 	if len(peers) > 0 {
 		peer := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
 		target = peer.PeerID
-		targetName = valuePlain(sanitizeNickname(peer.Nickname), "your teammate")
 	}
 	if reaction == "wave" && target == "" {
 		m.message = "Choose a teammate before waving."
 		return
 	}
 	m.controller.sendReaction(reaction, target)
-	m.message = "Sent " + reactionGlyph(reaction) + " to " + targetName
+	m.message = "Sent " + reactionGlyph(reaction) + "  " + reactionPhrase(reaction)
 }
 
 func (m sessionModel) liveHit(x int, y int) string {
@@ -2416,48 +2520,61 @@ func (m sessionModel) liveHit(x int, y int) string {
 		return ""
 	}
 	mapWidth := int(float64(width) * 0.68)
-	railX := mapWidth + 4
-	if x < railX {
+	contentX := lipgloss.Width(stylePanel.Width(mapWidth).Render("")) + 5
+	if x < contentX {
 		return ""
 	}
-	relativeX := x - railX
-	contentTop := 3
+	// Header plus the panel border and top padding place the first rail row at y=5.
+	// Keep this tied to the rendered panel so hover and click land on the text itself.
+	contentTop := 5
 	switch y - contentTop {
 	case 1:
-		return "copy-code"
+		return inlineLiveHit(x, contentX, []liveHitTarget{{"copy-code", valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode) + "  COPY", 0}})
+	case 9:
+		return inlineLiveHit(x, contentX, []liveHitTarget{{"notifications", "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled), 0}})
 	case 10:
-		return "notifications"
+		return inlineLiveHit(x, contentX, []liveHitTarget{{"notification-sound", "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound), 0}})
 	case 11:
-		return "notification-sound"
-	case 12:
-		if relativeX < maxInt(12, (width-mapWidth)/2) {
-			return "mute"
-		}
-		return "spatial"
+		return inlineLiveHit(x, contentX, []liveHitTarget{
+			{"mute", "Mute " + onOff(m.state.Listening.Muted), 3},
+			{"spatial", "Spatial " + onOff(m.state.Listening.Spatial), 0},
+		})
 	case 14:
-		if relativeX < maxInt(12, (width-mapWidth)/2) {
-			return "select-prev"
-		}
-		return "select-next"
+		return inlineLiveHit(x, contentX, []liveHitTarget{
+			{"reaction-wave", "👋 Wave", 4},
+			{"reaction-nice", "👍 Nice", 0},
+		})
 	case 15:
-		if relativeX < maxInt(12, (width-mapWidth)/2) {
-			return "reaction-wave"
-		}
-		return "reaction-nice"
+		return inlineLiveHit(x, contentX, []liveHitTarget{
+			{"reaction-coffee", "☕ Coffee", 2},
+			{"reaction-celebrate", "🎉 Celebrate", 0},
+		})
 	case 16:
-		if relativeX < maxInt(12, (width-mapWidth)/2) {
-			return "reaction-coffee"
-		}
-		return "reaction-celebrate"
+		return inlineLiveHit(x, contentX, []liveHitTarget{{"reaction-break", "🧘 Break", 0}})
 	case 18:
-		railWidth := maxInt(18, width-mapWidth-2)
-		if relativeX < railWidth/3 {
-			return "prefs"
+		return inlineLiveHit(x, contentX, []liveHitTarget{
+			{"prefs", "Preferences", 3},
+			{"back", "Back", 3},
+			{"stop", "Stop", 0},
+		})
+	}
+	return ""
+}
+
+type liveHitTarget struct {
+	action string
+	label  string
+	gap    int
+}
+
+func inlineLiveHit(x int, startX int, targets []liveHitTarget) string {
+	cursor := startX
+	for _, target := range targets {
+		width := ansi.StringWidth("[ " + target.label + " ]")
+		if x >= cursor && x < cursor+width {
+			return target.action
 		}
-		if relativeX < 2*railWidth/3 {
-			return "back"
-		}
-		return "stop"
+		cursor += width + target.gap
 	}
 	return ""
 }
@@ -2471,6 +2588,12 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		m.controller.cfg.Notifications.Configured = true
 		_ = saveConfig(m.controller.cfg)
 		m.message = "Notifications " + onOff(m.controller.cfg.Notifications.Enabled)
+		if m.controller.cfg.Notifications.Enabled {
+			cfg := m.controller.cfg
+			return m, func() tea.Msg {
+				return notificationTestMsg{err: sendNativeNotification("Cliks test 👋 Notifications are on", "Quick signals will appear here.", cfg.Notifications.Sound)}
+			}
+		}
 	case "notification-sound":
 		m.controller.cfg.Notifications.Sound = !m.controller.cfg.Notifications.Sound
 		m.controller.cfg.Notifications.Configured = true
@@ -2492,6 +2615,8 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		m.sendLiveReaction("coffee")
 	case "reaction-celebrate":
 		m.sendLiveReaction("celebrate")
+	case "reaction-break":
+		m.sendLiveReaction("break")
 	case "prefs":
 		m.mode = "settings"
 		m.settingsCursor = 0
@@ -2540,6 +2665,10 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 	}
 	previousStatus := m.controller.cfg.PresenceStatus
 	row := rows[m.settingsCursor]
+	if row.label == "Server" {
+		m.message = "Server changes reconnect the room. Return to the main screen → More → Server."
+		return
+	}
 	row.apply(&m.controller.cfg, delta)
 	applyTheme(m.controller.cfg.Theme)
 	_ = saveConfig(m.controller.cfg)
@@ -2579,6 +2708,9 @@ func (m sessionModel) sessionSettingsView() string {
 		footer = fmt.Sprintf("Showing %d-%d of %d. Up/down reveals more. Tab/Esc/q returns.", start+1, end, len(rows))
 	}
 	lines = append(lines, styleDim.Render(footer))
+	if m.message != "" {
+		lines = append(lines, styleDim.Render(m.message))
+	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		styleTitle.Render("Cliks Preferences"),
 		stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n")),

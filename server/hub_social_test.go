@@ -70,6 +70,11 @@ func TestRoomReactionBroadcastAndAllowlist(t *testing.T) {
 		t.Fatalf("reaction = %v, want celebrate", got)
 	}
 
+	writeTestJSON(t, sender, map[string]any{"type": "reaction", "reaction": "break"})
+	if got := readUntilType(t, recipient, "peer_reaction")["reaction"]; got != "break" {
+		t.Fatalf("reaction = %v, want break", got)
+	}
+
 	writeTestJSON(t, sender, map[string]any{"type": "reaction", "reaction": "arbitrary-untrusted-value"})
 	_ = recipient.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
 	if _, _, err := recipient.ReadMessage(); err == nil {
