@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -461,6 +461,14 @@ func cmdSet(args []string) error {
 		default:
 			return fmt.Errorf("presence must be available, focus, break, or dnd")
 		}
+	case "theme":
+		theme := strings.ToLower(strings.TrimSpace(value))
+		switch theme {
+		case "ember", "ocean", "mono":
+			cfg.Theme = theme
+		default:
+			return fmt.Errorf("theme must be ember, ocean, or mono")
+		}
 	case "spatial.dynamic":
 		cfg.Listening.DynamicPlacement = boolValue
 	case "keep.running":
@@ -482,6 +490,9 @@ func cmdSet(args []string) error {
 		if err != nil {
 			return err
 		}
+		if usesPublicBackend(cfg) && parsed != 500 {
+			return fmt.Errorf("the public Cliks relay is fixed at 500 ms to protect shared capacity; choose a self-hosted Server in the TUI or run cliks set api.url https://your-server before using 100-2000 ms")
+		}
 		if parsed < 100 {
 			parsed = 100
 		}
@@ -502,8 +513,15 @@ func cmdSet(args []string) error {
 		}
 		cfg.Listening.AudioDevice = device
 	case "api.url":
-		cfg.APIURL = strings.TrimRight(value, "/")
+		backend, err := normalizeBackendURL(value)
+		if err != nil {
+			return err
+		}
+		cfg.APIURL = backend
 		cfg.WSURL = toWSURL(cfg.APIURL)
+		if usesPublicBackend(cfg) {
+			cfg.BatchWindowMs = 500
+		}
 	case "ws.url":
 		cfg.WSURL = value
 	case "nickname", "name":

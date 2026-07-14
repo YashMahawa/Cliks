@@ -24,13 +24,17 @@ import (
 const (
 	codeAlphabet            = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	dummyDeletePasswordHash = "$2b$12$mMCOaGsqrw5HVe4PboZEdeKqkZZSrer3p4/KmwcbXB0YraVftIwf."
+	teamIdleTTL             = 48 * time.Hour
 )
+
+var errTeamUnavailable = errors.New("team unavailable")
 
 type Team struct {
 	ID        string `json:"id"`
 	Code      string `json:"code"`
 	Name      string `json:"name"`
 	CreatedAt string `json:"createdAt"`
+	ExpiresAt string `json:"expiresAt"`
 }
 
 type CreateTeamInput struct {
@@ -47,6 +51,11 @@ type TeamStore interface {
 	CreateTeam(context.Context, CreateTeamInput) (Team, error)
 	GetTeamByCode(context.Context, string) (*Team, error)
 	DeleteTeam(context.Context, DeleteTeamInput) (bool, error)
+}
+
+type TeamActivityStore interface {
+	TouchTeam(context.Context, string) error
+	ExpireInactiveTeams(context.Context, time.Time) ([]string, error)
 }
 
 func createTeamStoreFromEnv() (TeamStore, error) {
@@ -92,6 +101,10 @@ func (s *PostgresTeamStore) init(ctx context.Context) error {
 			deleted_at timestamptz
 		)`,
 		`alter table cliks_teams drop constraint if exists cliks_teams_code_key`,
+		`alter table cliks_teams add column if not exists last_connected_at timestamptz`,
+		`update cliks_teams set last_connected_at = created_at where last_connected_at is null`,
+		`alter table cliks_teams alter column last_connected_at set default now()`,
+		`alter table cliks_teams alter column last_connected_at set not null`,
 		`create unique index if not exists cliks_teams_code_active_idx
 			on cliks_teams (code)
 			where deleted_at is null`,
@@ -116,9 +129,9 @@ func (s *PostgresTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 		err := s.db.QueryRowContext(ctx,
 			`insert into cliks_teams (id, code, name, delete_password_hash)
 			 values ($1, $2, $3, $4)
-			 returning id, code, name, created_at`,
+			 returning id, code, name, created_at, last_connected_at`,
 			id, code, input.Name, string(hash),
-		).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt)
+		).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt)
 		if err == nil {
 			return row.toTeam(), nil
 		}
@@ -133,12 +146,12 @@ func (s *PostgresTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 func (s *PostgresTeamStore) GetTeamByCode(ctx context.Context, code string) (*Team, error) {
 	var row postgresTeamRow
 	err := s.db.QueryRowContext(ctx,
-		`select id, code, name, created_at
+		`select id, code, name, created_at, last_connected_at
 		 from cliks_teams
-		 where code = $1 and deleted_at is null
+		 where code = $1 and deleted_at is null and last_connected_at > now() - interval '48 hours'
 		 limit 1`,
 		normalizeTeamCode(code),
-	).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt)
+	).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -147,6 +160,34 @@ func (s *PostgresTeamStore) GetTeamByCode(ctx context.Context, code string) (*Te
 	}
 	team := row.toTeam()
 	return &team, nil
+}
+
+func (s *PostgresTeamStore) TouchTeam(ctx context.Context, code string) error {
+	result, err := s.db.ExecContext(ctx, `update cliks_teams set last_connected_at = now() where code = $1 and deleted_at is null`, normalizeTeamCode(code))
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		return errTeamUnavailable
+	}
+	return nil
+}
+
+func (s *PostgresTeamStore) ExpireInactiveTeams(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `update cliks_teams set deleted_at = now() where deleted_at is null and last_connected_at <= $1 returning code`, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var codes []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		codes = append(codes, code)
+	}
+	return codes, rows.Err()
 }
 
 func (s *PostgresTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInput) (bool, error) {
@@ -174,10 +215,11 @@ func (s *PostgresTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInpu
 }
 
 type postgresTeamRow struct {
-	ID        string
-	Code      string
-	Name      string
-	CreatedAt time.Time
+	ID              string
+	Code            string
+	Name            string
+	CreatedAt       time.Time
+	LastConnectedAt time.Time
 }
 
 func (r postgresTeamRow) toTeam() Team {
@@ -186,6 +228,7 @@ func (r postgresTeamRow) toTeam() Team {
 		Code:      r.Code,
 		Name:      r.Name,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ExpiresAt: r.LastConnectedAt.Add(teamIdleTTL).UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -209,6 +252,7 @@ func NewMemoryTeamStore() *MemoryTeamStore {
 			Code:      "CLIK-LOCAL",
 			Name:      "Local Test Room",
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ExpiresAt: time.Now().UTC().Add(teamIdleTTL).Format(time.RFC3339Nano),
 		},
 		DeletePasswordHash: string(hash),
 	}
@@ -227,9 +271,40 @@ func (s *MemoryTeamStore) CreateTeam(ctx context.Context, input CreateTeamInput)
 	for s.teams[code].DeletedAt == "" && s.teams[code].Code != "" {
 		code = makeCode()
 	}
-	team := Team{ID: newUUID(), Code: code, Name: input.Name, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	now := time.Now().UTC()
+	team := Team{ID: newUUID(), Code: code, Name: input.Name, CreatedAt: now.Format(time.RFC3339Nano), ExpiresAt: now.Add(teamIdleTTL).Format(time.RFC3339Nano)}
 	s.teams[code] = memoryTeam{Team: team, DeletePasswordHash: string(hash)}
 	return team, nil
+}
+
+func (s *MemoryTeamStore) TouchTeam(ctx context.Context, code string) error {
+	_ = ctx
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := normalizeTeamCode(code)
+	team := s.teams[key]
+	if team.Code == "" || team.DeletedAt != "" {
+		return errTeamUnavailable
+	}
+	team.ExpiresAt = time.Now().UTC().Add(teamIdleTTL).Format(time.RFC3339Nano)
+	s.teams[key] = team
+	return nil
+}
+
+func (s *MemoryTeamStore) ExpireInactiveTeams(ctx context.Context, before time.Time) ([]string, error) {
+	_ = ctx
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var codes []string
+	for code, team := range s.teams {
+		expires, err := time.Parse(time.RFC3339Nano, team.ExpiresAt)
+		if team.DeletedAt == "" && err == nil && !expires.After(before.Add(teamIdleTTL)) {
+			team.DeletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			s.teams[code] = team
+			codes = append(codes, code)
+		}
+	}
+	return codes, nil
 }
 
 func (s *MemoryTeamStore) GetTeamByCode(ctx context.Context, code string) (*Team, error) {
@@ -288,7 +363,7 @@ func (s *SupabaseTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 	for attempt := 0; attempt < 8; attempt++ {
 		code := makeCode()
 		var rows []supabaseTeamRow
-		err := s.rest(ctx, http.MethodPost, "/rest/v1/cliks_teams?select=id,code,name,created_at", map[string]string{
+		err := s.rest(ctx, http.MethodPost, "/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at", map[string]string{
 			"code":                 code,
 			"name":                 input.Name,
 			"delete_password_hash": string(hash),
@@ -308,7 +383,8 @@ func (s *SupabaseTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 }
 
 func (s *SupabaseTeamStore) GetTeamByCode(ctx context.Context, code string) (*Team, error) {
-	query := fmt.Sprintf("/rest/v1/cliks_teams?select=id,code,name,created_at&code=eq.%s&deleted_at=is.null&limit=1", url.QueryEscape(normalizeTeamCode(code)))
+	cutoff := url.QueryEscape(time.Now().UTC().Add(-teamIdleTTL).Format(time.RFC3339Nano))
+	query := fmt.Sprintf("/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at&code=eq.%s&deleted_at=is.null&last_connected_at=gt.%s&limit=1", url.QueryEscape(normalizeTeamCode(code)), cutoff)
 	var rows []supabaseTeamRow
 	if err := s.rest(ctx, http.MethodGet, query, nil, &rows, ""); err != nil {
 		return nil, err
@@ -318,6 +394,35 @@ func (s *SupabaseTeamStore) GetTeamByCode(ctx context.Context, code string) (*Te
 	}
 	team := rows[0].toTeam()
 	return &team, nil
+}
+
+func (s *SupabaseTeamStore) TouchTeam(ctx context.Context, code string) error {
+	path := fmt.Sprintf("/rest/v1/cliks_teams?select=code&code=eq.%s&deleted_at=is.null", url.QueryEscape(normalizeTeamCode(code)))
+	var rows []struct {
+		Code string `json:"code"`
+	}
+	if err := s.rest(ctx, http.MethodPatch, path, map[string]string{"last_connected_at": time.Now().UTC().Format(time.RFC3339Nano)}, &rows, "return=representation"); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return errTeamUnavailable
+	}
+	return nil
+}
+
+func (s *SupabaseTeamStore) ExpireInactiveTeams(ctx context.Context, before time.Time) ([]string, error) {
+	path := fmt.Sprintf("/rest/v1/cliks_teams?select=code&deleted_at=is.null&last_connected_at=lte.%s", url.QueryEscape(before.UTC().Format(time.RFC3339Nano)))
+	var rows []struct {
+		Code string `json:"code"`
+	}
+	if err := s.rest(ctx, http.MethodPatch, path, map[string]string{"deleted_at": time.Now().UTC().Format(time.RFC3339Nano)}, &rows, "return=representation"); err != nil {
+		return nil, err
+	}
+	codes := make([]string, 0, len(rows))
+	for _, row := range rows {
+		codes = append(codes, row.Code)
+	}
+	return codes, nil
 }
 
 func (s *SupabaseTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInput) (bool, error) {
@@ -381,10 +486,11 @@ func (s *SupabaseTeamStore) rest(ctx context.Context, method string, path string
 }
 
 type supabaseTeamRow struct {
-	ID        string `json:"id"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"created_at"`
+	ID              string `json:"id"`
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	CreatedAt       string `json:"created_at"`
+	LastConnectedAt string `json:"last_connected_at"`
 }
 
 func (r supabaseTeamRow) toTeam() Team {
@@ -392,7 +498,11 @@ func (r supabaseTeamRow) toTeam() Team {
 	if parsed, err := time.Parse(time.RFC3339Nano, created); err == nil {
 		created = parsed.UTC().Format(time.RFC3339Nano)
 	}
-	return Team{ID: r.ID, Code: r.Code, Name: r.Name, CreatedAt: created}
+	lastConnected := r.LastConnectedAt
+	if parsed, err := time.Parse(time.RFC3339Nano, lastConnected); err == nil {
+		lastConnected = parsed.UTC().Add(teamIdleTTL).Format(time.RFC3339Nano)
+	}
+	return Team{ID: r.ID, Code: r.Code, Name: r.Name, CreatedAt: created, ExpiresAt: lastConnected}
 }
 
 func makeCode() string {

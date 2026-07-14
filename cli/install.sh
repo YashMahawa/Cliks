@@ -7,6 +7,7 @@ REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.3.1}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
 if [ -z "$AUTO_YES" ]; then
@@ -44,8 +45,19 @@ say ""
 # Prefer a small native release. Source compilation remains a fallback for
 # unreleased branches and unusual architectures.
 PREBUILT=0
+version_at_least() {
+  awk -v got="$1" -v need="$2" 'BEGIN {
+    split(got, g, "."); split(need, n, ".");
+    for (i = 1; i <= 3; i++) {
+      g[i] += 0; n[i] += 0;
+      if (g[i] > n[i]) exit 0;
+      if (g[i] < n[i]) exit 1;
+    }
+    exit 0;
+  }'
+}
 install_prebuilt() {
-  local os arch asset url tmp
+  local os arch asset url tmp downloaded_version
   case "$(uname -s)" in
     Darwin) os="macos" ;;
     Linux) os="linux" ;;
@@ -61,6 +73,12 @@ install_prebuilt() {
   tmp="$(mktemp -d 2>/dev/null || mktemp -d -t cliks)"
   if curl -fL --retry 2 --connect-timeout 10 "$url" -o "$tmp/$asset" 2>/dev/null && \
      tar -xzf "$tmp/$asset" -C "$tmp" && [ -x "$tmp/cliks" ]; then
+    downloaded_version="$($tmp/cliks version 2>/dev/null || true)"
+    if ! version_at_least "$downloaded_version" "$REQUIRED_VERSION"; then
+      tip "Latest release is Cliks ${downloaded_version:-unknown}; ${REQUIRED_VERSION}+ is required for embedded sounds — using source fallback"
+      rm -rf "$tmp"
+      return 1
+    fi
     mkdir -p "$BIN_DIR"
     install -m 755 "$tmp/cliks" "$BIN_DIR/cliks"
     PREBUILT=1
@@ -286,6 +304,14 @@ ensure_path_export() {
 export PATH="$BIN_DIR:$PATH"
 ensure_path_export
 ok "Command: $BIN_DIR/cliks"
+
+installed_version="$($BIN_DIR/cliks version 2>/dev/null || true)"
+if ! version_at_least "$installed_version" "$REQUIRED_VERSION"; then
+  say "Install stopped: Cliks ${REQUIRED_VERSION}+ is required, but ${installed_version:-an unknown version} was installed."
+  say "The updater will not silently leave the broken non-embedded sound build in place."
+  exit 1
+fi
+ok "Version $installed_version (bundled sounds included)"
 
 "$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND" >/dev/null 2>&1 || true
 

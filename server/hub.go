@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -93,6 +96,7 @@ type RoomHub struct {
 	joinRate  *rateLimiter
 	gateMu    sync.Mutex
 	teamGates map[string]*teamGate
+	maxPeers  int
 }
 
 func NewRoomHub(store TeamStore, joinLimiters ...*rateLimiter) *RoomHub {
@@ -104,6 +108,7 @@ func NewRoomHub(store TeamStore, joinLimiters ...*rateLimiter) *RoomHub {
 		conns:     map[string]*clientConn{},
 		rooms:     map[string]*room{},
 		teamGates: map[string]*teamGate{},
+		maxPeers:  configuredMaxPeers(),
 	}
 	if len(joinLimiters) > 0 {
 		hub.joinRate = joinLimiters[0]
@@ -112,6 +117,17 @@ func NewRoomHub(store TeamStore, joinLimiters ...*rateLimiter) *RoomHub {
 		hub.joinRate = newRateLimiter(5*time.Minute, 20)
 	}
 	return hub
+}
+
+func configuredMaxPeers() int {
+	value, err := strconv.Atoi(os.Getenv("CLIKS_MAX_PEERS_PER_ROOM"))
+	if err != nil || value < 2 {
+		return maxPeersPerRoom
+	}
+	if value > 200 {
+		return 200
+	}
+	return value
 }
 
 func (h *RoomHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +254,17 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 		h.rejectUnavailableJoin(conn, teamCode)
 		return
 	}
+	if activityStore, ok := h.store.(TeamActivityStore); ok {
+		if err := activityStore.TouchTeam(ctx, team.Code); err != nil {
+			if errors.Is(err, errTeamUnavailable) {
+				h.rejectUnavailableJoin(conn, teamCode)
+				return
+			}
+			conn.sendJSONAndClose(serverError("Could not refresh team. Please retry."))
+			return
+		}
+		team.ExpiresAt = time.Now().Add(teamIdleTTL).UTC().Format(time.RFC3339Nano)
+	}
 
 	joinedAt := time.Now().UnixMilli()
 	p := &peer{
@@ -260,9 +287,9 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 		currentRoom = &room{team: *team, peers: map[string]*peer{}}
 		h.rooms[team.Code] = currentRoom
 	}
-	if len(currentRoom.peers) >= maxPeersPerRoom && currentRoom.peers[p.id] == nil {
+	if len(currentRoom.peers) >= h.maxPeers && currentRoom.peers[p.id] == nil {
 		h.mu.Unlock()
-		conn.sendJSONAndClose(roomFullPayload())
+		conn.sendJSONAndClose(roomFullPayload(h.maxPeers))
 		return
 	}
 	if previousCode := conn.roomCode; previousCode != "" && previousCode != team.Code {
@@ -440,6 +467,16 @@ func (h *RoomHub) closeRoom(teamCode string, message string) {
 	for _, p := range peers {
 		p.conn.sendJSONAndClose(payload)
 	}
+}
+
+func (h *RoomHub) ActiveTeamCodes() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	codes := make([]string, 0, len(h.rooms))
+	for code := range h.rooms {
+		codes = append(codes, code)
+	}
+	return codes
 }
 
 func (h *RoomHub) lockTeam(teamCode string) func() {

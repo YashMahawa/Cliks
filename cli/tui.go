@@ -19,12 +19,12 @@ import (
 )
 
 var (
-	colorAccent = lipgloss.AdaptiveColor{Light: "#006D7D", Dark: "#33D6E8"}
+	colorAccent = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
 	colorDim    = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
 	colorWarn   = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
 	colorOK     = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
-	colorPanel  = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#159BB5"}
-	colorSelect = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#33D6E8"}
+	colorPanel  = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
+	colorSelect = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
 	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
 
 	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
@@ -36,6 +36,34 @@ var (
 	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
 	styleFocused  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 )
+
+func applyTheme(theme string) {
+	switch theme {
+	case "ocean":
+		colorAccent = lipgloss.AdaptiveColor{Light: "#006D7D", Dark: "#33D6E8"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#159BB5"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#33D6E8"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
+	case "mono":
+		colorAccent = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#8A8A8A"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#111111"}
+	default:
+		colorAccent = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#11100F"}
+	}
+	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
+	styleAccent = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleDim = lipgloss.NewStyle().Foreground(colorDim)
+	styleWarn = lipgloss.NewStyle().Foreground(colorWarn)
+	styleOK = lipgloss.NewStyle().Foreground(colorOK)
+	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(1, 2)
+	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
+	styleFocused = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+}
 
 type shortcutHelp struct {
 	keys        string
@@ -134,6 +162,7 @@ type homeModel struct {
 	nicknameValue    string
 	audioDeviceValue string
 	batchWindowValue string
+	backendURLValue  string
 	stopActiveOnExit bool
 	busy             bool
 	width            int
@@ -142,6 +171,9 @@ type homeModel struct {
 	doctorLines      []string
 	doctorOffset     int
 	doctorHover      string
+	codeHover        bool
+	launchUntil      time.Time
+	firstLaunch      bool
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -149,6 +181,7 @@ func runHomeTUI(cfg CliksConfig) error {
 		printHelp("cliks")
 		return nil
 	}
+	applyTheme(cfg.Theme)
 	ctx, stopSignals := tuiSignalContext(context.Background())
 	defer stopSignals()
 	deferredMessage := consumeDeferredStopIfNeeded()
@@ -163,7 +196,17 @@ func runHomeTUI(cfg CliksConfig) error {
 			active, activeOK = activeSession()
 		}
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active)}
+	now := time.Now()
+	firstLaunch := !cfg.LaunchSeen
+	if firstLaunch {
+		cfg.LaunchSeen = true
+		_ = saveConfig(cfg)
+	}
+	launchDuration := 2 * time.Second
+	if firstLaunch {
+		launchDuration = 24 * time.Second
+	}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -217,10 +260,36 @@ func tuiSignalContext(parent context.Context) (context.Context, func()) {
 	return signal.NotifyContext(parent, exitSignals...)
 }
 
-func (m homeModel) Init() tea.Cmd { return homeTick() }
+type launchTickMsg time.Time
+
+func (m homeModel) Init() tea.Cmd {
+	commands := []tea.Cmd{homeTick(), launchTick()}
+	if m.firstLaunch {
+		commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
+	}
+	return tea.Batch(commands...)
+}
+
+func launchTick() tea.Cmd {
+	return tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg { return launchTickMsg(t) })
+}
+
+func welcomeSoundCmd(listening ListeningConfig) tea.Cmd {
+	return func() tea.Msg {
+		audio := newAudioEngine(listening)
+		defer audio.Close()
+		_ = audio.preview()
+		return nil
+	}
+}
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case launchTickMsg:
+		if time.Now().Before(m.launchUntil) {
+			return m, launchTick()
+		}
+		return m, nil
 	case homeTickMsg:
 		m.refreshRuntime()
 		return m, homeTick()
@@ -266,6 +335,12 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.MouseMsg:
+		if time.Now().Before(m.launchUntil) {
+			if msg.Type == tea.MouseLeft {
+				m.launchUntil = time.Now()
+			}
+			return m, nil
+		}
 		if m.helpOpen {
 			return m, nil
 		}
@@ -307,9 +382,20 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mouseOver = false
 		}
 		if msg.Type == tea.MouseMotion {
+			m.codeHover = m.homeCodeHit(msg.X, msg.Y)
+			if m.codeHover {
+				m.mouseOver = false
+				return m, nil
+			}
 			m.mouseOver = m.hover(msg.Y)
 		}
 		if msg.Type == tea.MouseLeft {
+			if m.homeCodeHit(msg.X, msg.Y) {
+				m.message = clipboardStatus(m.cfg.CurrentTeamCode)
+				m.codeHover = true
+				m.mouseOver = false
+				return m, nil
+			}
 			if !m.hover(msg.Y) {
 				m.mouseOver = false
 				return m, nil
@@ -322,6 +408,15 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case tea.KeyMsg:
+		if time.Now().Before(m.launchUntil) {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "enter", " ", "esc":
+				m.launchUntil = time.Now()
+			}
+			return m, nil
+		}
 		if m.helpOpen {
 			switch msg.String() {
 			case "?", "esc", "q":
@@ -395,6 +490,9 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) View() string {
+	if time.Now().Before(m.launchUntil) {
+		return m.launchView()
+	}
 	var body string
 	if m.helpOpen {
 		context := m.mode
@@ -412,6 +510,36 @@ func (m homeModel) View() string {
 		body = m.itemView()
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks"), body, m.statusFooterView())
+}
+
+func (m homeModel) launchView() string {
+	width := maxInt(40, panelWidth(m.width))
+	height := maxInt(14, m.height-7)
+	remaining := time.Until(m.launchUntil)
+	frame := int(remaining.Milliseconds()/90) % 4
+	dots := []string{"·", "· ·", "· · ·", "· · · ·"}[frame]
+	var lines []string
+	if m.firstLaunch {
+		lines = []string{
+			"                 ·       ·",
+			"            ·       ○ Mira       ·",
+			"        ·                         ·",
+			"      ○ Noor       [ YOU ]       ○ Sam",
+			"        ·                         ·",
+			"            ·       ○ Kai        ·",
+			"",
+			"Your quiet coworking room is waking up",
+		}
+	} else {
+		lines = []string{"[ YOU ]"}
+	}
+	lines = append(lines, "", dots)
+	content := styleAccent.Render(strings.Join(lines, "\n"))
+	return stylePanel.Width(width).Height(height).Align(lipgloss.Center).AlignVertical(lipgloss.Center).Render(content)
+}
+
+func (m homeModel) fullPanel() lipgloss.Style {
+	return stylePanel.Width(panelWidth(m.width)).Height(maxInt(10, m.height-8))
 }
 
 func (m *homeModel) move(delta int) {
@@ -509,12 +637,45 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.moveFormTextCursorToEnd()
 		m.message = "Use default, or an output name supported by mpv/PulseAudio/PipeWire."
 	case "batch-window":
+		if usesPublicBackend(m.cfg) {
+			m.message = "The public relay is fixed at 500 ms. Choose Server and use your own backend to tune 100-2000 ms."
+			return m, nil
+		}
 		m.mode = "batch-window"
 		m.formCursor = 0
 		m.formReturnMode = "advanced"
 		m.batchWindowValue = fmt.Sprintf("%d", m.cfg.BatchWindowMs)
 		m.moveFormTextCursorToEnd()
 		m.message = "100-2000 ms. The default 500 ms balances latency and network use."
+	case "backend-url":
+		returnMode := m.mode
+		if returnMode != "menu" && returnMode != "advanced" {
+			returnMode = "advanced"
+		}
+		m.mode = "backend-url"
+		m.formCursor = 0
+		m.formReturnMode = returnMode
+		m.backendURLValue = m.cfg.APIURL
+		m.moveFormTextCursorToEnd()
+		m.message = "Use public/default, or paste your self-hosted http(s) server. WebSocket is derived automatically."
+	case "factory-reset":
+		m.mode = "factory-reset"
+		m.cursor = 0
+		m.mouseOver = false
+		m.message = "Choose Reset Device to clear this device only."
+	case "reset-confirm":
+		if err := factoryResetDevice(); err != nil {
+			m.message = "Could not reset: " + err.Error()
+			return m, nil
+		}
+		m.cfg = defaultConfig()
+		m.activeOK = false
+		m.mode = "home"
+		m.cursor = 0
+		m.firstLaunch = true
+		m.launchUntil = time.Now().Add(24 * time.Second)
+		m.message = "Factory reset complete. Welcome back to the beginning."
+		return m, tea.Batch(launchTick(), welcomeSoundCmd(m.cfg.Listening))
 	case "preferences":
 		m.mode = "preferences"
 		m.settingsCursor = 0
@@ -605,6 +766,7 @@ func (m *homeModel) changeSetting(delta int) {
 	}
 	row := rows[m.settingsCursor]
 	row.apply(&m.cfg, delta)
+	applyTheme(m.cfg.Theme)
 	_ = saveConfig(m.cfg)
 	m.message = "Saved."
 }
@@ -626,7 +788,7 @@ func (m homeModel) itemView() string {
 	lines = append(lines, "")
 	lines = append(lines, styleDim.Render("? shortcuts"))
 	lines = append(lines, styleDim.Render(m.message))
-	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
 func (m homeModel) itemPrefixLines() []string {
@@ -642,13 +804,56 @@ func (m homeModel) itemPrefixLines() []string {
 			teamText = m.activeTeamLabel()
 		}
 		lines = append(lines, fmt.Sprintf("Team: %s", valueOr(teamText, "not joined")))
+		if m.cfg.CurrentTeamCode != "" {
+			code := "[ " + m.cfg.CurrentTeamCode + "  COPY ]"
+			if m.codeHover {
+				code = styleSelected.Render(code)
+			} else {
+				code = styleFocused.Render(code)
+			}
+			lines = append(lines, code)
+		}
 		lines = append(lines, "Connection: "+m.connectionSummary())
 		if m.activeOK {
 			lines = append(lines, fmt.Sprintf("People: %s", peopleSummary(m.active.ActiveCount)))
 			lines = append(lines, fmt.Sprintf("Activity: %d captured, %d sent", m.active.LocalCapturedEvents, m.active.LocalSentEvents))
 		}
 	}
+	if m.mode == "team" && m.cfg.CurrentTeamCode != "" {
+		code := "[ " + m.cfg.CurrentTeamCode + "  COPY ]"
+		if m.codeHover {
+			code = styleSelected.Render(code)
+		} else {
+			code = styleFocused.Render(code)
+		}
+		lines = append(lines, "", code)
+	}
 	return append(lines, "")
+}
+
+func (m homeModel) homeCodeHit(x int, y int) bool {
+	if m.cfg.CurrentTeamCode == "" || (m.mode != "home" && m.mode != "team") {
+		return false
+	}
+	for i, line := range m.itemPrefixLines() {
+		if strings.Contains(ansi.Strip(line), "COPY ]") {
+			return y == panelContentStartY()+i && x >= 3 && x < 3+len(m.cfg.CurrentTeamCode)+10
+		}
+	}
+	return false
+}
+
+func factoryResetDevice() error {
+	_, _ = stopActiveSession()
+	_, _ = autostartAction([]string{"disable"})
+	if err := os.Remove(configPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	legacy := legacyConfigPath()
+	if legacy != "" && legacy != configPath() {
+		_ = os.Remove(legacy)
+	}
+	return os.RemoveAll(stateDir())
 }
 
 func (m homeModel) preferencesView() string {
@@ -676,7 +881,7 @@ func (m homeModel) preferencesView() string {
 	}
 	lines = append(lines, styleDim.Render(footer))
 	lines = append(lines, styleDim.Render(m.message))
-	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
 func (m homeModel) doctorReportView() string {
@@ -704,7 +909,7 @@ func (m homeModel) doctorReportView() string {
 		position = "No report data"
 	}
 	lines = append(lines, styleDim.Render(position+". Wheel or up/down scrolls; r refreshes; q returns."), styleDim.Render(m.message))
-	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
 func (m homeModel) doctorVisibleCount() int {
@@ -823,6 +1028,7 @@ func (m homeModel) items() []homeItem {
 	case "menu":
 		return []homeItem{
 			{key: "preferences", label: "Preferences", help: "sound, sharing, spatial audio, and fatigue fade"},
+			{key: "backend-url", label: "Server", help: backendSummary(m.cfg)},
 			{key: "advanced", label: "Advanced", help: "nickname, audio output, and batching"},
 			{key: "team", label: "Team", help: "create, delete, or switch the selected team"},
 			{key: "connection", label: "Connection", help: "background mode and launch-at-login"},
@@ -855,10 +1061,17 @@ func (m homeModel) items() []homeItem {
 		}
 	case "advanced":
 		return []homeItem{
+			{key: "backend-url", label: "Server", help: backendSummary(m.cfg)},
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "anonymous") + " (CLI key: nickname)"},
 			{key: "audio-device", label: "Audio Output", help: valuePlain(m.cfg.Listening.AudioDevice, "default") + " (CLI key: audio.device)"},
-			{key: "batch-window", label: "Batch Window", help: fmt.Sprintf("%d ms (CLI key: batch.ms)", m.cfg.BatchWindowMs)},
+			{key: "batch-window", label: "Batch Window", help: batchWindowHelp(m.cfg)},
+			{key: "factory-reset", label: "Factory Reset", help: "clear this device and replay first-run welcome"},
 			{key: "back", label: "Back", help: "return to the menu"},
+		}
+	case "factory-reset":
+		return []homeItem{
+			{key: "reset-confirm", label: "Reset Device", help: "stop Cliks, clear local settings, and restart fresh"},
+			{key: "back", label: "Cancel", help: "keep everything as it is"},
 		}
 	default:
 		if m.cfg.CurrentTeamCode == "" {
@@ -898,6 +1111,8 @@ func (m homeModel) viewHeader() (string, string) {
 		return "Diagnostics", "Quick checks without leaving the TUI."
 	case "advanced":
 		return "Advanced", "These controls stay on this device. Run cliks set --list for every scriptable key."
+	case "factory-reset":
+		return "Factory Reset", "This clears only this device. It does not delete your team from the server."
 	default:
 		if m.cfg.CurrentTeamCode == "" {
 			return "Set up Cliks", "Join a team first, then Cliks opens the live room automatically."
@@ -914,6 +1129,20 @@ func (m homeModel) startHelp() string {
 		return "join or create a team first"
 	}
 	return "open the live room in this terminal; stops when this terminal closes"
+}
+
+func backendSummary(cfg CliksConfig) string {
+	if usesPublicBackend(cfg) {
+		return "Cliks public · 20 people · protected 500 ms batching"
+	}
+	return "self-hosted · " + cfg.APIURL
+}
+
+func batchWindowHelp(cfg CliksConfig) string {
+	if usesPublicBackend(cfg) {
+		return "500 ms · locked on the public relay; self-host to tune"
+	}
+	return fmt.Sprintf("%d ms · self-hosted range 100-2000 ms", cfg.BatchWindowMs)
 }
 
 func (m homeModel) backgroundToggleHelp() string {
@@ -1018,7 +1247,7 @@ func (m *homeModel) back() {
 	case "doctor-report":
 		m.mode = "diagnostics"
 		m.cursor = 0
-	case "team", "connection", "diagnostics", "preferences", "advanced":
+	case "team", "connection", "diagnostics", "preferences", "advanced", "factory-reset":
 		m.mode = "menu"
 		m.cursor = 0
 	default:
@@ -1256,6 +1485,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Notifications.Configured = true
 		}},
 		{"Presence", "available, focus, break, or dnd", func(c CliksConfig) string { return presenceLabel(c.PresenceStatus) }, func(c *CliksConfig, d int) { c.PresenceStatus = nextPresence(c.PresenceStatus, d) }},
+		{"Theme", "ember, ocean, or mono", func(c CliksConfig) string { return c.Theme }, func(c *CliksConfig, d int) { c.Theme = nextTheme(c.Theme, d) }},
 		{"Share keyboard", "send keyboard activity kind only", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
 		{"Share mouse", "send left/right click activity only", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
 		{"Keep Running", "saved terminal-close preference", func(c CliksConfig) string { return onOff(c.KeepRunning) }, func(c *CliksConfig, _ int) { c.KeepRunning = !c.KeepRunning }},
@@ -1324,6 +1554,26 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
+	if m.mode == "backend-url" {
+		backend, err := normalizeBackendURL(m.backendURLValue)
+		if err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.cfg.APIURL = backend
+		m.cfg.WSURL = toWSURL(backend)
+		if usesPublicBackend(m.cfg) {
+			m.cfg.BatchWindowMs = 500
+		}
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.mode = valuePlain(m.formReturnMode, "advanced")
+		m.cursor = 0
+		m.message = "Server saved. " + backendSummary(m.cfg) + ". Reconnect Live to use it."
+		return m, nil
+	}
 	if m.mode == "nickname" {
 		name := sanitizeNickname(m.nicknameValue)
 		m.cfg.Nickname = name
@@ -1348,7 +1598,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode = "advanced"
-		m.cursor = 1
+		m.cursor = 2
 		m.message = fmt.Sprintf("Audio output set to %s.", valuePlain(device, "default"))
 		return m, nil
 	}
@@ -1358,13 +1608,17 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.message = err.Error()
 			return m, nil
 		}
+		if usesPublicBackend(m.cfg) && window != 500 {
+			m.message = "The public relay is fixed at 500 ms. Set Server to your own backend before tuning batching."
+			return m, nil
+		}
 		m.cfg.BatchWindowMs = window
 		if err := saveConfig(m.cfg); err != nil {
 			m.message = err.Error()
 			return m, nil
 		}
 		m.mode = "advanced"
-		m.cursor = 2
+		m.cursor = 3
 		m.message = fmt.Sprintf("Batch window set to %d ms.", window)
 		return m, nil
 	}
@@ -1412,7 +1666,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
-	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" {
+	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" || m.mode == "backend-url" {
 		return 1
 	}
 	return 2
@@ -1438,6 +1692,8 @@ func (m homeModel) formValue() string {
 		return m.audioDeviceValue
 	case "batch-window":
 		return m.batchWindowValue
+	case "backend-url":
+		return m.backendURLValue
 	default:
 		return ""
 	}
@@ -1465,6 +1721,8 @@ func (m *homeModel) setFormValue(value string) {
 		m.audioDeviceValue = value
 	case "batch-window":
 		m.batchWindowValue = value
+	case "backend-url":
+		m.backendURLValue = value
 	}
 }
 
@@ -1518,7 +1776,7 @@ func (m homeModel) formHit(x int, y int) int {
 
 func isFormMode(mode string) bool {
 	switch mode {
-	case "create", "join", "delete", "nickname", "audio-device", "batch-window":
+	case "create", "join", "delete", "nickname", "audio-device", "batch-window", "backend-url":
 		return true
 	default:
 		return false
@@ -1563,6 +1821,12 @@ func (m homeModel) formView() string {
 		rows = []string{
 			formLine("Milliseconds", m.batchWindowValue, "500", true, m.formTextCursor, false),
 		}
+	} else if m.mode == "backend-url" {
+		title = "Server"
+		rows = []string{
+			formLine("HTTP URL", m.backendURLValue, productionAPIURL, true, m.formTextCursor, false),
+			styleDim.Render("Type public to restore Cliks. Self-hosting unlocks larger room limits and 100-2000 ms batching."),
+		}
 	} else {
 		title = "Nickname"
 		rows = []string{
@@ -1578,7 +1842,7 @@ func (m homeModel) formView() string {
 		lines = append(lines, styleDim.Render("Left/right edits at the cursor. Enter submits. Tab changes fields. Esc cancels."))
 		lines = append(lines, styleDim.Render(m.message))
 	}
-	return stylePanel.Width(panelWidth(m.width)).Render(strings.Join(lines, "\n"))
+	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
 func formLine(label string, value string, placeholder string, selected bool, cursor int, secret bool) string {
@@ -1741,7 +2005,6 @@ type sessionModel struct {
 	mode           string
 	settingsCursor int
 	settingsHover  bool
-	buttonHover    int
 	codeHover      bool
 	message        string
 	exit           sessionExitAction
@@ -1751,11 +2014,12 @@ type sessionModel struct {
 	helpOpen       bool
 	selectedPeer   int
 	welcomeUntil   time.Time
+	hoverAction    string
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
 	now := time.Now()
-	model := sessionModel{controller: controller, state: controller.viewState(), buttonHover: -1, now: now}
+	model := sessionModel{controller: controller, state: controller.viewState(), now: now}
 	if !controller.cfg.WelcomeSeen {
 		model.welcomeUntil = now.Add(6 * time.Second)
 		controller.cfg.WelcomeSeen = true
@@ -1816,23 +2080,18 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Type {
 		case tea.MouseMotion:
-			m.buttonHover = m.controlButtonHit(msg.X, msg.Y)
-			m.codeHover = m.teamCodeHit(msg.X, msg.Y)
+			m.hoverAction = m.liveHit(msg.X, msg.Y)
+			m.codeHover = m.hoverAction == "copy-code"
 		case tea.MouseWheelUp:
 			m.controller.adjustVolume(0.05)
-			m.buttonHover = -1
+			m.hoverAction = ""
 		case tea.MouseWheelDown:
 			m.controller.adjustVolume(-0.05)
-			m.buttonHover = -1
+			m.hoverAction = ""
 		case tea.MouseLeft:
-			if m.teamCodeHit(msg.X, msg.Y) {
-				m.codeHover = true
-				m.message = clipboardStatus(m.state.TeamCode)
-				return m, nil
-			}
-			if index := m.controlButtonHit(msg.X, msg.Y); index >= 0 {
-				m.buttonHover = index
-				return m.activateLiveButton(index)
+			if action := m.liveHit(msg.X, msg.Y); action != "" {
+				m.hoverAction = action
+				return m.activateLiveAction(action)
 			}
 			if m.state.CaptureMode == "terminal" && m.state.Listening.Mouse {
 				m.controller.recordLocalActivity(LocalActivityEvent{Kind: "mouse", Button: "left", At: time.Now()})
@@ -1928,18 +2187,18 @@ func (m sessionModel) View() string {
 		return m.sessionSettingsView()
 	}
 	width := maxInt(44, panelWidth(m.width))
-	bodyHeight := maxInt(12, m.height-9)
+	bodyHeight := maxInt(12, m.height-7)
 	header := m.liveHeader(width)
-	controls := m.liveControlsStyle().Width(width).Render(m.liveControlsLine())
-	if width < 82 {
+	footer := styleDim.Render(" ? Help   ↑/↓ Volume   ←/→ Density   Tab Preferences   Esc Back   Ctrl+C Stop")
+	if width < 74 {
 		desk := stylePanel.Width(width).Height(bodyHeight).Render(m.renderSpatialDesk(width-6, bodyHeight-3))
-		return lipgloss.JoinVertical(lipgloss.Left, header, desk, controls)
+		return lipgloss.JoinVertical(lipgloss.Left, header, desk, footer)
 	}
-	mapWidth := int(float64(width) * 0.64)
+	mapWidth := int(float64(width) * 0.68)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(m.renderSpatialDesk(mapWidth-6, bodyHeight-3))
 	activity := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
-	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", activity), controls)
+	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", activity), footer)
 }
 
 func (m sessionModel) liveHeader(width int) string {
@@ -1985,6 +2244,17 @@ func (m sessionModel) renderSpatialDesk(width int, height int) string {
 		}
 	}
 	put(cx-3, cy, "[ YOU ]")
+	if len(m.state.RecentReactions) > 0 {
+		reaction := m.state.RecentReactions[len(m.state.RecentReactions)-1]
+		if m.now.Sub(reaction.At) < 4*time.Second {
+			name := valuePlain(sanitizeNickname(reaction.Nickname), "Someone")
+			bubble := reactionGlyph(reaction.Reaction) + "  " + name
+			if (m.now.UnixMilli()/300)%2 == 0 {
+				bubble = "✦ " + bubble + " ✦"
+			}
+			put(cx-len([]rune(bubble))/2, maxInt(1, cy-3), bubble)
+		}
+	}
 	peers := sortedRemotePeers(m.state)
 	if len(peers) == 0 && !m.welcomeUntil.IsZero() && m.now.Before(m.welcomeUntil) {
 		peers = []PeerPresence{{PeerID: "demo-1", Nickname: "Mira", JoinedAt: m.now.Add(-time.Second).UnixMilli()}, {PeerID: "demo-2", Nickname: "Sam", JoinedAt: m.now.Add(-2 * time.Second).UnixMilli()}, {PeerID: "demo-3", Nickname: "Noor", JoinedAt: m.now.Add(-3 * time.Second).UnixMilli()}}
@@ -2079,207 +2349,162 @@ func reactionGlyph(value string) string {
 }
 
 func (m sessionModel) liveActivityView(width int) string {
-	lines := []string{styleAccent.Render("Right now"), styleDim.Render(valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)), "", typingSummary(m.state, m.now), roomPeopleSummary(m.state), "Flow: " + flowBadge(m.state, m.now), "Health: " + healthSummary(m.state, m.now), "Capture: " + valuePlain(m.state.CaptureMode, "starting"), "", "Volume  " + compactListeningBar(m.state.Listening), "Density " + compactBar(m.state.Listening.Density), "", "Presence  " + presenceLabel(m.controller.cfg.PresenceStatus), "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled), "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound)}
+	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
+	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	selected := "No teammate yet"
 	if peers := sortedRemotePeers(m.state); len(peers) > 0 {
-		selected := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
-		lines = append(lines, "", styleAccent.Render("Selected: "+valuePlain(selected.Nickname, "teammate")), styleDim.Render("j/k chooses a teammate"))
+		peer := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
+		selected = valuePlain(peer.Nickname, "Teammate")
 	}
-	for i := len(m.state.RecentReactions) - 1; i >= 0 && len(lines) < maxInt(12, m.height-8); i-- {
-		reaction := m.state.RecentReactions[i]
-		if m.now.Sub(reaction.At) > 12*time.Second {
-			continue
-		}
-		lines = append(lines, reactionGlyph(reaction.Reaction)+" "+valuePlain(reaction.Nickname, "Teammate")+" sent "+reaction.Reaction)
+	lines := []string{
+		styleAccent.Render(valuePlain(team, "Your room")),
+		m.liveActionLine("copy-code", code+"  COPY"),
+		connectionStyle(m.state.ConnectionStatus) + "  ·  " + roomPeopleSummary(m.state),
+		typingSummary(m.state, m.now),
+		"Flow: " + flowBadge(m.state, m.now),
+		"Health: " + styleDim.Render(healthSummary(m.state, m.now)),
+		"",
+		"Volume  " + compactListeningBar(m.state.Listening),
+		"Density " + compactBar(m.state.Listening.Density),
+		m.liveActionLine("notifications", "Notifications  "+onOff(m.controller.cfg.Notifications.Enabled)),
+		m.liveActionLine("notification-sound", "Notify sound   "+onOff(m.controller.cfg.Notifications.Sound)),
+		m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial)),
+		"",
+		styleAccent.Render("Send to ") + m.liveActionLine("select-prev", "‹") + " " + selected + " " + m.liveActionLine("select-next", "›"),
+		m.liveActionLine("reaction-wave", "👋 Wave") + "    " + m.liveActionLine("reaction-nice", "★ Nice"),
+		m.liveActionLine("reaction-coffee", "☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "✦ Celebrate"),
+		"",
+		m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop"),
+	}
+	if m.message != "" {
+		lines = append(lines, "", styleDim.Render(m.message))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m sessionModel) liveActionLine(action string, label string) string {
+	text := "[ " + label + " ]"
+	if m.hoverAction == action {
+		return styleSelected.Render(text)
+	}
+	return styleFocused.Render(text)
 }
 
 func (m *sessionModel) sendLiveReaction(reaction string) {
 	peers := sortedRemotePeers(m.state)
 	target := ""
+	targetName := "the room"
 	if len(peers) > 0 {
-		target = peers[clampInt(m.selectedPeer, 0, len(peers)-1)].PeerID
+		peer := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
+		target = peer.PeerID
+		targetName = valuePlain(sanitizeNickname(peer.Nickname), "your teammate")
 	}
 	if reaction == "wave" && target == "" {
 		m.message = "Choose a teammate before waving."
 		return
 	}
 	m.controller.sendReaction(reaction, target)
-	m.message = "Sent " + reactionGlyph(reaction)
+	m.message = "Sent " + reactionGlyph(reaction) + " to " + targetName
 }
 
-func (m sessionModel) livePanelLines() ([]string, []string, int) {
-	state := m.state
-	teamName := strings.TrimSpace(state.TeamName)
-	if teamName == "" || strings.EqualFold(teamName, state.TeamCode) {
-		teamName = teamNameForCode(m.controller.cfg, state.TeamCode)
+func (m sessionModel) liveHit(x int, y int) string {
+	if m.teamCodeHit(x, y) {
+		return "copy-code"
 	}
-	if teamName == "" {
-		teamName = "Team"
+	width := maxInt(44, panelWidth(m.width))
+	if width < 74 {
+		return ""
 	}
-	code := valuePlain(state.TeamCode, m.controller.cfg.CurrentTeamCode)
-	codeValue := code
-	if m.codeHover {
-		codeValue = styleSelected.Render(" " + code + " ")
+	mapWidth := int(float64(width) * 0.68)
+	railX := mapWidth + 4
+	if x < railX {
+		return ""
 	}
-	if m.height > 0 && m.height < 24 {
-		left := []string{
-			"Team: " + styleAccent.Render(teamName),
-			"Code: " + codeValue,
-			"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
-			"Connection: " + connectionStyle(state.ConnectionStatus),
-			"People: " + roomPeopleSummary(state),
-			"Typing: " + typingSummary(state, m.now),
-			"Flow: " + flowBadge(state, m.now),
-			"Health: " + healthSummary(state, m.now),
-			fmt.Sprintf("Activity: %d captured, %d sent", state.LocalCapturedEvents, state.LocalSentEvents),
+	relativeX := x - railX
+	contentTop := 3
+	switch y - contentTop {
+	case 1:
+		return "copy-code"
+	case 10:
+		return "notifications"
+	case 11:
+		return "notification-sound"
+	case 12:
+		if relativeX < maxInt(12, (width-mapWidth)/2) {
+			return "mute"
 		}
-		if state.Notice != "" {
-			left = append(left, styleWarn.Render(state.Notice))
-		} else if state.PermissionHint != "" {
-			left = append(left, styleWarn.Render(state.PermissionHint))
+		return "spatial"
+	case 14:
+		if relativeX < maxInt(12, (width-mapWidth)/2) {
+			return "select-prev"
 		}
-		right := []string{
-			"Sound",
-			"Volume  " + muteAwareBar(state.Listening),
-			"Density " + bar(state.Listening.Density),
-			fmt.Sprintf("Mute %s  Spatial %s", onOff(state.Listening.Muted), onOff(state.Listening.Spatial)),
-			fmt.Sprintf("Fade %s  Keep %s", onOff(state.Listening.FatigueProtection), onOff(m.controller.cfg.KeepRunning)),
-			"↑/↓ volume  ←/→ density  ? help",
+		return "select-next"
+	case 15:
+		if relativeX < maxInt(12, (width-mapWidth)/2) {
+			return "reaction-wave"
 		}
-		return left, right, 1
-	}
-	left := []string{
-		"Team: " + styleAccent.Render(teamName),
-		"Code: " + codeValue,
-		"You:  " + valuePlain(m.controller.cfg.Nickname, "anonymous"),
-		"",
-		"Connection: " + connectionStyle(state.ConnectionStatus),
-		"People: " + roomPeopleSummary(state),
-		"Typing: " + typingSummary(state, m.now),
-		"Flow: " + flowBadge(state, m.now),
-		"Health: " + healthSummary(state, m.now),
-		"Capture: " + state.CaptureMode,
-		"",
-		fmt.Sprintf("Captured: %d", state.LocalCapturedEvents),
-		fmt.Sprintf("Sent:     %d", state.LocalSentEvents),
-	}
-	if state.Notice != "" {
-		left = append(left, "", styleWarn.Render(state.Notice))
-	}
-	if m.message != "" {
-		left = append(left, styleDim.Render(m.message))
-	}
-	if state.PermissionHint != "" {
-		left = append(left, "", styleWarn.Render(state.PermissionHint))
-	}
-	right := []string{
-		"Sound",
-		"",
-		"Volume  " + muteAwareBar(state.Listening),
-		"Density " + bar(state.Listening.Density),
-		"Muted   " + onOff(state.Listening.Muted),
-		"Spatial " + onOff(state.Listening.Spatial),
-		"Fade    " + onOff(state.Listening.FatigueProtection),
-		"Keep    " + onOff(m.controller.cfg.KeepRunning),
-		"",
-		"Keys: ↑/↓ volume  ←/→ density",
-		"m mute  s spatial  f fade  Tab prefs",
-		"Esc/q/back returns  x stop  ? shortcuts",
-		"Mouse: wheel volume; click hovered controls",
-	}
-	return left, right, 1
-}
-
-type liveButton struct {
-	label  string
-	action string
-}
-
-func liveButtons() []liveButton {
-	return []liveButton{
-		{label: "Back", action: "back"},
-		{label: "Prefs", action: "prefs"},
-		{label: "Mute", action: "mute"},
-		{label: "Spatial", action: "spatial"},
-		{label: "Stop", action: "stop"},
-	}
-}
-
-func (m sessionModel) liveControlsLine() string {
-	parts := []string{}
-	for index, button := range liveButtons() {
-		part := "[ " + button.label + " ]"
-		if index == m.buttonHover {
-			part = styleSelected.Render(part)
+		return "reaction-nice"
+	case 16:
+		if relativeX < maxInt(12, (width-mapWidth)/2) {
+			return "reaction-coffee"
 		}
-		parts = append(parts, part)
+		return "reaction-celebrate"
+	case 18:
+		railWidth := maxInt(18, width-mapWidth-2)
+		if relativeX < railWidth/3 {
+			return "prefs"
+		}
+		if relativeX < 2*railWidth/3 {
+			return "back"
+		}
+		return "stop"
 	}
-	social := "1 Wave  ·  2 Nice  ·  3 Coffee  ·  4 Celebrate  ·  P Presence  ·  J/K Select"
-	return strings.Join(parts, " ") + "\n" + styleDim.Render(social)
+	return ""
 }
 
-func (m sessionModel) liveControlsStyle() lipgloss.Style {
-	if m.height > 0 && m.height < 24 {
-		return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(0, 2)
-	}
-	return stylePanel
-}
-
-func (m sessionModel) activateLiveButton(index int) (tea.Model, tea.Cmd) {
-	buttons := liveButtons()
-	if index < 0 || index >= len(buttons) {
-		return m, nil
-	}
-	switch buttons[index].action {
-	case "back":
-		m.exit = sessionExitBack
-		return m, tea.Quit
-	case "prefs":
-		m.mode = "settings"
-		m.settingsCursor = 0
-		m.settingsHover = false
+func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "copy-code":
+		m.message = clipboardStatus(valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode))
+	case "notifications":
+		m.controller.cfg.Notifications.Enabled = !m.controller.cfg.Notifications.Enabled
+		m.controller.cfg.Notifications.Configured = true
+		_ = saveConfig(m.controller.cfg)
+		m.message = "Notifications " + onOff(m.controller.cfg.Notifications.Enabled)
+	case "notification-sound":
+		m.controller.cfg.Notifications.Sound = !m.controller.cfg.Notifications.Sound
+		m.controller.cfg.Notifications.Configured = true
+		_ = saveConfig(m.controller.cfg)
+		m.message = "Notification sound " + onOff(m.controller.cfg.Notifications.Sound)
 	case "mute":
 		m.controller.toggle("muted")
 	case "spatial":
 		m.controller.toggle("spatial")
+	case "select-prev":
+		m.selectedPeer = clampInt(m.selectedPeer-1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
+	case "select-next", "select-peer":
+		m.selectedPeer = clampInt(m.selectedPeer+1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
+	case "reaction-wave":
+		m.sendLiveReaction("wave")
+	case "reaction-nice":
+		m.sendLiveReaction("nice")
+	case "reaction-coffee":
+		m.sendLiveReaction("coffee")
+	case "reaction-celebrate":
+		m.sendLiveReaction("celebrate")
+	case "prefs":
+		m.mode = "settings"
+		m.settingsCursor = 0
+		m.settingsHover = false
+	case "back":
+		m.exit = sessionExitBack
+		return m, tea.Quit
 	case "stop":
 		m.exit = sessionExitStop
 		return m, tea.Quit
 	}
+	m.state = m.controller.viewState()
 	return m, nil
-}
-
-func (m sessionModel) livePanelHeight() int {
-	left, right, _ := m.livePanelLines()
-	width := panelWidth(m.width)
-	colWidth := (width - 6) / 2
-	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
-	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
-	return maxInt(lipgloss.Height(room), lipgloss.Height(sound))
-}
-
-func (m sessionModel) controlsContentY() int {
-	padding := 2
-	if m.height > 0 && m.height < 24 {
-		padding = 1
-	}
-	return 1 + m.livePanelHeight() + padding
-}
-
-func (m sessionModel) controlButtonHit(x int, y int) int {
-	if y != m.controlsContentY() {
-		return -1
-	}
-	cursor := 3
-	for index, button := range liveButtons() {
-		width := len("[ " + button.label + " ]")
-		if x >= cursor && x < cursor+width {
-			return index
-		}
-		cursor += width + 1
-	}
-	return -1
 }
 
 func (m sessionModel) teamCodeHit(x int, y int) bool {
@@ -2292,16 +2517,7 @@ func (m sessionModel) teamCodeHit(x int, y int) bool {
 		codeX := ansi.StringWidth(" Cliks  /  "+valuePlain(team, "Team")+"  ·  ") + 1
 		return x >= codeX && x < codeX+ansi.StringWidth(code)
 	}
-	// Full live layout: title row + panel padding + "Room" + "Team" + "Code  ".
-	// Compact layout packs code on the first content line next to the team name.
-	if m.height > 0 && m.height < 24 {
-		codeY := 3
-		codeX := 3 + len(strings.TrimSpace(m.state.TeamName)+"  ")
-		return y == codeY && x >= codeX && x < codeX+len(code)
-	}
-	codeY := 3 + 2 // Room header + Team line
-	codeX := 3 + len("Code  ")
-	return y == codeY && x >= codeX && x < codeX+len(code)
+	return false
 }
 
 func (m sessionModel) settingsHit(x int, y int) int {
@@ -2325,6 +2541,7 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 	previousStatus := m.controller.cfg.PresenceStatus
 	row := rows[m.settingsCursor]
 	row.apply(&m.controller.cfg, delta)
+	applyTheme(m.controller.cfg.Theme)
 	_ = saveConfig(m.controller.cfg)
 	m.controller.set(func(state *SessionViewState) {
 		state.Listening = m.controller.cfg.Listening
@@ -2388,13 +2605,7 @@ func panelWidth(width int) int {
 	if width <= 0 {
 		return 82
 	}
-	if width < 60 {
-		return width - 4
-	}
-	if width > 110 {
-		return 104
-	}
-	return width - 4
+	return maxInt(36, width-4)
 }
 
 func bar(value float64) string {
@@ -2454,6 +2665,18 @@ func nextPresence(current string, delta int) string {
 	}
 	index = (index + delta + len(values)) % len(values)
 	return values[index]
+}
+
+func nextTheme(current string, delta int) string {
+	values := []string{"ember", "ocean", "mono"}
+	index := 0
+	for i, value := range values {
+		if value == current {
+			index = i
+			break
+		}
+	}
+	return values[(index+delta+len(values))%len(values)]
 }
 
 func connectionStyle(value string) string {

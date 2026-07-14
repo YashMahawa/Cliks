@@ -18,7 +18,7 @@ cliks join CLIK-XXXXXX
 
 That is usually enough on macOS and Linux. It downloads a native release first, so Go and Git are not required on normal machines. The installer:
 
-- builds the `cliks` command
+- installs the native `cliks` command (with its real sound pack embedded)
 - installs **mpv** for stereo spatial sound when possible
 - prepares background capture access on Linux
 - opens Accessibility settings on macOS (one switch)
@@ -83,6 +83,17 @@ cliks join CLIK-XXXXXX
 
 Cliks still sends **only** activity kind + coarse timing — never key codes or text.
 
+### Android / Termux (best-effort second device)
+
+Termux is useful as a lightweight second-device client, but it is not a supported desktop capture target. Install the Termux:API app and then run:
+
+```bash
+pkg install termux-api mpv
+cliks setup
+```
+
+Cliks uses `termux-media-player` when available, falls back to mpv, uses `termux-notification` for waves, and uses `termux-clipboard-set` for one-click room-code copy.
+
 Wayland and sandboxes (Flatpak) may block `/dev/input`. Prefer a normal desktop user session. Temporary local test:
 
 ```bash
@@ -101,6 +112,19 @@ cliks start --terminal --self
 | `cliks doctor` | Detailed report (also under More → Diagnostics in the TUI) |
 | `cliks capture-test` | Confirm activity is detected while you type/click |
 | `cliks` | Friendly on-screen control panel |
+
+## Public or self-hosted server
+
+The default public relay is intentionally predictable for everyone: 20 people per room and 500 ms activity batches. These limits cannot be reduced or raised from a client pointed at the public backend.
+
+To use your own relay, open `cliks` → More → Server and paste its `https://` address. The WebSocket address is filled automatically. You can also run:
+
+```bash
+cliks set api.url https://your-cliks-server
+cliks set batch.ms 250
+```
+
+Type `public` in the Server field, or run `cliks set api.url public`, to restore the shared Cliks backend. Self-hosted operators can set `CLIKS_MAX_PEERS_PER_ROOM=40` (supported range 2–200). Larger rooms and shorter batches increase server load quickly.
 
 You should **not** need to debug raw permissions by hand. Prefer `cliks setup` over copy-pasting system commands.
 
@@ -153,6 +177,7 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 |---------|-----|
 | `cliks: command not found` | Open a **new** terminal, or `export PATH="$HOME/.local/bin:$PATH"` |
 | No sound | `cliks setup` then `cliks sound-test` |
+| “Could not locate bundled sounds” | Update to Cliks 0.3.1 or newer; release binaries contain the WAV pack |
 | No wave notification | Enable Notifications in Preferences, then run `cliks notification-test` |
 | Teammates cannot hear you | `cliks capture-test` then `cliks setup` |
 | macOS capture silent | Accessibility for your terminal app, then restart Cliks |

@@ -20,6 +20,7 @@ export function RoomForm() {
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+	const [codeCopied, setCodeCopied] = useState(false);
 
   const joinCommand = useMemo(
     () => (createdTeam ? `cliks join ${createdTeam.code}` : ""),
@@ -83,9 +84,19 @@ export function RoomForm() {
         <div className="mt-8 flex flex-wrap items-end justify-between gap-4 border border-line bg-3 p-5 xl:p-6">
           <div>
             <div className="font-mono text-[11px] uppercase tracking-widest text-mute">room code</div>
-            <div className="mt-1 font-mono text-4xl font-bold tracking-[0.12em] text-accent md:text-5xl">
-              {createdTeam.code}
-            </div>
+			<button
+				type="button"
+				onClick={async () => {
+					try { await navigator.clipboard.writeText(createdTeam.code); } catch { /* clipboard unavailable */ }
+					setCodeCopied(true);
+					window.setTimeout(() => setCodeCopied(false), 1400);
+				}}
+				className="mt-1 font-mono text-4xl font-bold tracking-[0.12em] text-accent transition-opacity hover:opacity-80 active:scale-[0.99] md:text-5xl"
+				aria-label="Copy room code"
+			>
+				{createdTeam.code}
+			</button>
+			<div className="mt-2 font-mono text-[11px] text-mute">{codeCopied ? "copied" : "click the code to copy"}</div>
           </div>
           <CopyButton
             value={createdTeam.code}
@@ -93,6 +104,9 @@ export function RoomForm() {
             className="btn-ghost h-11 px-4 text-fg"
           />
         </div>
+		<p className="mt-3 text-xs leading-relaxed text-mute">
+			Rooms automatically expire after 48 hours without a live connection. Reconnecting refreshes the clock.
+		</p>
 
         <div className="mt-6 space-y-4">
           <div>

@@ -31,6 +31,12 @@ func nativeNotificationStatus() (bool, string) {
 		}
 		return false, "Windows PowerShell is unavailable"
 	case "linux":
+		if isTermuxRuntime() {
+			if _, err := exec.LookPath("termux-notification"); err == nil {
+				return true, "Android notification (Termux:API)"
+			}
+			return false, "install Termux:API and run: pkg install termux-api"
+		}
 		if _, err := exec.LookPath("notify-send"); err == nil {
 			return true, "desktop notifications (notify-send)"
 		}

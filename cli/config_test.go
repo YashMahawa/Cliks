@@ -75,6 +75,35 @@ func TestEnvironmentURLsOverrideSavedConfiguration(t *testing.T) {
 	}
 }
 
+func TestPublicBackendLocksBatchWindowToFiveHundredMilliseconds(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.BatchWindowMs = 100
+	normalizeConfig(&cfg)
+	if cfg.BatchWindowMs != 500 {
+		t.Fatalf("public batch window = %d, want 500", cfg.BatchWindowMs)
+	}
+}
+
+func TestSelfHostedBackendKeepsCustomBatchWindow(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.APIURL = "https://cliks.example.com"
+	cfg.WSURL = toWSURL(cfg.APIURL)
+	cfg.BatchWindowMs = 150
+	normalizeConfig(&cfg)
+	if cfg.BatchWindowMs != 150 || usesPublicBackend(cfg) {
+		t.Fatalf("self-hosted config normalized incorrectly: %+v", cfg)
+	}
+}
+
+func TestNormalizeBackendURLSupportsPublicAlias(t *testing.T) {
+	if got, err := normalizeBackendURL("public"); err != nil || got != productionAPIURL {
+		t.Fatalf("normalizeBackendURL(public) = %q, %v", got, err)
+	}
+	if _, err := normalizeBackendURL("not-a-url"); err == nil {
+		t.Fatal("normalizeBackendURL accepted a URL without http(s)")
+	}
+}
+
 func TestParseOnOffRejectsUnknownValues(t *testing.T) {
 	if _, err := parseOnOff("sometimes"); err == nil {
 		t.Fatal("parseOnOff accepted an ambiguous value")

@@ -99,31 +99,69 @@ func TestLiveEscapeReturnsToHomeInsteadOfStopping(t *testing.T) {
 	}
 }
 
-func TestLiveControlHoverAndClickBack(t *testing.T) {
+func TestLiveActionRailHoverAndClickBack(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()
 	cfg.CurrentTeamCode = "CLIK-LOCAL"
 	controller := newSessionController(cfg, StartOptions{}, nil)
 	model := newSessionModel(controller)
 	model.width = 120
-	y := model.controlsContentY()
+	model.height = 32
+	width := panelWidth(model.width)
+	mapWidth := int(float64(width) * 0.68)
+	railX := mapWidth + 4
+	railWidth := maxInt(18, width-mapWidth-2)
+	y := 21
+	x := railX + railWidth/2
 
-	updated, cmd := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: 4, Y: y})
+	updated, cmd := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x, Y: y})
 	got := updated.(sessionModel)
 	if cmd != nil {
 		t.Fatalf("hover returned command")
 	}
-	if got.buttonHover != 0 {
-		t.Fatalf("buttonHover = %d, want 0", got.buttonHover)
+	if got.hoverAction != "back" {
+		t.Fatalf("hoverAction = %q, want back", got.hoverAction)
 	}
 
-	updated, cmd = got.Update(tea.MouseMsg{Type: tea.MouseLeft, X: 4, Y: y})
+	updated, cmd = got.Update(tea.MouseMsg{Type: tea.MouseLeft, X: x, Y: y})
 	got = updated.(sessionModel)
 	if cmd == nil {
 		t.Fatalf("back click did not request transition")
 	}
 	if got.exit != sessionExitBack {
 		t.Fatalf("exit = %q, want back", got.exit)
+	}
+}
+
+func TestLiveMiddleDoesNotHighlightDetachedControls(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width = 120
+	model.height = 32
+
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: 12, Y: 16})
+	got := updated.(sessionModel)
+	if got.hoverAction != "" {
+		t.Fatalf("middle of desk highlighted %q", got.hoverAction)
+	}
+}
+
+func TestLiveNotificationRowTogglesDirectly(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width = 120
+	model.height = 32
+	width := panelWidth(model.width)
+	railX := int(float64(width)*0.68) + 5
+
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseLeft, X: railX, Y: 13})
+	got := updated.(sessionModel)
+	if !got.controller.cfg.Notifications.Enabled {
+		t.Fatal("clicking Notifications did not toggle it on")
 	}
 }
 
@@ -279,6 +317,31 @@ func TestAdvancedBatchWindowValidation(t *testing.T) {
 		if _, err := parseBatchWindow(value); err == nil {
 			t.Fatalf("parseBatchWindow(%q) should fail", value)
 		}
+	}
+}
+
+func TestAdvancedServerFormSwitchesToSelfHostedBackend(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := homeModel{cfg: defaultConfig(), mode: "advanced"}
+	updated, _ := model.activate()
+	got := updated.(homeModel)
+	if got.mode != "backend-url" {
+		t.Fatalf("mode = %q, want backend-url", got.mode)
+	}
+	got.backendURLValue = "https://cliks.example.com"
+	updated, _ = got.submitForm()
+	got = updated.(homeModel)
+	if got.cfg.APIURL != "https://cliks.example.com" || got.cfg.WSURL != "wss://cliks.example.com/ws" {
+		t.Fatalf("backend = %q, %q", got.cfg.APIURL, got.cfg.WSURL)
+	}
+}
+
+func TestPublicServerBatchWindowOpensWithPolicyMessageInsteadOfForm(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "advanced", cursor: 3}
+	updated, _ := model.activate()
+	got := updated.(homeModel)
+	if got.mode != "advanced" || !strings.Contains(got.message, "public relay is fixed at 500 ms") {
+		t.Fatalf("public batch action = mode %q, message %q", got.mode, got.message)
 	}
 }
 

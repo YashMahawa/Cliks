@@ -61,6 +61,8 @@ Team creation and deletion are protected by lightweight in-memory per-IP throttl
 
 Soft-deleted team rows are retained for history, but code uniqueness is scoped to active rows only. Postgres and Supabase both use a partial unique index on `(code) where deleted_at is null`, so deleting a room does not permanently consume its code.
 
+Teams track `last_connected_at` and expire after 48 hours without a live WebSocket connection. Join refreshes the deadline. The hourly cleanup refreshes currently occupied rooms before soft-deleting inactive rows and closing any matching in-memory room. Creation responses expose `expiresAt` so clients can explain the lifecycle without persisting membership or activity history.
+
 Users can create and delete teams from the website, from `cliks create` / `cliks delete`, or from the bare `cliks` TUI. CLI/TUI delete-password entry should remain masked when stdin is an interactive terminal.
 
 ## Scaling notes
@@ -108,7 +110,9 @@ The current audio engine still uses system players, but it caps concurrent playb
 
 Advanced users can set `audio.device`. Device routing prefers `mpv`, `paplay`, `pw-play`, or `aplay`, injects the player's native device argument without invoking a shell, and falls back with a `cliks doctor` warning when the active player cannot route. Changing the setting while a session is active reselects the player locally.
 
-The Go CLI uses Bubble Tea for a full-terminal spatial desk and settings UI. The desk centers the listener, draws adaptive depth rings, labels up to 12 peers, marks current typers, animates arrivals, and uses compact overflow dots as rooms grow. A first-live-run synthetic arrangement teaches the map without creating network events. Interactive listening and presence controls persist locally:
+The Go CLI uses Bubble Tea for a full-terminal spatial desk and settings UI. The desk centers the listener, draws adaptive depth rings, labels up to 12 peers, marks current typers, animates arrivals and reactions, and uses compact overflow dots as rooms grow. A first-launch animation and first-live-run synthetic arrangement teach the map without creating network events. The direct action rail owns its own hit map, avoiding stale detached-button coordinates. Interactive listening and presence controls persist locally:
+
+The public backend policy is 20 peers and exactly 500 ms client batches. Config normalization and both CLI/TUI setters prevent selecting another batch interval while `api.url`/`ws.url` point to the public service. Advanced → Server accepts `public` or a self-hosted HTTP(S) URL and derives `/ws`; custom servers unlock the 100–2000 ms client range. `CLIKS_MAX_PEERS_PER_ROOM` lets a self-hosted relay choose 2–200 peers while retaining 20 as the default.
 
 - Up/Down: volume
 - `[`/`]`: ambience density

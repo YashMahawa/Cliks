@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"math"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -241,4 +242,21 @@ func TestAudioEngineCloseCancelsActivePlaybackAndStopsWorkers(t *testing.T) {
 		t.Fatal("audio engine did not stop promptly after cancellation")
 	}
 	engine.Close()
+}
+
+func TestBundledReleaseSoundsExtractWithoutSourceTree(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	bundledSoundOnce = sync.Once{}
+	bundledSoundRoot = ""
+	bundledSoundErr = nil
+	root, err := extractedBundledSoundsRoot()
+	if err != nil {
+		t.Fatalf("extract bundled sounds: %v", err)
+	}
+	for _, kind := range []string{"keyboard", "mouse"} {
+		matches, globErr := filepath.Glob(filepath.Join(root, kind, "*.wav"))
+		if globErr != nil || len(matches) == 0 {
+			t.Fatalf("%s samples = %v, %v; want embedded WAVs", kind, matches, globErr)
+		}
+	}
 }

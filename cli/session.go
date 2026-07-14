@@ -90,6 +90,7 @@ type sessionController struct {
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
+	applyTheme(cfg.Theme)
 	exit, err := runSession(cfg, opts)
 	if err != nil {
 		return err

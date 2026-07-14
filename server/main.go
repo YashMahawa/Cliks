@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,6 +50,7 @@ func main() {
 		lookupTeamLimiter: newRateLimiter(5*time.Minute, 40),
 	}
 	go runSafely("heartbeat loop", func() { srv.hub.heartbeatLoop(heartbeatInterval) })
+	go runSafely("team expiry loop", srv.teamExpiryLoop)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.withCORS(srv.handleHealth))
@@ -72,6 +74,38 @@ func main() {
 	log.Printf("cliks server listening on :%s", port)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+}
+
+func (s *apiServer) teamExpiryLoop() {
+	s.expireInactiveTeams()
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.expireInactiveTeams()
+	}
+}
+
+func (s *apiServer) expireInactiveTeams() {
+	store, ok := s.store.(TeamActivityStore)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, code := range s.hub.ActiveTeamCodes() {
+		if err := store.TouchTeam(ctx, code); err != nil {
+			log.Printf("refresh active team %s: %v", code, err)
+			return
+		}
+	}
+	codes, err := store.ExpireInactiveTeams(ctx, time.Now().Add(-teamIdleTTL))
+	if err != nil {
+		log.Printf("expire inactive teams: %v", err)
+		return
+	}
+	for _, code := range codes {
+		s.hub.closeRoom(code, "This team expired after 48 hours without a connection.")
 	}
 }
 
@@ -300,8 +334,8 @@ func teamUnavailablePayload(code string) map[string]string {
 	}
 }
 
-func roomFullPayload() map[string]string {
-	return protocolError("room_full", "This room is full. Cliks rooms are capped at 20 people.")
+func roomFullPayload(limit int) map[string]string {
+	return protocolError("room_full", fmt.Sprintf("This room is full. This server allows %d people.", limit))
 }
 
 func joinRateLimitedPayload() map[string]string {

@@ -58,8 +58,12 @@ const faqs = [
   },
   {
     q: "What gets stored?",
-    a: "Room name, code, and a password hash. Live presence is memory-only and disappears when the room empties.",
+    a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 48 hours without a live connection; reconnecting refreshes the clock.",
   },
+	{
+		q: "Can I use my own server?",
+		a: "Yes. Paste its HTTPS URL under Cliks → More → Server. The shared public relay stays at 20 people and 500 ms batching; self-hosting unlocks configurable room capacity and 100–2000 ms batches.",
+	},
 ];
 
 export default function HomePage() {
@@ -213,6 +217,9 @@ export default function HomePage() {
                 No invites, no SSO. One person creates a room; everyone else pastes a code into the
                 CLI.
               </p>
+			  <p className="mt-3 max-w-[42ch] font-mono text-xs leading-relaxed text-mute">
+				Unused rooms clean themselves up after 48 hours. Any live connection refreshes the clock.
+			  </p>
             </div>
             <div className="py-14 lg:col-span-7 lg:py-20 lg:pl-10">
               <RoomForm />

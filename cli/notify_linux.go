@@ -10,6 +10,19 @@ import (
 )
 
 func sendNativeNotification(title string, body string, sound bool) error {
+	if isTermuxRuntime() {
+		path, err := exec.LookPath("termux-notification")
+		if err != nil {
+			return fmt.Errorf("native notifications need Termux:API (pkg install termux-api)")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		args := []string{"--title", title, "--content", body, "--group", "cliks"}
+		if sound {
+			args = append(args, "--sound")
+		}
+		return exec.CommandContext(ctx, path, args...).Run()
+	}
 	path, err := exec.LookPath("notify-send")
 	if err != nil {
 		return fmt.Errorf("native notifications need notify-send")

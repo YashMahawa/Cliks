@@ -28,13 +28,14 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "notifications", Label: "Notifications", Description: "show native notifications for direct waves (on/off)"},
 	{Key: "notifications.sound", Label: "Notification sound", Description: "play sound with native wave notifications (on/off)"},
 	{Key: "presence", Label: "Presence", Description: "available, focus, break, or dnd"},
+	{Key: "theme", Label: "Theme", Description: "ember, ocean, or mono terminal palette"},
 	{Key: "share.keyboard", Label: "Share keyboard", Description: "send keyboard activity kind only (on/off)"},
 	{Key: "share.mouse", Label: "Share mouse", Description: "send left/right click activity only (on/off)"},
 	{Key: "spatial.dynamic", Label: "Dynamic circle", Description: "move active teammates closer locally (on/off)"},
 	{Key: "spatial.shuffleMinutes", Label: "Shuffle minutes", Description: "dynamic placement refresh interval from 1 to 60"},
-	{Key: "batch.ms", Label: "Batch window", Description: "activity batch window from 100 to 2000 ms"},
+	{Key: "batch.ms", Label: "Batch window", Description: "public relay: fixed 500 ms; self-hosted: 100 to 2000 ms"},
 	{Key: "audio.device", Label: "Audio device", Description: "player output device name, or default"},
-	{Key: "api.url", Label: "API URL", Description: "advanced backend API override"},
+	{Key: "api.url", Label: "Server", Description: "public/default or a self-hosted http(s) backend URL"},
 	{Key: "ws.url", Label: "WebSocket URL", Description: "advanced relay WebSocket override"},
 }
 

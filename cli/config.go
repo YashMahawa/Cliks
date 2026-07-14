@@ -51,6 +51,23 @@ func printConfigLoadWarningOnce() {
 
 const productionAPIURL = "https://139.59.29.207.sslip.io"
 
+func usesPublicBackend(cfg CliksConfig) bool {
+	return strings.EqualFold(strings.TrimRight(cfg.APIURL, "/"), productionAPIURL) &&
+		strings.EqualFold(strings.TrimRight(cfg.WSURL, "/"), strings.TrimRight(toWSURL(productionAPIURL), "/"))
+}
+
+func normalizeBackendURL(value string) (string, error) {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if strings.EqualFold(value, "default") || strings.EqualFold(value, "public") {
+		return productionAPIURL, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("server URL must start with http:// or https://")
+	}
+	return value, nil
+}
+
 type TeamConfig struct {
 	Code         string `json:"code"`
 	Name         string `json:"name,omitempty"`
@@ -89,6 +106,8 @@ type CliksConfig struct {
 	Nickname        string             `json:"nickname,omitempty"`
 	PresenceStatus  string             `json:"presenceStatus,omitempty"`
 	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
+	LaunchSeen      bool               `json:"launchSeen,omitempty"`
+	Theme           string             `json:"theme,omitempty"`
 	KeepRunning     bool               `json:"keepRunning"`
 	Teams           []TeamConfig       `json:"teams"`
 	Sharing         SharingConfig      `json:"sharing"`
@@ -104,6 +123,7 @@ func defaultConfig() CliksConfig {
 		APIURL:         apiURL,
 		WSURL:          wsURL,
 		PresenceStatus: "available",
+		Theme:          "ember",
 		Notifications:  NotificationConfig{Sound: true, Configured: true},
 		Teams:          []TeamConfig{},
 		Sharing: SharingConfig{
@@ -195,6 +215,9 @@ func applyEnvURLOverrides(cfg CliksConfig) CliksConfig {
 	}
 	if wsURL := strings.TrimSpace(os.Getenv("CLIKS_WS_URL")); wsURL != "" {
 		cfg.WSURL = wsURL
+	}
+	if usesPublicBackend(cfg) {
+		cfg.BatchWindowMs = 500
 	}
 	return cfg
 }
@@ -297,6 +320,11 @@ func normalizeConfig(cfg *CliksConfig) {
 	default:
 		cfg.PresenceStatus = def.PresenceStatus
 	}
+	switch cfg.Theme {
+	case "ember", "ocean", "mono":
+	default:
+		cfg.Theme = def.Theme
+	}
 	if cfg.APIURL == "" {
 		cfg.APIURL = def.APIURL
 	}
@@ -305,6 +333,9 @@ func normalizeConfig(cfg *CliksConfig) {
 	}
 	if cfg.BatchWindowMs == 0 {
 		cfg.BatchWindowMs = def.BatchWindowMs
+	}
+	if usesPublicBackend(*cfg) {
+		cfg.BatchWindowMs = 500
 	}
 	if cfg.Teams == nil {
 		cfg.Teams = []TeamConfig{}

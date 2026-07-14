@@ -36,6 +36,17 @@ func TestClientConnClosesInsteadOfBlockingOnFullOutboundBuffer(t *testing.T) {
 	}
 }
 
+func TestConfiguredMaxPeersSupportsSelfHostedRooms(t *testing.T) {
+	t.Setenv("CLIKS_MAX_PEERS_PER_ROOM", "64")
+	if got := NewRoomHub(NewMemoryTeamStore()).maxPeers; got != 64 {
+		t.Fatalf("maxPeers = %d, want 64", got)
+	}
+	t.Setenv("CLIKS_MAX_PEERS_PER_ROOM", "500")
+	if got := configuredMaxPeers(); got != 200 {
+		t.Fatalf("capped maxPeers = %d, want 200", got)
+	}
+}
+
 func TestHeartbeatTickDoesNotBlockOnSlowPeer(t *testing.T) {
 	hub := NewRoomHub(NewMemoryTeamStore())
 	conn := newClientConn("slow-heartbeat", nil, "test")

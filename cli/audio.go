@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"math"
 	"math/rand"
 	"os"
@@ -16,6 +18,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+)
+
+// Release binaries carry the real WAV pack. External audio players require a
+// path, so soundsRoot extracts these files to a versioned cache on first use.
+//
+//go:embed assets/sounds/*/*.wav
+var bundledSoundFS embed.FS
+
+var (
+	bundledSoundOnce sync.Once
+	bundledSoundRoot string
+	bundledSoundErr  error
 )
 
 type RemoteActivityEvent struct {
@@ -506,6 +520,11 @@ func detectAudioPlayer() *audioPlayer {
 		// MediaPlayer supports Volume (0-1). Falls back to soft WAV gain if assembly load fails at runtime.
 		return windowsMediaPlayer()
 	}
+	if isTermuxRuntime() {
+		if _, err := exec.LookPath("termux-media-player"); err == nil {
+			return termuxAudioPlayer()
+		}
+	}
 	if _, err := exec.LookPath("paplay"); err == nil {
 		return paplayAudioPlayer()
 	}
@@ -516,6 +535,16 @@ func detectAudioPlayer() *audioPlayer {
 		return alsaAudioPlayer()
 	}
 	return nil
+}
+
+func termuxAudioPlayer() *audioPlayer {
+	return &audioPlayer{Command: "termux-media-player", Spatial: false, VolumeCapable: false, ArgsFor: func(job playbackJob) []string {
+		return []string{"play", job.File}
+	}}
+}
+
+func isTermuxRuntime() bool {
+	return os.Getenv("TERMUX_VERSION") != "" || strings.Contains(os.Getenv("PREFIX"), "com.termux")
 }
 
 func windowsMediaPlayer() *audioPlayer {
@@ -707,6 +736,9 @@ func audioInstallHint() string {
 	case "windows":
 		return "install mpv for stereo spatial sound (winget install mpv.mpv), or re-run the Cliks installer."
 	case "linux":
+		if isTermuxRuntime() {
+			return "install Termux:API for phone audio: pkg install termux-api (or install mpv)."
+		}
 		return "install mpv for stereo spatial sound, or a basic player (pulseaudio-utils / pipewire-utils)."
 	default:
 		return "no supported audio player found on this system."
@@ -720,6 +752,9 @@ func audioInstallCommands() []string {
 	case "windows":
 		return []string{"winget install --id mpv.mpv -e", "scoop install mpv"}
 	case "linux":
+		if isTermuxRuntime() {
+			return []string{"pkg install termux-api", "pkg install mpv"}
+		}
 		if _, err := exec.LookPath("pacman"); err == nil {
 			return []string{"sudo pacman -S --needed mpv"}
 		}
@@ -744,6 +779,9 @@ func audioInstallMessage() string {
 }
 
 func soundsRoot() (string, error) {
+	if root, err := extractedBundledSoundsRoot(); err == nil {
+		return root, nil
+	}
 	exe, _ := os.Executable()
 	candidates := []string{
 		filepath.Join(filepath.Dir(exe), "..", "assets", "sounds"),
@@ -757,6 +795,43 @@ func soundsRoot() (string, error) {
 		}
 	}
 	return "", errors.New("could not locate bundled sound assets")
+}
+
+func extractedBundledSoundsRoot() (string, error) {
+	bundledSoundOnce.Do(func() {
+		cacheRoot, err := os.UserCacheDir()
+		if err != nil || strings.TrimSpace(cacheRoot) == "" {
+			cacheRoot = os.TempDir()
+		}
+		root := filepath.Join(cacheRoot, "cliks", "sounds", version)
+		paths, err := fs.Glob(bundledSoundFS, "assets/sounds/*/*.wav")
+		if err != nil || len(paths) == 0 {
+			bundledSoundErr = errors.New("bundled sound pack is empty")
+			return
+		}
+		for _, embeddedPath := range paths {
+			data, readErr := bundledSoundFS.ReadFile(embeddedPath)
+			if readErr != nil {
+				bundledSoundErr = readErr
+				return
+			}
+			relative := strings.TrimPrefix(embeddedPath, "assets/sounds/")
+			destination := filepath.Join(root, filepath.FromSlash(relative))
+			if stat, statErr := os.Stat(destination); statErr == nil && stat.Size() == int64(len(data)) {
+				continue
+			}
+			if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); mkdirErr != nil {
+				bundledSoundErr = mkdirErr
+				return
+			}
+			if writeErr := atomicWriteFile(destination, data, 0o644); writeErr != nil {
+				bundledSoundErr = writeErr
+				return
+			}
+		}
+		bundledSoundRoot = root
+	})
+	return bundledSoundRoot, bundledSoundErr
 }
 
 func placementForIndex(index int, peerID string) peerPlacement {
