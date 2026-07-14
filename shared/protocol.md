@@ -13,15 +13,16 @@ Incoming WebSocket messages are capped at 8 KiB and each connection has a local 
   "type": "join",
   "teamCode": "CLIK-842KQ9",
   "nickname": "local optional name",
+  "status": "available",
   "client": {
     "name": "cliks",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "features": ["compact-v1"]
   }
 }
 ```
 
-`nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
+`nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `status` is one of `available`, `focus`, `break`, or `dnd`; missing and unknown values become `available`. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
 
 A WebSocket connection has exactly one current room. Sending another valid `join` migrates that connection to the new room and emits updated presence to both rooms; activity is routed only to the new room. Failed joins are limited per source IP. After 20 failed attempts in five minutes, the relay sends the following error and closes the socket so the client reconnect loop backs off:
 
@@ -69,14 +70,29 @@ Raw client-side offsets are not forwarded as-is.
 
 ### Profile update
 
-Used after join when a running CLI notices the local nickname changed.
+Used after join when a running CLI notices the local nickname or presence state changed.
 
 ```json
 {
   "type": "profile",
-  "nickname": "Mira"
+  "nickname": "Mira",
+  "status": "focus"
 }
 ```
+
+### Reaction
+
+Reactions are ephemeral social signals. The relay does not persist them. The fixed allowlist is `wave`, `nice`, `coffee`, `focus`, and `celebrate`; modified clients cannot introduce arbitrary reaction text.
+
+```json
+{
+  "type": "reaction",
+  "reaction": "wave",
+  "targetPeerId": "peer_xyz987"
+}
+```
+
+`wave` is targeted and requires a current peer in the sender's room. It is delivered only to the sender and recipient, with a 30-second per-recipient cooldown. Other reactions are room-wide. Each peer is limited to six accepted reactions per 10 seconds. Rejected, invalid, or rate-limited reactions are silently ignored so they do not become a secondary error-notification channel.
 
 ## Server to client
 
@@ -102,10 +118,25 @@ Used after join when a running CLI notices the local nickname changed.
   "teamCode": "CLIK-842KQ9",
   "activeCount": 4,
   "peers": [
-    { "peerId": "peer_abc123", "nickname": "Mira", "joinedAt": 1780000000000 }
+    { "peerId": "peer_abc123", "nickname": "Mira", "joinedAt": 1780000000000, "status": "focus" }
   ]
 }
 ```
+
+### Peer reaction
+
+```json
+{
+  "type": "peer_reaction",
+  "peerId": "peer_abc123",
+  "nickname": "Mira",
+  "reaction": "wave",
+  "targetPeerId": "peer_xyz987",
+  "sentAt": 1780000000400
+}
+```
+
+The CLI keeps only a short in-memory recent-reaction view. A background client may translate a targeted wave into an OS-native notification when the recipient explicitly enabled notifications. Focus and do-not-disturb presence suppress those native notifications locally; notification sound is a separate local preference.
 
 ### Peer activity
 

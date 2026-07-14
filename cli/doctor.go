@@ -71,6 +71,14 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 		doctorCheck{"Sharing keyboard", yesNo(cfg.Sharing.Keyboard)},
 		doctorCheck{"Sharing mouse", yesNo(cfg.Sharing.Mouse)},
 	)
+	if ready, detail := nativeNotificationStatus(); ready {
+		report.checks = append(report.checks, doctorCheck{"Native notifications", "ready (" + detail + ")"})
+	} else {
+		report.checks = append(report.checks, doctorCheck{"Native notifications", "optional — " + detail})
+		if cfg.Notifications.Enabled {
+			report.issues = append(report.issues, doctorIssue{"Enable desktop notifications", "Notifications are on in Cliks, but the OS helper is missing: " + detail + ".", []string{"cliks notification-test"}})
+		}
+	}
 	if cfg.CurrentTeamCode == "" {
 		report.issues = append(report.issues, doctorIssue{"Join a team", "Cliks does not have a selected team code.", []string{"cliks join CLIK-XXXXXX"}})
 	}

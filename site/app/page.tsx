@@ -2,10 +2,7 @@ import Image from "next/image";
 import { RoomForm } from "../components/RoomForm";
 import { RoomDemo } from "../components/RoomDemo";
 import { HeroCtas } from "../components/HeroCtas";
-import { InstallCopy } from "../components/CommandBits";
-
-const installCommand =
-  "curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash";
+import { InstallOptions } from "../components/InstallOptions";
 const repoUrl = "https://github.com/YashMahawa/Cliks";
 const xUrl = "https://x.com/MahawarYas27492";
 
@@ -53,7 +50,7 @@ const steps = [
 const faqs = [
   {
     q: "Can you read what I type?",
-    a: "No. The OS only reports that a key was pressed — not which one. Content never leaves the machine.",
+    a: "No. Cliks immediately reduces local input to ‘keyboard activity happened.’ Key values, codes, and content never reach the relay.",
   },
   {
     q: "Is this a microphone stream?",
@@ -229,7 +226,7 @@ export default function HomePage() {
               <div className="lg:col-span-5">
                 <p className="section-kicker">CLI</p>
                 <h2 className="mt-3 text-[clamp(1.75rem,2.4vw,2.5rem)] font-bold tracking-tight">
-                  Install once.
+                  One command. No toolchain.
                 </h2>
                 <p className="mt-3 max-w-[40ch] text-soft">
                   After install:{" "}
@@ -237,7 +234,7 @@ export default function HomePage() {
                 </p>
               </div>
               <div className="lg:col-span-7">
-                <InstallCopy value={installCommand} />
+                <InstallOptions />
                 <p className="mt-3 font-mono text-[11px] text-mute">
                   Prefer to read it first?{" "}
                   <a
@@ -282,14 +279,17 @@ export default function HomePage() {
             />
             <span className="font-mono text-xs text-mute">MIT licensed</span>
           </div>
-          <a
-            href={xUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-mono text-xs text-mute hover:text-accent"
-          >
-            Follow on X
-          </a>
+          <div className="flex items-center gap-5 font-mono text-xs text-mute">
+            <a href={`${repoUrl}/stargazers`} target="_blank" rel="noopener noreferrer" className="hover:text-accent">
+              Star on GitHub
+            </a>
+            <a href="https://github.com/sponsors/YashMahawa" target="_blank" rel="noopener noreferrer" className="hover:text-accent">
+              Support
+            </a>
+            <a href={xUrl} target="_blank" rel="noopener noreferrer" className="hover:text-accent">
+              Follow on X
+            </a>
+          </div>
         </footer>
       </main>
     </div>

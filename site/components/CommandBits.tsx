@@ -53,10 +53,12 @@ export function InstallCopy({
   value,
   className = "",
   label = "Copy install command",
+  subtitle = "Native download · source fallback",
 }: {
   value: string;
   className?: string;
   label?: string;
+  subtitle?: string;
 }) {
   const [done, setDone] = useState(false);
 
@@ -86,7 +88,7 @@ export function InstallCopy({
             {done ? "Copied to clipboard" : label}
           </span>
           <span className="mt-0.5 block font-mono text-[11px] text-mute">
-            {done ? "Paste in your terminal" : "macOS · Linux · Windows · one line"}
+            {done ? "Paste in your terminal" : subtitle}
           </span>
         </span>
       </span>

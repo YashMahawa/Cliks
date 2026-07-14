@@ -46,6 +46,11 @@ jobs:
         if: runner.os != 'Windows'
         run: bash -n cli/install.sh
 
+      - name: PowerShell installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '[scriptblock]::Create((Get-Content -Raw cli/install.ps1)) | Out-Null'
+
   docker:
     name: Docker image
     runs-on: ubuntu-latest

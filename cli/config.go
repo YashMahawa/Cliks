@@ -76,25 +76,36 @@ type ListeningConfig struct {
 	AudioDevice       string  `json:"audioDevice,omitempty"`
 }
 
+type NotificationConfig struct {
+	Enabled    bool `json:"enabled"`
+	Sound      bool `json:"sound"`
+	Configured bool `json:"configured,omitempty"`
+}
+
 type CliksConfig struct {
-	APIURL          string          `json:"apiUrl"`
-	WSURL           string          `json:"wsUrl"`
-	CurrentTeamCode string          `json:"currentTeamCode,omitempty"`
-	Nickname        string          `json:"nickname,omitempty"`
-	KeepRunning     bool            `json:"keepRunning"`
-	Teams           []TeamConfig    `json:"teams"`
-	Sharing         SharingConfig   `json:"sharing"`
-	Listening       ListeningConfig `json:"listening"`
-	BatchWindowMs   int             `json:"batchWindowMs"`
+	APIURL          string             `json:"apiUrl"`
+	WSURL           string             `json:"wsUrl"`
+	CurrentTeamCode string             `json:"currentTeamCode,omitempty"`
+	Nickname        string             `json:"nickname,omitempty"`
+	PresenceStatus  string             `json:"presenceStatus,omitempty"`
+	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
+	KeepRunning     bool               `json:"keepRunning"`
+	Teams           []TeamConfig       `json:"teams"`
+	Sharing         SharingConfig      `json:"sharing"`
+	Listening       ListeningConfig    `json:"listening"`
+	Notifications   NotificationConfig `json:"notifications"`
+	BatchWindowMs   int                `json:"batchWindowMs"`
 }
 
 func defaultConfig() CliksConfig {
 	apiURL := getenvDefault("CLIKS_API_URL", productionAPIURL)
 	wsURL := getenvDefault("CLIKS_WS_URL", toWSURL(apiURL))
 	return CliksConfig{
-		APIURL: apiURL,
-		WSURL:  wsURL,
-		Teams:  []TeamConfig{},
+		APIURL:         apiURL,
+		WSURL:          wsURL,
+		PresenceStatus: "available",
+		Notifications:  NotificationConfig{Sound: true, Configured: true},
+		Teams:          []TeamConfig{},
 		Sharing: SharingConfig{
 			Keyboard: true,
 			Mouse:    true,
@@ -278,6 +289,14 @@ func formatTeamLabel(name string, code string) string {
 
 func normalizeConfig(cfg *CliksConfig) {
 	def := defaultConfig()
+	if !cfg.Notifications.Configured {
+		cfg.Notifications = def.Notifications
+	}
+	switch cfg.PresenceStatus {
+	case "available", "focus", "break", "dnd":
+	default:
+		cfg.PresenceStatus = def.PresenceStatus
+	}
 	if cfg.APIURL == "" {
 		cfg.APIURL = def.APIURL
 	}

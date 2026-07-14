@@ -43,6 +43,8 @@ Example:
 
 The receiving CLI schedules local sound playback using those offsets. That means the server sees only tiny pulses, while the receiver still hears a natural rhythm. New CLIs negotiate compact server-to-client activity frames with `compact-v1`; older clients still receive the verbose JSON shape.
 
+The separate social surface stays intentionally constrained. Presence carries an explicit four-state status (`available`, `focus`, `break`, `dnd`). Ephemeral reactions use a fixed allowlist and are not stored. A wave targets one same-room peer, is private to sender/recipient, and has a 30-second per-target cooldown; room reactions and waves share a six-per-10-second sender limit. Background clients may show targeted waves through native macOS Notification Center, Windows toast, or Linux `notify-send` only when the recipient enabled notifications. Focus/DND suppress notification delivery locally and sound is independently configurable.
+
 ## Team codes and public status
 
 New team codes use the `CLIK-XXXXXX` shape. Older or local test codes such as `CLIK-LOCAL` can still be joined because API validation accepts longer code strings.
@@ -98,19 +100,24 @@ Good next optimizations:
 
 `cliks start` keeps the process alive through ordinary WebSocket close/error events. It reports connection state, sends pings, terminates heartbeat timeouts, retries with exponential backoff plus bounded +/-10% jitter, and resumes joining the selected team when the backend is reachable again. The 30-second cap remains unchanged. Linux evdev read retries use the same jittered schedule so many clients/devices do not recover in lockstep. Activity captured while disconnected is best-effort and currently dropped rather than buffered.
 
+Local configuration and session state use atomic temp-file, fsync, and rename writes. Invalid config JSON is reported once per process instead of being silently treated as a clean default configuration. Foreground, background, and login-started sessions share a guarded `session.lock`; a young lock with incomplete metadata is not removed speculatively. WebSocket client heartbeats share the socket writer mutex, preventing concurrent ping and activity writes from corrupting a connection.
+
 Terminal capture stores its original `term.State` on the capture instance and restores it through deferred, idempotent cleanup. Raw-mode `Ctrl+C` cancels capture without closing stdin, so the restore still has a valid terminal file descriptor; `cliks fix-terminal` remains the manual fallback. TUI SIGHUP/SIGTERM handling uses Bubble Tea context cancellation rather than `os.Exit`, so alternate-screen/mouse cleanup and foreground-to-background handoff can finish through the normal path.
 
 The current audio engine still uses system players, but it caps concurrent playback at four processes and queues at most 96 jobs so dense batches do not create unbounded process storms. The four workers are bound to the owning session context, and every external player command has a 2-second timeout. Session teardown cancels active players and waits for the workers, preventing goroutine/process accumulation across repeated Live sessions. Player priority is spatial-first: **`mpv` first** (lavfi stereo pan + volume; never the invalid `--audio-pan` flag), then `ffplay` with an FFmpeg pan filter, then `afplay`/`paplay`/`pw-play` for distance volume, and `aplay`/Windows `Media.SoundPlayer` as basic fallbacks. `cliks setup` and the installer try to install mpv so non-technical users get spatial sound without manual package hunting. Before queueing, keyboard events within a 20ms playback window are merged and use the latest event's offset/pan/gain; mouse clicks are never merged. Above 50% queue pressure the client progressively thins keyboard playback while preserving click events; overflow replaces stale queued work with recent work. This keeps sound current instead of replaying a long backlog. Fatigue protection allows roughly 24 queued playback events per remote peer in its five-second window, scales through all 20 room seats, and uses a gradual nonlinear reduction that reaches the 35% floor only at extreme sustained aggregate load. A future native mixer could reduce process overhead further, but pan and distance now reach capable CLI players.
 
 Advanced users can set `audio.device`. Device routing prefers `mpv`, `paplay`, `pw-play`, or `aplay`, injects the player's native device argument without invoking a shell, and falls back with a `cliks doctor` warning when the active player cannot route. Changing the setting while a session is active reselects the player locally.
 
-The Go CLI uses Bubble Tea for the live dashboard and settings UI. Interactive controls are local-only and persist to the config file:
+The Go CLI uses Bubble Tea for a full-terminal spatial desk and settings UI. The desk centers the listener, draws adaptive depth rings, labels up to 12 peers, marks current typers, animates arrivals, and uses compact overflow dots as rooms grow. A first-live-run synthetic arrangement teaches the map without creating network events. Interactive listening and presence controls persist locally:
 
 - Up/Down: volume
 - `[`/`]`: ambience density
 - `m`: mute
 - `s`: spatial on/off
 - `f`: fatigue fade on/off
+- `j`/`k`: select a teammate
+- `1`/`2`/`3`/`4`: wave, nice, coffee, celebrate
+- `p`: cycle presence status
 - `Tab` or `Shift+S`: open live settings without disconnecting; `Tab`/`Esc`/`q` returns to the room
 - `Esc`, `q`, or Back from live: return to the main control screen
 - Stop or `Ctrl+C`: disconnect the current session
@@ -148,11 +155,12 @@ Required local checks before pushing:
 - `npm run build`
 - `npm run smoke:server`
 - `bash -n cli/install.sh`
+- PowerShell parse check for `cli/install.ps1`
 - `go test ./...` from `cli`
 - cross-build the Go CLI for Linux, macOS, and Windows when capture/background/startup behavior changes
 - `go test ./...` from `server` when relay/store/protocol behavior changes
 
-CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, compact activity frames, nickname truncation, deleted-code lookup behavior, room caps, live-room closure on delete, single-room auto-migration, and failed-join throttling. Go unit tests cover lookup throttling, WebSocket oversized/flood protection, slow-peer queue isolation, missed-heartbeat eviction, concurrent join/delete lifecycle ordering, population-scaled fatigue behavior, audio deadlines/cancellation, shared diagnostic rendering, and TUI report/footer behavior. `scripts/load-test.mjs` defaults to a local server on port 8787, waits for each welcome before sending, requires the exact expected fan-out count, and deletes temporary teams even when a run fails. Set `CLIKS_LOAD_TARGET` explicitly for a live backend and keep live `CLIKS_LOAD_*` values conservative.
+CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. Tagged releases add native Linux x64/arm64, macOS Intel/Apple Silicon, and Windows x64 archives through `.github/workflows/release.yml`; public installers consume those assets before considering a source build. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, compact activity frames, nickname truncation, deleted-code lookup behavior, room caps, live-room closure on delete, single-room auto-migration, and failed-join throttling. Go unit tests cover reaction allowlists/cooldowns, lookup throttling, WebSocket oversized/flood protection, slow-peer queue isolation, missed-heartbeat eviction, concurrent join/delete lifecycle ordering, population-scaled fatigue behavior, audio deadlines/cancellation, shared diagnostic rendering, and TUI report/footer behavior.
 
 ## Free-tier expectation
 

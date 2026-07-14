@@ -14,7 +14,7 @@ const PEERS = [
 ];
 
 /** Distance from center as % of stage — keeps clear air around YOU. */
-const RING_R = [34, 42, 50];
+const RING_R = [34, 41, 46];
 
 type EventKind = "keyboard" | "mouse";
 
@@ -57,10 +57,13 @@ export function RoomDemo() {
   const [finished, setFinished] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [tip, setTip] = useState<number | null>(null);
+  const [welcoming, setWelcoming] = useState(false);
+  const [visiblePeers, setVisiblePeers] = useState(PEERS.length);
   const peerRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const youRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef<number[]>([]);
   const tickRef = useRef<number | null>(null);
+  const welcomeTimersRef = useRef<number[]>([]);
 
   const placements = useMemo(
     () =>
@@ -82,6 +85,13 @@ export function RoomDemo() {
     youRef.current?.classList.remove("you-listening");
   }, []);
 
+  const clearWelcome = useCallback(() => {
+    for (const id of welcomeTimersRef.current) window.clearTimeout(id);
+    welcomeTimersRef.current = [];
+    setWelcoming(false);
+    setVisiblePeers(PEERS.length);
+  }, []);
+
   const stop = useCallback(() => {
     clearTimers();
     setRunning(false);
@@ -99,6 +109,7 @@ export function RoomDemo() {
   }, []);
 
   const start = useCallback(() => {
+    clearWelcome();
     clearTimers();
     setFinished(false);
     setRunning(true);
@@ -124,9 +135,34 @@ export function RoomDemo() {
         setSecondsLeft(0);
       }, DEMO_MS)
     );
-  }, [clearTimers, flashPeer, triggerMouseSound, triggerSound]);
+  }, [clearTimers, clearWelcome, flashPeer, triggerMouseSound, triggerSound]);
 
-  useEffect(() => () => clearTimers(), [clearTimers]);
+  useEffect(() => () => {
+    clearTimers();
+    clearWelcome();
+  }, [clearTimers, clearWelcome]);
+
+  // First visit: quietly show the room assembling. Audio remains click-initiated
+  // so the page never surprises people or fights browser autoplay rules.
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.sessionStorage.getItem("cliks-room-welcomed") === "1") return;
+    window.sessionStorage.setItem("cliks-room-welcomed", "1");
+    welcomeTimersRef.current.push(
+      window.setTimeout(() => {
+        setWelcoming(true);
+        setVisiblePeers(0);
+        PEERS.forEach((_, index) => {
+          welcomeTimersRef.current.push(
+            window.setTimeout(() => setVisiblePeers(index + 1), 260 + index * 230)
+          );
+        });
+        welcomeTimersRef.current.push(
+          window.setTimeout(() => setWelcoming(false), 260 + PEERS.length * 230 + 900)
+        );
+      }, 700)
+    );
+  }, []);
 
   useEffect(() => {
     const onExternalStart = () => {
@@ -148,12 +184,12 @@ export function RoomDemo() {
   }, []);
 
   return (
-    <div className={`room-orbit mx-auto w-full max-w-[420px] ${running ? "is-live" : ""}`}>
+    <div className={`room-orbit mx-auto w-full max-w-[420px] ${running ? "is-live" : ""} ${welcoming ? "is-welcoming" : ""}`}>
       <div className="orbit-chrome">
         <div className="status-chip">
           <span className={`status-mark ${running ? "is-on" : finished ? "is-done" : ""}`} aria-hidden />
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-soft">
-            {running ? `room live · ${secondsLeft}s` : finished ? "room quiet" : "your room"}
+            {running ? `room live · ${secondsLeft}s` : welcoming ? "people arriving" : finished ? "room quiet" : "your room"}
           </span>
         </div>
         <span className="font-mono text-[10px] text-mute">6 peers · 3 depths</span>
@@ -179,7 +215,7 @@ export function RoomDemo() {
           <span className="you-label">you</span>
         </div>
 
-        {placements.map((peer, i) => (
+        {placements.slice(0, visiblePeers).map((peer, i) => (
           <button
             key={peer.name}
             type="button"
@@ -213,6 +249,11 @@ export function RoomDemo() {
       </div>
 
       <div className="orbit-actions">
+        {welcoming ? (
+          <p className="orbit-welcome" aria-live="polite">
+            Your people settle around you. Closer sounds feel closer.
+          </p>
+        ) : null}
         {!running ? (
           <button type="button" onClick={start} className="btn-primary flex h-11 w-full items-center justify-center text-sm">
             {finished ? "Hear the room again" : "Hear a room (14 sec)"}

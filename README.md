@@ -10,17 +10,23 @@ No login. No chat. No microphone. No keystrokes sent.
 
 Open the Cliks website, create a team code, and copy the install or join command from the page:
 
-[cliks.agichaos.dev](https://cliks.agichaos.dev)
+[site-kappa-six-64.vercel.app](https://site-kappa-six-64.vercel.app)
 
 The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything.
 
-Install the CLI (macOS, Windows Git Bash, or Linux):
+Install the native CLI on macOS or Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
 ```
 
-The installer prepares **spatial sound** (mpv when possible) and **background capture** access, then runs `cliks setup`. Full per-OS notes: [docs/setup.md](docs/setup.md).
+On Windows 10/11, open PowerShell and run:
+
+```powershell
+irm https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.ps1 | iex
+```
+
+The installers download a native release (no Go or Git required), prepare **spatial sound** and **background capture** access, then run `cliks setup`. Source compilation remains a fallback on unusual Unix architectures. Full per-OS notes: [docs/setup.md](docs/setup.md).
 
 Then create or join a room:
 
@@ -41,6 +47,8 @@ Cliks sends only tiny activity pulses:
 - mouse click happened
 - coarse timing between those activity pulses
 - your optional 10-character plain-text display name, if you set one with `cliks nickname`
+- your explicit presence state (`available`, `focus`, `break`, or `dnd`)
+- allowlisted ephemeral reactions such as a wave or coffee — never arbitrary message text
 
 Cliks does **not** send:
 
@@ -147,6 +155,7 @@ cliks service enable|disable
 cliks set autostart on
 cliks set audio.device default
 cliks sound-test
+cliks notification-test
 cliks capture-test
 cliks fix-terminal
 cliks doctor
@@ -156,7 +165,7 @@ Bare `cliks` opens the control screen. The home view intentionally stays small: 
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
-While `cliks start` is open, Cliks shows a live terminal dashboard with room name and code, display names for small rooms, a compact typing-now summary, local flow badge, live health/last-activity line, capture, connection, and sound controls. Larger rooms collapse to people/typing counts so the panel stays readable. Use `Up/Down` to adjust volume, `Left/Right` or `[` and `]` to adjust sound density, `m` to mute, `s` to toggle spatial audio, and `f` to toggle fatigue fade. Press `Tab` or `Shift+S` to open the same preference rows used by the main TUI, then `Tab`/`Esc`/`q` to return to live. Press `Esc`, `q`, or the Back button from live to return to the main control screen instead of quitting the app; use Stop or `Ctrl+C` when you actually want to disconnect. If Keep Running is on, leaving or closing the foreground live window hands the room off to one background session. You can click the team code to copy it, click hovered on-screen controls, use `?` for the shortcut guide, and use the mouse wheel for volume in terminals with mouse reporting. Changes are saved automatically, and settings include short explanations for spatial audio, dynamic circle placement, density, and fatigue fade.
+While `cliks start` is open, Cliks uses the terminal as a full spatial desk: you sit in the center, teammates occupy adaptive rings, active typers light up, recent reactions stay visible briefly, and large rooms collapse overflow into calm semantic dots. The first visit animates a small example room so the controls make sense before anyone joins. Use `j/k` to select a teammate, `1` to wave, `2` for nice, `3` for coffee, `4` to celebrate, and `p` to cycle presence. `Up/Down` adjusts volume, `Left/Right` or `[` and `]` adjusts density, and `m`/`s`/`f` toggle mute, spatial audio, and fatigue fade. `Tab` opens live preferences without disconnecting. Optional native notifications are off by default, apply only to targeted waves in background mode, are suppressed during focus/DND, and have a separate sound switch.
 
 Rooms are capped at 20 live people. Spatial placement pans teammates around your desk locally: 4 people in the first ring and 2 more seats per outer ring, with each ring rotated to avoid stacking teammates at the same angle. Dynamic circle placement is enabled for new installs and can be turned off; when enabled it reshuffles every 1-60 minutes so recently active teammates move closer locally. Fatigue fade softens long typing bursts with a room-aware gradual curve so busy rooms do not pump between loud and quiet. Density controls how many received sounds are played locally; it never changes what activity is sent.
 
@@ -233,14 +242,14 @@ curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.s
 
 Designed for non-technical users. It:
 
-- installs Go if needed and builds the CLI
+- downloads the current native GitHub Release (source build only as a fallback)
 - installs **mpv** for stereo spatial sound when a package manager is available
 - adds `~/.local/bin` (or platform equivalent) to common shell PATH files
 - prepares Linux input access automatically when possible
 - opens macOS Accessibility settings when needed
 - runs `cliks setup` and prints plain next steps
 
-On Windows, run it from **Git Bash** (or another MSYS-style shell). Open a new terminal afterward if `cliks` is not found. In Termux, the wrapper goes to `$PREFIX/bin` and desktop input-group steps are skipped.
+Windows users should use `cli/install.ps1` from PowerShell; Git Bash remains a supported fallback. Tagged releases are built and tested natively on Linux x64/arm64, macOS Intel/Apple Silicon, and Windows x64. In Termux, the source-build wrapper goes to `$PREFIX/bin` and desktop input-group steps are skipped.
 
 See [docs/setup.md](docs/setup.md) for a full macOS / Windows / Linux walkthrough.
 
@@ -322,9 +331,11 @@ docker compose up
 
 ## Current Status
 
-This is an early prototype. The website, longer team codes, Go WebSocket relay, team deletion with live deleted-room signals, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
+Cliks is an active prototype. The website, longer team codes, Go WebSocket relay, team deletion with live deleted-room signals, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
-Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS and Windows still need more polish around native permission prompts and capture validation.
+Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS uses global hooks after Accessibility is granted to the terminal app launching Cliks; Windows global hooks work for normal-privilege applications, while capture may pause when an elevated window is focused. `cliks setup`, `cliks doctor`, and `cliks capture-test` provide platform-specific readiness checks and fixes.
+
+Local configuration and session state are written atomically. Invalid saved JSON produces a visible warning instead of silently replacing settings with defaults, and one session lock prevents foreground, background, and login-started copies from connecting at the same time. WebSocket heartbeat writes are synchronized with other socket writes.
 
 The hosted backend keeps `/health` public for uptime checks, but it returns only anonymous aggregate counts. It does not expose team codes, team names, or per-room snapshots. Team lookups and failed WebSocket joins are limited per IP, inbound WebSocket messages are size/rate guarded, a socket is allowed in only one room at a time, and recovered background/connection panics are logged with stack traces instead of taking down unrelated rooms.
 

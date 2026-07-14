@@ -41,8 +41,41 @@ esac
 say "Installing Cliks..."
 say ""
 
+# Prefer a small native release. Source compilation remains a fallback for
+# unreleased branches and unusual architectures.
+PREBUILT=0
+install_prebuilt() {
+  local os arch asset url tmp
+  case "$(uname -s)" in
+    Darwin) os="macos" ;;
+    Linux) os="linux" ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) return 1 ;;
+  esac
+  asset="cliks-${os}-${arch}.tar.gz"
+  url="https://github.com/YashMahawa/Cliks/releases/latest/download/${asset}"
+  tmp="$(mktemp -d 2>/dev/null || mktemp -d -t cliks)"
+  if curl -fL --retry 2 --connect-timeout 10 "$url" -o "$tmp/$asset" 2>/dev/null && \
+     tar -xzf "$tmp/$asset" -C "$tmp" && [ -x "$tmp/cliks" ]; then
+    mkdir -p "$BIN_DIR"
+    install -m 755 "$tmp/cliks" "$BIN_DIR/cliks"
+    PREBUILT=1
+    ok "Downloaded native Cliks release"
+  fi
+  rm -rf "$tmp"
+  [ "$PREBUILT" = "1" ]
+}
+
+if ! is_termux; then
+  install_prebuilt || tip "No matching release found — using the source fallback"
+fi
+
 # --- git ---
-if ! command -v git >/dev/null 2>&1; then
+if [ "$PREBUILT" = "0" ] && ! command -v git >/dev/null 2>&1; then
   if is_termux; then
     say "Installing git..."
     if command -v pkg >/dev/null 2>&1; then
@@ -118,18 +151,20 @@ install_go() {
   esac
 }
 
-if ! command -v go >/dev/null 2>&1; then
+if [ "$PREBUILT" = "0" ] && ! command -v go >/dev/null 2>&1; then
   install_go
 fi
 
 # Refresh PATH for common Go locations after fresh install.
 export PATH="$HOME/go/bin:/usr/local/go/bin:/c/Program Files/Go/bin:$PATH"
 
-if ! command -v go >/dev/null 2>&1; then
+if [ "$PREBUILT" = "0" ] && ! command -v go >/dev/null 2>&1; then
   say "Go is installed but not on PATH yet. Open a new terminal and rerun this command."
   exit 1
 fi
-ok "Go ready"
+if [ "$PREBUILT" = "0" ]; then
+  ok "Go ready"
+fi
 
 # --- spatial audio (mpv) + helpers ---
 install_system_deps() {
@@ -159,17 +194,17 @@ install_system_deps() {
           apt-get install -y mpv termux-api
         fi
       elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard
+        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard libnotify
       elif command -v apt-get >/dev/null 2>&1; then
         sudo apt-get update
-        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils || \
+        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-bin || \
           sudo apt-get install -y mpv
       elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils || sudo dnf install -y mpv
+        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils libnotify || sudo dnf install -y mpv
       elif command -v zypper >/dev/null 2>&1; then
-        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils || sudo zypper install -y mpv
+        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-tools || sudo zypper install -y mpv
       elif command -v apk >/dev/null 2>&1; then
-        sudo apk add mpv xclip wl-clipboard
+        sudo apk add mpv xclip wl-clipboard libnotify
       fi
       if command -v mpv >/dev/null 2>&1; then
         ok "Spatial audio (mpv)"
@@ -204,26 +239,25 @@ install_system_deps() {
 
 install_system_deps
 
-# --- clone / update source ---
-if [ -d "$INSTALL_DIR/.git" ]; then
-  git -C "$INSTALL_DIR" pull --ff-only
-else
-  rm -rf "$INSTALL_DIR"
-  git clone "$REPO_URL" "$INSTALL_DIR"
-fi
-ok "Source ready"
-
-# --- build ---
-cd "$INSTALL_DIR/cli"
-go build -o dist/cliks .
-ok "Built cliks"
-
-mkdir -p "$BIN_DIR"
-cat > "$BIN_DIR/cliks" <<EOF
+# --- source fallback ---
+if [ "$PREBUILT" = "0" ]; then
+  if [ -d "$INSTALL_DIR/.git" ]; then
+    git -C "$INSTALL_DIR" pull --ff-only
+  else
+    rm -rf "$INSTALL_DIR"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+  ok "Source ready"
+  cd "$INSTALL_DIR/cli"
+  go build -o dist/cliks .
+  ok "Built cliks"
+  mkdir -p "$BIN_DIR"
+  cat > "$BIN_DIR/cliks" <<EOF
 #!/usr/bin/env sh
 exec "$INSTALL_DIR/cli/dist/cliks" "\$@"
 EOF
-chmod +x "$BIN_DIR/cliks"
+  chmod +x "$BIN_DIR/cliks"
+fi
 
 # --- PATH for new terminals ---
 ensure_path_export() {

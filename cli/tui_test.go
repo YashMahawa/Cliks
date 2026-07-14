@@ -163,6 +163,26 @@ func TestLiveViewShowsHealthAndFlowDuringQuietPeriods(t *testing.T) {
 	}
 }
 
+func TestFirstLiveViewTeachesSpatialDeskWithoutNetworkPeers(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+	model.width = 100
+	model.height = 28
+
+	view := model.View()
+	for _, want := range []string{"Welcome to your desk", "Mira", "Sam", "Noor", "[ YOU ]"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("first live view is missing %q:\n%s", want, view)
+		}
+	}
+	if !loadConfig().WelcomeSeen {
+		t.Fatal("first live view did not persist the welcome marker")
+	}
+}
+
 func TestHomeShortcutGuideTogglesWithoutChangingSelection(t *testing.T) {
 	model := homeModel{cfg: defaultConfig(), mode: "home", cursor: 1}
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})

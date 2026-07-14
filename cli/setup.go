@@ -56,6 +56,11 @@ func runSetupChecks(verifySound bool) []setupStep {
 	}
 	steps = append(steps, ensureAudioReady()...)
 	steps = append(steps, ensureCaptureReady()...)
+	if ready, detail := nativeNotificationStatus(); ready {
+		steps = append(steps, setupStep{title: "Native notifications", status: "ok", detail: "Optional waves can use " + detail + ". They stay off until you enable them in Preferences."})
+	} else {
+		steps = append(steps, setupStep{title: "Native notifications", status: "tip", detail: "Optional and currently off: " + detail + "."})
+	}
 	if msg := repairAutostartIfEnabled(); msg != "" {
 		steps = append(steps, setupStep{
 			title:  "Launch at login",

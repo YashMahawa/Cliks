@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.s
 cliks join CLIK-XXXXXX
 ```
 
-That is usually enough. The installer:
+That is usually enough on macOS and Linux. It downloads a native release first, so Go and Git are not required on normal machines. The installer:
 
 - builds the `cliks` command
 - installs **mpv** for stereo spatial sound when possible
@@ -55,10 +55,10 @@ No key values are ever read or sent — only “keyboard activity” / “mouse 
 
 **Note (not an error):** if you focus Task Manager or another *Administrator* window, Windows security may pause capture until you leave that window. Normal apps are fine.
 
-Install from **Git Bash** (or another MSYS-style shell):
+Open PowerShell (no Administrator mode needed) and run:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
+```powershell
+irm https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.ps1 | iex
 ```
 
 Then open a new terminal and:
@@ -97,6 +97,7 @@ cliks start --terminal --self
 |---------|---------|
 | `cliks setup` | One-time readiness: sound + capture, auto-fix what it can |
 | `cliks sound-test` | Hear sample keyboard/mouse clicks |
+| `cliks notification-test` | Send one OS-native test notification using your sound preference |
 | `cliks doctor` | Detailed report (also under More → Diagnostics in the TUI) |
 | `cliks capture-test` | Confirm activity is detected while you type/click |
 | `cliks` | Friendly on-screen control panel |
@@ -152,6 +153,7 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 |---------|-----|
 | `cliks: command not found` | Open a **new** terminal, or `export PATH="$HOME/.local/bin:$PATH"` |
 | No sound | `cliks setup` then `cliks sound-test` |
+| No wave notification | Enable Notifications in Preferences, then run `cliks notification-test` |
 | Teammates cannot hear you | `cliks capture-test` then `cliks setup` |
 | macOS capture silent | Accessibility for your terminal app, then restart Cliks |
 | Linux capture silent after install | Log out/in once if you were added to the `input` group |

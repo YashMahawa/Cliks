@@ -28,6 +28,7 @@ type PeerPresence struct {
 	PeerID   string `json:"peerId"`
 	Nickname string `json:"nickname,omitempty"`
 	JoinedAt int64  `json:"joinedAt,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 type peerPlacement struct {

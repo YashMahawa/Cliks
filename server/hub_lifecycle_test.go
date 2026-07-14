@@ -45,7 +45,7 @@ func TestDeleteWaitsForConcurrentJoinAndLeavesNoRoom(t *testing.T) {
 
 	joined := make(chan struct{})
 	go func() {
-		hub.join(context.Background(), conn, store.team.Code, "", false)
+		hub.join(context.Background(), conn, store.team.Code, "", "available", false)
 		close(joined)
 	}()
 	<-store.getStarted

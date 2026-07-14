@@ -50,6 +50,7 @@ type SessionViewState struct {
 	LastLocalActivityAt time.Time
 	LastPeerActivityAt  time.Time
 	LocalBurstCount     int
+	RecentReactions     []PeerReactionStatus
 }
 
 type PeerActivityStatus struct {
@@ -58,26 +59,34 @@ type PeerActivityStatus struct {
 	LastActivityAt time.Time
 }
 
+type PeerReactionStatus struct {
+	PeerID       string
+	Nickname     string
+	Reaction     string
+	TargetPeerID string
+	At           time.Time
+}
+
 type sessionController struct {
-	cfg               CliksConfig
-	opts              StartOptions
-	ctx               context.Context
-	cancel            context.CancelFunc
-	audio             *AudioEngine
-	updates           chan SessionViewState
-	local             chan LocalActivityEvent
-	instance          *sessionInstance
-	lastStateWrite    time.Time
-	stateWriteTimer   *time.Timer
-	stateWriteMu      sync.Mutex
-	stopOnce          sync.Once
-	mu                sync.Mutex
-	wsMu              sync.Mutex
-	ws                *websocket.Conn
-	state             SessionViewState
-	ownPeerID         string
-	capture           *ActivityCapture
-	rateLimitedUntil  time.Time
+	cfg              CliksConfig
+	opts             StartOptions
+	ctx              context.Context
+	cancel           context.CancelFunc
+	audio            *AudioEngine
+	updates          chan SessionViewState
+	local            chan LocalActivityEvent
+	instance         *sessionInstance
+	lastStateWrite   time.Time
+	stateWriteTimer  *time.Timer
+	stateWriteMu     sync.Mutex
+	stopOnce         sync.Once
+	mu               sync.Mutex
+	wsMu             sync.Mutex
+	ws               *websocket.Conn
+	state            SessionViewState
+	ownPeerID        string
+	capture          *ActivityCapture
+	rateLimitedUntil time.Time
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
@@ -465,8 +474,13 @@ func (s *sessionController) configLoop() {
 			nickname := sanitizeNickname(cfg.Nickname)
 			if nickname != sanitizeNickname(s.cfg.Nickname) {
 				s.cfg.Nickname = nickname
-				s.sendProfile(nickname)
+				s.sendProfile(nickname, cfg.PresenceStatus)
 			}
+			if cfg.PresenceStatus != s.cfg.PresenceStatus {
+				s.cfg.PresenceStatus = cfg.PresenceStatus
+				s.sendProfile(nickname, cfg.PresenceStatus)
+			}
+			s.cfg.Notifications = cfg.Notifications
 			if cfg.Listening != s.cfg.Listening {
 				s.cfg.Listening = cfg.Listening
 				s.audio.updateListening(cfg.Listening)
@@ -479,16 +493,32 @@ func (s *sessionController) configLoop() {
 	}
 }
 
-func (s *sessionController) sendProfile(nickname string) {
+func (s *sessionController) sendProfile(nickname string, status string) {
 	s.wsMu.Lock()
 	conn := s.ws
 	if conn != nil {
 		_ = conn.WriteJSON(map[string]any{
 			"type":     "profile",
 			"nickname": nickname,
+			"status":   status,
 		})
 	}
 	s.wsMu.Unlock()
+}
+
+func (s *sessionController) sendReaction(reaction string, targetPeerID string) {
+	s.wsMu.Lock()
+	defer s.wsMu.Unlock()
+	if s.ws == nil {
+		return
+	}
+	_ = s.ws.WriteJSON(map[string]any{"type": "reaction", "reaction": reaction, "targetPeerId": targetPeerID})
+}
+
+func (s *sessionController) cyclePresence() {
+	s.cfg.PresenceStatus = nextPresence(s.cfg.PresenceStatus, 1)
+	_ = saveConfig(s.cfg)
+	s.sendProfile(sanitizeNickname(s.cfg.Nickname), s.cfg.PresenceStatus)
 }
 
 func (s *sessionController) connectLoop() {
@@ -552,6 +582,7 @@ func (s *sessionController) connectLoop() {
 			"type":     "join",
 			"teamCode": s.cfg.CurrentTeamCode,
 			"nickname": sanitizeNickname(s.cfg.Nickname),
+			"status":   s.cfg.PresenceStatus,
 			"client": map[string]any{
 				"name":     "cliks",
 				"version":  version,
@@ -687,6 +718,8 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			TeamCode       string                `json:"teamCode,omitempty"`
 			ActiveCount    int                   `json:"activeCount,omitempty"`
 			Nickname       string                `json:"nickname,omitempty"`
+			Reaction       string                `json:"reaction,omitempty"`
+			TargetPeerID   string                `json:"targetPeerId,omitempty"`
 			BatchStartedAt int64                 `json:"batchStartedAt,omitempty"`
 			Events         []RemoteActivityEvent `json:"events,omitempty"`
 			Peers          []PeerPresence        `json:"peers,omitempty"`
@@ -735,6 +768,17 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 				state.RecentPeerActivity = markPeerActive(state.RecentPeerActivity, envelope.PeerID, envelope.Nickname, time.Now())
 			})
 			s.audio.scheduleBatch(envelope.PeerID, envelope.Events)
+		case "peer_reaction":
+			now := time.Now()
+			s.set(func(state *SessionViewState) {
+				state.RecentReactions = append(state.RecentReactions, PeerReactionStatus{PeerID: envelope.PeerID, Nickname: envelope.Nickname, Reaction: envelope.Reaction, TargetPeerID: envelope.TargetPeerID, At: now})
+				if len(state.RecentReactions) > 8 {
+					state.RecentReactions = state.RecentReactions[len(state.RecentReactions)-8:]
+				}
+			})
+			if envelope.Reaction == "wave" && envelope.TargetPeerID == s.ownPeerID && envelope.PeerID != s.ownPeerID && runModeFromEnv() != runModeForeground {
+				_ = notifyWave(loadConfig(), envelope.Nickname)
+			}
 		case "a":
 			events := parseCompactEvents(envelope.CompactEvents)
 			if envelope.CompactPeerID != "" && len(events) > 0 {

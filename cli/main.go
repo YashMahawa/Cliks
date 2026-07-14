@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.2.5"
+const version = "0.3.0"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -61,6 +61,8 @@ func run(args []string) error {
 		return runDoctor()
 	case "sound-test":
 		return runSoundTest()
+	case "notification-test":
+		return runNotificationTest()
 	case "capture-test":
 		return cmdCaptureTest(rest[1:])
 	case "fix-terminal":
@@ -445,6 +447,20 @@ func cmdSet(args []string) error {
 		cfg.Listening.Spatial = boolValue
 	case "hear.fade":
 		cfg.Listening.FatigueProtection = boolValue
+	case "notifications":
+		cfg.Notifications.Enabled = boolValue
+		cfg.Notifications.Configured = true
+	case "notifications.sound":
+		cfg.Notifications.Sound = boolValue
+		cfg.Notifications.Configured = true
+	case "presence":
+		status := strings.ToLower(strings.TrimSpace(value))
+		switch status {
+		case "available", "focus", "break", "dnd":
+			cfg.PresenceStatus = status
+		default:
+			return fmt.Errorf("presence must be available, focus, break, or dnd")
+		}
 	case "spatial.dynamic":
 		cfg.Listening.DynamicPlacement = boolValue
 	case "keep.running":
@@ -623,6 +639,8 @@ Usage:
   %[1]s setup            One-time easy setup (sound + capture)
   %[1]s doctor           Print the full setup and permission report
   %[1]s sound-test       Play local sample sounds
+  %[1]s notification-test
+                         Send one native notification using your sound preference
   %[1]s capture-test     Verify local activity capture
   %[1]s service ...      Canonical service control (background + login)
   %[1]s service start|stop|status [CODE]

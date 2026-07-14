@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"sort"
@@ -53,6 +54,9 @@ func shortcutEntries(context string) []shortcutHelp {
 		}
 	case "live":
 		return []shortcutHelp{
+			{"j / k", "select a teammate on the spatial desk"},
+			{"1 / 2 / 3 / 4", "wave, nice, coffee, or celebrate"},
+			{"p", "cycle available, focus, break, and do not disturb"},
 			{"Up/+, Down/-", "raise or lower volume"},
 			{"Right/], Left/[", "raise or lower sound density"},
 			{"m / s / f", "toggle mute, spatial audio, or fatigue fade"},
@@ -646,7 +650,6 @@ func (m homeModel) itemPrefixLines() []string {
 	}
 	return append(lines, "")
 }
-
 
 func (m homeModel) preferencesView() string {
 	rows := settingsRows(m.cfg)
@@ -1244,6 +1247,15 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		{"Hear keyboard", "play teammate keyboard events", func(c CliksConfig) string { return onOff(c.Listening.Keyboard) }, func(c *CliksConfig, _ int) { c.Listening.Keyboard = !c.Listening.Keyboard }},
 		{"Hear mouse", "play teammate click events", func(c CliksConfig) string { return onOff(c.Listening.Mouse) }, func(c *CliksConfig, _ int) { c.Listening.Mouse = !c.Listening.Mouse }},
 		{"Self monitor", "hear your own local test events", func(c CliksConfig) string { return onOff(c.Listening.Self) }, func(c *CliksConfig, _ int) { c.Listening.Self = !c.Listening.Self }},
+		{"Notifications", "native alerts for direct waves", func(c CliksConfig) string { return onOff(c.Notifications.Enabled) }, func(c *CliksConfig, _ int) {
+			c.Notifications.Enabled = !c.Notifications.Enabled
+			c.Notifications.Configured = true
+		}},
+		{"Notify sound", "sound with native wave alerts", func(c CliksConfig) string { return onOff(c.Notifications.Sound) }, func(c *CliksConfig, _ int) {
+			c.Notifications.Sound = !c.Notifications.Sound
+			c.Notifications.Configured = true
+		}},
+		{"Presence", "available, focus, break, or dnd", func(c CliksConfig) string { return presenceLabel(c.PresenceStatus) }, func(c *CliksConfig, d int) { c.PresenceStatus = nextPresence(c.PresenceStatus, d) }},
 		{"Share keyboard", "send keyboard activity kind only", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
 		{"Share mouse", "send left/right click activity only", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
 		{"Keep Running", "saved terminal-close preference", func(c CliksConfig) string { return onOff(c.KeepRunning) }, func(c *CliksConfig, _ int) { c.KeepRunning = !c.KeepRunning }},
@@ -1737,10 +1749,19 @@ type sessionModel struct {
 	height         int
 	now            time.Time
 	helpOpen       bool
+	selectedPeer   int
+	welcomeUntil   time.Time
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
-	return sessionModel{controller: controller, state: controller.viewState(), buttonHover: -1, now: time.Now()}
+	now := time.Now()
+	model := sessionModel{controller: controller, state: controller.viewState(), buttonHover: -1, now: now}
+	if !controller.cfg.WelcomeSeen {
+		model.welcomeUntil = now.Add(6 * time.Second)
+		controller.cfg.WelcomeSeen = true
+		_ = saveConfig(controller.cfg)
+	}
+	return model
 }
 
 func (m sessionModel) Init() tea.Cmd {
@@ -1871,6 +1892,20 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.controller.toggle("spatial")
 		case "f":
 			m.controller.toggle("fade")
+		case "j":
+			m.selectedPeer = clampInt(m.selectedPeer+1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
+		case "k":
+			m.selectedPeer = clampInt(m.selectedPeer-1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
+		case "1":
+			m.sendLiveReaction("wave")
+		case "2":
+			m.sendLiveReaction("nice")
+		case "3":
+			m.sendLiveReaction("coffee")
+		case "4":
+			m.sendLiveReaction("celebrate")
+		case "p":
+			m.controller.cyclePresence()
 		case "tab", "S":
 			m.mode = "settings"
 		}
@@ -1892,17 +1927,185 @@ func (m sessionModel) View() string {
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
 	}
-	left, right, _ := m.livePanelLines()
-	width := panelWidth(m.width)
-	colWidth := (width - 6) / 2
-	room := stylePanel.Width(colWidth).Render(strings.Join(left, "\n"))
-	sound := stylePanel.Width(colWidth).Render(strings.Join(right, "\n"))
+	width := maxInt(44, panelWidth(m.width))
+	bodyHeight := maxInt(12, m.height-9)
+	header := m.liveHeader(width)
 	controls := m.liveControlsStyle().Width(width).Render(m.liveControlsLine())
-	return lipgloss.JoinVertical(lipgloss.Left,
-		styleTitle.Render("Cliks Live"),
-		lipgloss.JoinHorizontal(lipgloss.Top, room, "  ", sound),
-		controls,
-	)
+	if width < 82 {
+		desk := stylePanel.Width(width).Height(bodyHeight).Render(m.renderSpatialDesk(width-6, bodyHeight-3))
+		return lipgloss.JoinVertical(lipgloss.Left, header, desk, controls)
+	}
+	mapWidth := int(float64(width) * 0.64)
+	infoWidth := width - mapWidth - 2
+	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(m.renderSpatialDesk(mapWidth-6, bodyHeight-3))
+	activity := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
+	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", activity), controls)
+}
+
+func (m sessionModel) liveHeader(width int) string {
+	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
+	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	left := " Cliks  /  " + valuePlain(team, "Team")
+	if code != "" {
+		left += "  ·  " + code
+	}
+	right := connectionStyle(m.state.ConnectionStatus) + "  ·  " + fmt.Sprintf("%d here", maxInt(1, m.state.ActiveCount)) + " "
+	contentWidth := maxInt(20, width-2)
+	rightWidth := ansi.StringWidth(right)
+	left = ansi.Truncate(left, maxInt(8, contentWidth-rightWidth-2), "…")
+	gap := maxInt(2, contentWidth-ansi.StringWidth(left)-rightWidth)
+	return styleTitle.Width(contentWidth).Render(left + strings.Repeat(" ", gap) + right)
+}
+
+func (m sessionModel) renderSpatialDesk(width int, height int) string {
+	width = maxInt(32, width)
+	height = maxInt(10, height)
+	grid := make([][]rune, height)
+	for y := range grid {
+		grid[y] = []rune(strings.Repeat(" ", width))
+	}
+	put := func(x int, y int, value string) {
+		if y < 0 || y >= height {
+			return
+		}
+		for i, ch := range []rune(value) {
+			px := x + i
+			if px >= 0 && px < width {
+				grid[y][px] = ch
+			}
+		}
+	}
+	cx, cy := width/2, height/2
+	for ring := 1; ring <= 2; ring++ {
+		rx := float64(width) * (0.20 + float64(ring)*0.12)
+		ry := float64(height) * (0.18 + float64(ring)*0.12)
+		for step := 0; step < 72; step++ {
+			a := float64(step) * 2 * math.Pi / 72
+			put(cx+int(math.Cos(a)*rx), cy+int(math.Sin(a)*ry), "·")
+		}
+	}
+	put(cx-3, cy, "[ YOU ]")
+	peers := sortedRemotePeers(m.state)
+	if len(peers) == 0 && !m.welcomeUntil.IsZero() && m.now.Before(m.welcomeUntil) {
+		peers = []PeerPresence{{PeerID: "demo-1", Nickname: "Mira", JoinedAt: m.now.Add(-time.Second).UnixMilli()}, {PeerID: "demo-2", Nickname: "Sam", JoinedAt: m.now.Add(-2 * time.Second).UnixMilli()}, {PeerID: "demo-3", Nickname: "Noor", JoinedAt: m.now.Add(-3 * time.Second).UnixMilli()}}
+		put(maxInt(1, cx-10), 0, "Welcome to your desk")
+	}
+	visible := minInt(len(peers), 12)
+	for i := 0; i < visible; i++ {
+		peer := peers[i]
+		ring := 1
+		seat := i
+		capacity := 4
+		if i >= 4 {
+			ring, seat, capacity = 2, i-4, 8
+		}
+		a := -math.Pi/2 + float64(seat)*2*math.Pi/float64(capacity) + float64(ring-1)*0.22
+		rx := float64(width) * (0.31 + float64(ring-1)*0.11)
+		ry := float64(height) * (0.28 + float64(ring-1)*0.10)
+		x, y := cx+int(math.Cos(a)*rx), cy+int(math.Sin(a)*ry)
+		name := sanitizeNickname(peer.Nickname)
+		if name == "" {
+			name = fmt.Sprintf("Peer %d", i+1)
+		}
+		marker := peerStatusMarker(peer.Status)
+		if peerTyping(m.state, peer.PeerID, m.now) {
+			marker = "◆"
+		}
+		if m.now.Sub(time.UnixMilli(peer.JoinedAt)) < 1600*time.Millisecond && (m.now.UnixMilli()/250)%2 == 0 {
+			marker = "◌"
+		}
+		if i == m.selectedPeer {
+			marker = "●"
+		}
+		label := marker + " " + truncateRunes(name, 10)
+		put(x-len([]rune(label))/2, y, label)
+	}
+	if len(peers) > visible {
+		extra := len(peers) - visible
+		dots := strings.Repeat("•", minInt(extra, 8))
+		put(cx-len([]rune(dots))/2, height-1, dots+fmt.Sprintf(" +%d nearby", extra))
+	}
+	lines := make([]string, height)
+	for i := range grid {
+		lines[i] = strings.TrimRight(string(grid[i]), " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func peerStatusMarker(status string) string {
+	switch status {
+	case "focus":
+		return "◎"
+	case "break":
+		return "◒"
+	case "dnd":
+		return "×"
+	default:
+		return "○"
+	}
+}
+
+func peerTyping(state SessionViewState, peerID string, now time.Time) bool {
+	for _, activity := range state.RecentPeerActivity {
+		if activity.PeerID == peerID && now.Sub(activity.LastActivityAt) < 1800*time.Millisecond {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func reactionGlyph(value string) string {
+	switch value {
+	case "wave":
+		return "👋"
+	case "nice":
+		return "★"
+	case "coffee":
+		return "☕"
+	case "focus":
+		return "◎"
+	case "celebrate":
+		return "✦"
+	}
+	return "•"
+}
+
+func (m sessionModel) liveActivityView(width int) string {
+	lines := []string{styleAccent.Render("Right now"), styleDim.Render(valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)), "", typingSummary(m.state, m.now), roomPeopleSummary(m.state), "Flow: " + flowBadge(m.state, m.now), "Health: " + healthSummary(m.state, m.now), "Capture: " + valuePlain(m.state.CaptureMode, "starting"), "", "Volume  " + compactListeningBar(m.state.Listening), "Density " + compactBar(m.state.Listening.Density), "", "Presence  " + presenceLabel(m.controller.cfg.PresenceStatus), "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled), "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound)}
+	if peers := sortedRemotePeers(m.state); len(peers) > 0 {
+		selected := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
+		lines = append(lines, "", styleAccent.Render("Selected: "+valuePlain(selected.Nickname, "teammate")), styleDim.Render("j/k chooses a teammate"))
+	}
+	for i := len(m.state.RecentReactions) - 1; i >= 0 && len(lines) < maxInt(12, m.height-8); i-- {
+		reaction := m.state.RecentReactions[i]
+		if m.now.Sub(reaction.At) > 12*time.Second {
+			continue
+		}
+		lines = append(lines, reactionGlyph(reaction.Reaction)+" "+valuePlain(reaction.Nickname, "Teammate")+" sent "+reaction.Reaction)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *sessionModel) sendLiveReaction(reaction string) {
+	peers := sortedRemotePeers(m.state)
+	target := ""
+	if len(peers) > 0 {
+		target = peers[clampInt(m.selectedPeer, 0, len(peers)-1)].PeerID
+	}
+	if reaction == "wave" && target == "" {
+		m.message = "Choose a teammate before waving."
+		return
+	}
+	m.controller.sendReaction(reaction, target)
+	m.message = "Sent " + reactionGlyph(reaction)
 }
 
 func (m sessionModel) livePanelLines() ([]string, []string, int) {
@@ -1997,13 +2200,8 @@ func liveButtons() []liveButton {
 	return []liveButton{
 		{label: "Back", action: "back"},
 		{label: "Prefs", action: "prefs"},
-		{label: "Vol-", action: "vol-down"},
-		{label: "Vol+", action: "vol-up"},
-		{label: "Den-", action: "density-down"},
-		{label: "Den+", action: "density-up"},
 		{label: "Mute", action: "mute"},
 		{label: "Spatial", action: "spatial"},
-		{label: "Fade", action: "fade"},
 		{label: "Stop", action: "stop"},
 	}
 }
@@ -2017,7 +2215,8 @@ func (m sessionModel) liveControlsLine() string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, " ")
+	social := "1 Wave  ·  2 Nice  ·  3 Coffee  ·  4 Celebrate  ·  P Presence  ·  J/K Select"
+	return strings.Join(parts, " ") + "\n" + styleDim.Render(social)
 }
 
 func (m sessionModel) liveControlsStyle() lipgloss.Style {
@@ -2040,20 +2239,10 @@ func (m sessionModel) activateLiveButton(index int) (tea.Model, tea.Cmd) {
 		m.mode = "settings"
 		m.settingsCursor = 0
 		m.settingsHover = false
-	case "vol-down":
-		m.controller.adjustVolume(-0.05)
-	case "vol-up":
-		m.controller.adjustVolume(0.05)
-	case "density-down":
-		m.controller.adjustDensity(-0.1)
-	case "density-up":
-		m.controller.adjustDensity(0.1)
 	case "mute":
 		m.controller.toggle("muted")
 	case "spatial":
 		m.controller.toggle("spatial")
-	case "fade":
-		m.controller.toggle("fade")
 	case "stop":
 		m.exit = sessionExitStop
 		return m, tea.Quit
@@ -2098,11 +2287,16 @@ func (m sessionModel) teamCodeHit(x int, y int) bool {
 	if code == "" {
 		return false
 	}
+	if y == 0 {
+		team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
+		codeX := ansi.StringWidth(" Cliks  /  "+valuePlain(team, "Team")+"  ·  ") + 1
+		return x >= codeX && x < codeX+ansi.StringWidth(code)
+	}
 	// Full live layout: title row + panel padding + "Room" + "Team" + "Code  ".
 	// Compact layout packs code on the first content line next to the team name.
 	if m.height > 0 && m.height < 24 {
 		codeY := 3
-		codeX := 3 + len(strings.TrimSpace(m.state.TeamName)+ "  ")
+		codeX := 3 + len(strings.TrimSpace(m.state.TeamName)+"  ")
 		return y == codeY && x >= codeX && x < codeX+len(code)
 	}
 	codeY := 3 + 2 // Room header + Team line
@@ -2128,6 +2322,7 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 	if len(rows) == 0 {
 		return
 	}
+	previousStatus := m.controller.cfg.PresenceStatus
 	row := rows[m.settingsCursor]
 	row.apply(&m.controller.cfg, delta)
 	_ = saveConfig(m.controller.cfg)
@@ -2136,6 +2331,9 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 		state.HearingSelf = m.controller.cfg.Listening.Self
 	})
 	m.controller.audio.updateListening(m.controller.cfg.Listening)
+	if previousStatus != m.controller.cfg.PresenceStatus {
+		m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus)
+	}
 	m.state = m.controller.viewState()
 }
 
@@ -2205,6 +2403,19 @@ func bar(value float64) string {
 	return styleAccent.Render(strings.Repeat("█", filled)) + styleDim.Render(strings.Repeat("░", width-filled)) + fmt.Sprintf(" %d%%", int(value*100+0.5))
 }
 
+func compactBar(value float64) string {
+	width := 10
+	filled := int(clamp(value, 0, 1)*float64(width) + 0.5)
+	return styleAccent.Render(strings.Repeat("█", filled)) + styleDim.Render(strings.Repeat("░", width-filled)) + fmt.Sprintf(" %d%%", int(value*100+0.5))
+}
+
+func compactListeningBar(listening ListeningConfig) string {
+	if listening.Muted {
+		return styleWarn.Render("muted")
+	}
+	return compactBar(listening.Volume)
+}
+
 func muteAwareBar(listening ListeningConfig) string {
 	if listening.Muted {
 		return styleWarn.Render("muted")
@@ -2217,6 +2428,32 @@ func onOff(value bool) string {
 		return styleOK.Render("on")
 	}
 	return styleDim.Render("off")
+}
+
+func presenceLabel(value string) string {
+	switch value {
+	case "focus":
+		return "focus"
+	case "break":
+		return "on a break"
+	case "dnd":
+		return "do not disturb"
+	default:
+		return "available"
+	}
+}
+
+func nextPresence(current string, delta int) string {
+	values := []string{"available", "focus", "break", "dnd"}
+	index := 0
+	for i, value := range values {
+		if value == current {
+			index = i
+			break
+		}
+	}
+	index = (index + delta + len(values)) % len(values)
+	return values[index]
 }
 
 func connectionStyle(value string) string {
