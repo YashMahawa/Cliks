@@ -507,13 +507,13 @@ func (s *sessionController) sendProfile(nickname string, status string) {
 	s.wsMu.Unlock()
 }
 
-func (s *sessionController) sendReaction(reaction string, targetPeerID string) {
+func (s *sessionController) sendReaction(reaction string) {
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 	if s.ws == nil {
 		return
 	}
-	_ = s.ws.WriteJSON(map[string]any{"type": "reaction", "reaction": reaction, "targetPeerId": targetPeerID})
+	_ = s.ws.WriteJSON(map[string]any{"type": "reaction", "reaction": reaction})
 }
 
 func (s *sessionController) cyclePresence() {
@@ -771,20 +771,24 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			s.audio.scheduleBatch(envelope.PeerID, envelope.Events)
 		case "peer_reaction":
 			now := time.Now()
-			s.set(func(state *SessionViewState) {
-				state.RecentReactions = append(state.RecentReactions, PeerReactionStatus{PeerID: envelope.PeerID, Nickname: envelope.Nickname, Reaction: envelope.Reaction, TargetPeerID: envelope.TargetPeerID, At: now})
-				if len(state.RecentReactions) > 8 {
-					state.RecentReactions = state.RecentReactions[len(state.RecentReactions)-8:]
-				}
-			})
-			if envelope.PeerID != s.ownPeerID {
+			cfg := loadConfig()
+			isOwn := envelope.PeerID == s.ownPeerID
+			if isOwn || !cfg.Listening.Muted {
+				s.set(func(state *SessionViewState) {
+					state.RecentReactions = append(state.RecentReactions, PeerReactionStatus{PeerID: envelope.PeerID, Nickname: envelope.Nickname, Reaction: envelope.Reaction, At: now})
+					if len(state.RecentReactions) > 8 {
+						state.RecentReactions = state.RecentReactions[len(state.RecentReactions)-8:]
+					}
+				})
+			}
+			if !isOwn && !cfg.Listening.Muted {
 				go func(cfg CliksConfig, nickname string, reaction string) {
 					if err := notifyReaction(cfg, nickname, reaction); err != nil {
 						s.set(func(state *SessionViewState) {
 							state.Notice = "Notification failed: " + err.Error() + ". Run cliks notification-test."
 						})
 					}
-				}(loadConfig(), envelope.Nickname, envelope.Reaction)
+				}(cfg, envelope.Nickname, envelope.Reaction)
 			}
 		case "a":
 			events := parseCompactEvents(envelope.CompactEvents)

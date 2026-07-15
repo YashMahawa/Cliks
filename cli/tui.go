@@ -82,7 +82,6 @@ func shortcutEntries(context string) []shortcutHelp {
 		}
 	case "live":
 		return []shortcutHelp{
-			{"j / k", "select a teammate on the spatial desk"},
 			{"1 / 2 / 3 / 4 / 5", "wave, nice, coffee, celebrate, or suggest a break"},
 			{"p", "cycle available, focus, break, and do not disturb"},
 			{"Up/+, Down/-", "raise or lower volume"},
@@ -133,6 +132,7 @@ const (
 	actionSetup            homeAction = "setup"
 	actionDoctor           homeAction = "doctor"
 	actionSoundTest        homeAction = "sound-test"
+	actionSolo             homeAction = "solo"
 	actionBackgroundStart  homeAction = "background-start"
 	actionBackgroundStop   homeAction = "background-stop"
 	actionBackgroundStatus homeAction = "background-status"
@@ -179,6 +179,9 @@ type homeModel struct {
 	launchSoundPhase      int
 	firstLaunch           bool
 	onboardingPending     bool
+	onboardingStep        int
+	onboardingQuip        int
+	onboardingSuggestion  string
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -211,7 +214,7 @@ func runHomeTUI(cfg CliksConfig) error {
 	if firstLaunch {
 		launchDuration = 10 * time.Second
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -240,6 +243,8 @@ func runHomeTUI(cfg CliksConfig) error {
 		return runDoctor()
 	case actionSoundTest:
 		return runSoundTest()
+	case actionSolo:
+		return runSoloTUI(result.cfg)
 	case actionBackgroundStart:
 		return cmdBackground([]string{"start", result.cfg.CurrentTeamCode})
 	case actionBackgroundStop:
@@ -286,6 +291,15 @@ func welcomeSoundCmd(listening ListeningConfig) tea.Cmd {
 	}
 }
 
+func ambientPreviewCmd(listening ListeningConfig) tea.Cmd {
+	return func() tea.Msg {
+		audio := newAudioEngine(listening)
+		time.Sleep(1800 * time.Millisecond)
+		audio.Close()
+		return nil
+	}
+}
+
 func launchSoundCuePhase(elapsed time.Duration) int {
 	if elapsed >= 7*time.Second {
 		return 2
@@ -302,9 +316,14 @@ func (m *homeModel) finishLaunch() {
 		m.mode = "first-setup"
 		m.cursor = 0
 		m.mouseOver = false
-		m.message = "Choose a nickname, check permissions, or keep the safe defaults."
+		if m.onboardingSuggestion == "" {
+			m.onboardingSuggestion = randomFunnyNickname()
+		}
+		m.message = "One choice at a time. Nothing here is permanent."
 	}
 }
+
+type onboardingPermissionMsg struct{ message string }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -341,6 +360,15 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = msg.message
 		}
 		return m, nil
+	case onboardingPermissionMsg:
+		m.busy = false
+		m.advanceOnboarding(msg.message)
+		return m, nil
+	case notificationTestMsg:
+		if msg.err != nil {
+			m.message = "Notification test needs attention: " + msg.err.Error()
+		}
+		return m, nil
 	case formDoneMsg:
 		m.busy = false
 		m.refreshRuntime()
@@ -355,6 +383,9 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Created %s. %s", teamLabel(msg.cfg, msg.code), msg.message)
 		} else if msg.kind == "join" {
 			m.message = fmt.Sprintf("Joined %s. Opening live...", teamLabel(msg.cfg, msg.code))
+			if msg.message != "" {
+				m.message += " " + msg.message
+			}
 			if !m.activeOK {
 				m.action = actionStart
 				return m, tea.Quit
@@ -456,6 +487,20 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.mode == "first-setup" {
+			switch msg.String() {
+			case "ctrl+c", "q", "esc":
+				return m, tea.Quit
+			case "left", "h", "backspace":
+				if m.onboardingStep > 0 {
+					m.onboardingStep--
+					m.cursor = 0
+					m.mouseOver = false
+					m.message = "Previous choice. Change anything you like."
+				}
+				return m, nil
+			}
+		}
 		if isFormMode(m.mode) {
 			return m.updateForm(msg)
 		}
@@ -532,6 +577,9 @@ func (m homeModel) View() string {
 			context = "home"
 		}
 		body = shortcutHelpView(context, m.width)
+	} else if m.mode == "first-setup" {
+		body = m.itemView()
+		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks  /  first light"), body)
 	} else if m.mode == "preferences" {
 		body = m.preferencesView()
 	} else if m.mode == "doctor-report" {
@@ -707,6 +755,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		}
 		m.action = actionStart
 		return m, tea.Quit
+	case "solo":
+		m.action = actionSolo
+		return m, tea.Quit
 	case "menu":
 		m.mode = "menu"
 		m.cursor = 0
@@ -760,6 +811,59 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.nicknameValue = m.cfg.Nickname
 		m.moveFormTextCursorToEnd()
 		m.message = "Set the short name teammates see in the live room. Max 10 characters."
+	case "onboarding-random-name":
+		m.cfg.Nickname = m.onboardingSuggestion
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("You are now " + m.cfg.Nickname + ". Extremely credible.")
+	case "onboarding-anonymous":
+		m.cfg.Nickname = ""
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Anonymous it is. Mysterious, but punctual.")
+	case "onboarding-sound-balanced", "onboarding-sound-quiet", "onboarding-sound-lively":
+		switch item.key {
+		case "onboarding-sound-quiet":
+			m.cfg.Listening.Volume, m.cfg.Listening.Density = 0.42, 0.48
+		case "onboarding-sound-lively":
+			m.cfg.Listening.Volume, m.cfg.Listening.Density = 0.78, 1
+		default:
+			m.cfg.Listening.Volume, m.cfg.Listening.Density = 0.7, 0.8
+		}
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Your listening mix is set.")
+		return m, welcomeSoundCmd(m.cfg.Listening)
+	case "onboarding-permission":
+		m.busy = true
+		m.message = "Opening the one OS permission Cliks needs…"
+		return m, onboardingPermissionCmd()
+	case "onboarding-permission-later":
+		m.advanceOnboarding("Skipped for now. Setup Check can reopen it anytime.")
+	case "onboarding-notify-sound", "onboarding-notify-quiet", "onboarding-notify-off":
+		m.cfg.Notifications.Enabled = item.key != "onboarding-notify-off"
+		m.cfg.Notifications.Sound = item.key == "onboarding-notify-sound"
+		m.cfg.Notifications.Configured = true
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Notification preference saved.")
+		if m.cfg.Notifications.Enabled {
+			cfg := m.cfg
+			return m, func() tea.Msg {
+				return notificationTestMsg{err: sendNativeNotification("Mira 👋 Welcome to Cliks", "A quick signal looks like this.", cfg.Notifications.Sound)}
+			}
+		}
+	case "onboarding-background-on", "onboarding-background-off":
+		m.cfg.KeepRunning = item.key == "onboarding-background-on"
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Background preference saved.")
+	case "onboarding-autostart-on", "onboarding-autostart-off":
+		m.cfg.AutostartWanted = item.key == "onboarding-autostart-on"
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Launch-at-login preference saved. It activates after you join a team.")
+	case "onboarding-ambient-off", "onboarding-ambient-rain", "onboarding-ambient-cafe", "onboarding-ambient-deep":
+		m.cfg.Listening.Ambient = strings.TrimPrefix(item.key, "onboarding-ambient-")
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Room tone saved. It stays private to your headphones.")
+		if m.cfg.Listening.Ambient != "off" {
+			return m, ambientPreviewCmd(m.cfg.Listening)
+		}
 	case "advanced":
 		m.mode = "advanced"
 		m.cursor = 0
@@ -810,6 +914,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.firstLaunch = true
 		m.onboardingPending = true
+		m.onboardingStep = 0
+		m.onboardingSuggestion = randomFunnyNickname()
+		m.onboardingQuip = int(time.Now().UnixNano() % 7)
 		m.launchSoundPhase = 0
 		m.launchStartedAt = time.Now()
 		m.launchUntil = m.launchStartedAt.Add(10 * time.Second)
@@ -944,15 +1051,25 @@ func (m homeModel) itemView() string {
 				line = styleFocused.Render("> " + line)
 			}
 		}
+		if m.mode == "first-setup" {
+			line = centerTerminalText(line, maxInt(30, panelWidth(m.width)-8))
+		}
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, styleDim.Render("? shortcuts"))
+	if m.mode == "first-setup" {
+		lines = append(lines, centerTerminalText(styleDim.Render("↑/↓ choose  •  Enter confirms  •  ← previous  •  Esc exits safely"), maxInt(30, panelWidth(m.width)-8)))
+	} else {
+		lines = append(lines, styleDim.Render("? shortcuts"))
+	}
 	lines = append(lines, styleDim.Render(m.message))
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
 func (m homeModel) itemPrefixLines() []string {
+	if m.mode == "first-setup" {
+		return m.firstSetupPrefixLines()
+	}
 	title, intro := m.viewHeader()
 	lines := []string{styleAccent.Render(title)}
 	if intro != "" {
@@ -990,6 +1107,60 @@ func (m homeModel) itemPrefixLines() []string {
 		lines = append(lines, "", code)
 	}
 	return append(lines, "")
+}
+
+func (m homeModel) firstSetupPrefixLines() []string {
+	step := clampInt(m.onboardingStep, 0, onboardingStepCount-1)
+	titles := []string{"What should the room call you?", "How present should the room feel?", "Let Cliks notice activity—not keys", "How should quick signals arrive?", "Should your chair stay warm?", "Wake Cliks after sign-in?", "Add a private room tone?"}
+	details := []string{
+		"Your name is shared as plain presence text. It never comes from your OS account.",
+		"This changes only what you hear. Your teammates keep their own mix.",
+		"The OS permission exposes local events; Cliks immediately reduces them to keyboard or left/right click.",
+		"Every signal includes who sent it and the fixed message. Mute silences them locally.",
+		"Background mode keeps one small session alive after this terminal closes.",
+		"One launcher, one session, no surprise duplicate coworkers pretending to be you.",
+		"Room tones are generated and played locally. The team never hears your choice.",
+	}
+	quips := []string{
+		"No stand-up meeting was scheduled to configure this.",
+		"A volume slider should not become a personality test.",
+		"Your password manager may relax; we are not collecting letters.",
+		"The notification has one job, then it leaves.",
+		"Tiny daemon. Normal chair. Absolutely no blockchain.",
+		"Computers are excellent at remembering the boring part.",
+		"Like office air-conditioning, except everyone controls their own.",
+	}
+	width := maxInt(30, panelWidth(m.width)-8)
+	filled := step + 1
+	progress := strings.Repeat("━", filled) + strings.Repeat("─", onboardingStepCount-filled)
+	art := []string{
+		"             ·       ○       ·",
+		"         ·       [ YOU ]       ·",
+		"             ·       ○       ·",
+	}
+	lines := make([]string, 0, 20)
+	for index := 0; index < clampInt((m.height-22)/4, 0, 5); index++ {
+		lines = append(lines, "")
+	}
+	lines = append(lines,
+		centerTerminalText(styleDim.Render(fmt.Sprintf("SETUP  %d/%d   %s", step+1, onboardingStepCount, progress)), width),
+		"",
+	)
+	for _, line := range art {
+		lines = append(lines, centerTerminalText(styleAccent.Render(line), width))
+	}
+	lines = append(lines, "", centerTerminalText(styleAccent.Render(titles[step]), width))
+	for _, line := range strings.Split(ansi.Wordwrap(details[step], maxInt(28, width-12), ""), "\n") {
+		lines = append(lines, centerTerminalText(line, width))
+	}
+	quip := quips[(step+m.onboardingQuip)%len(quips)]
+	lines = append(lines, centerTerminalText(styleDim.Render(quip), width), "")
+	return lines
+}
+
+func centerTerminalText(value string, width int) string {
+	padding := maxInt(0, (width-ansi.StringWidth(value))/2)
+	return strings.Repeat(" ", padding) + value
 }
 
 func (m homeModel) homeCodeHit(x int, y int) bool {
@@ -1168,6 +1339,70 @@ type homeItem struct {
 	help  string
 }
 
+const onboardingStepCount = 7
+
+func (m homeModel) onboardingItems() []homeItem {
+	switch clampInt(m.onboardingStep, 0, onboardingStepCount-1) {
+	case 0:
+		return []homeItem{
+			{key: "nickname", label: "Type my own", help: "up to 10 characters"},
+			{key: "onboarding-random-name", label: m.onboardingSuggestion, help: "a freshly generated internet citizen"},
+			{key: "onboarding-anonymous", label: "Stay anonymous", help: "the classic mysterious coworker"},
+		}
+	case 1:
+		return []homeItem{
+			{key: "onboarding-sound-balanced", label: "Balanced", help: "warm, present, easy to forget"},
+			{key: "onboarding-sound-quiet", label: "Quiet", help: "soft enough for deep work"},
+			{key: "onboarding-sound-lively", label: "Lively", help: "more of the room, still fatigue-protected"},
+		}
+	case 2:
+		return []homeItem{
+			{key: "onboarding-permission", label: "Open permission", help: "Cliks guides the exact OS step"},
+			{key: "onboarding-permission-later", label: "Do it later", help: "the room can wait without judging"},
+		}
+	case 3:
+		return []homeItem{
+			{key: "onboarding-notify-sound", label: "Banners + sound", help: "signals may make one small sound"},
+			{key: "onboarding-notify-quiet", label: "Quiet banners", help: "sender and message, no alert sound"},
+			{key: "onboarding-notify-off", label: "No banners", help: "signals stay inside the room"},
+		}
+	case 4:
+		return []homeItem{
+			{key: "onboarding-background-on", label: "Keep it running", help: "closing this screen will not empty your chair"},
+			{key: "onboarding-background-off", label: "Only while open", help: "terminal closes, Cliks stops"},
+		}
+	case 5:
+		return []homeItem{
+			{key: "onboarding-autostart-on", label: "Start after sign-in", help: "activates after your first team join"},
+			{key: "onboarding-autostart-off", label: "I will start it", help: "no login launcher"},
+		}
+	default:
+		return []homeItem{
+			{key: "onboarding-ambient-off", label: "No room tone", help: "only coworker keyboard and click ambience"},
+			{key: "onboarding-ambient-rain", label: "Rain window", help: "private, low, and steady"},
+			{key: "onboarding-ambient-cafe", label: "Cafe hum", help: "soft room texture without voices"},
+			{key: "onboarding-ambient-deep", label: "Deep focus", help: "a slow low-frequency bed"},
+		}
+	}
+}
+
+func (m *homeModel) advanceOnboarding(message string) {
+	if m.onboardingStep >= onboardingStepCount-1 {
+		m.cfg.OnboardingSeen = true
+		_ = saveConfig(m.cfg)
+		m.onboardingPending = false
+		m.mode = "home"
+		m.cursor = 0
+		m.mouseOver = false
+		m.message = "Your desk is ready. " + message
+		return
+	}
+	m.onboardingStep++
+	m.cursor = 0
+	m.mouseOver = false
+	m.message = message
+}
+
 type formDoneMsg struct {
 	kind    string
 	code    string
@@ -1197,14 +1432,7 @@ func (m homeModel) items() []homeItem {
 			{key: "back", label: "Back", help: "return to the greeting screen"},
 		}
 	case "first-setup":
-		return []homeItem{
-			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "so A teammate can finally retire")},
-			{key: "setup", label: "Permissions", help: "open OS steps; key values are not invited"},
-			{key: "notification-test", label: "Test Notifications", help: "send yourself one polite interruption"},
-			{key: "preferences", label: "Preferences", help: "notifications, sound, sharing, theme, and server"},
-			{key: "backend-url", label: "Server", help: backendSummary(m.cfg)},
-			{key: "first-setup-done", label: "Continue", help: "safe defaults included; office coffee is not"},
-		}
+		return m.onboardingItems()
 	case "team":
 		return []homeItem{
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
@@ -1247,6 +1475,7 @@ func (m homeModel) items() []homeItem {
 	default:
 		if m.cfg.CurrentTeamCode == "" {
 			return []homeItem{
+				{key: "solo", label: "Solo Desk", help: "an offline simulated room, made only on this device"},
 				{key: "join", label: "Join Team", help: "paste a team code and open live"},
 				{key: "create", label: "Create Team", help: "make a room and copy its code"},
 				{key: "sound", label: "Sound Check", help: "play keyboard and mouse samples"},
@@ -1257,6 +1486,7 @@ func (m homeModel) items() []homeItem {
 		}
 		items := []homeItem{
 			{key: "start", label: "Open Live", help: m.startHelp()},
+			{key: "solo", label: "Solo Desk", help: "open your private offline soundscape"},
 			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
 		}
 		if m.activeOK {
@@ -1648,6 +1878,10 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Listening.Muted = false
 		}},
 		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
+		{"Room tone", "private ambient layer: off, rain, cafe, or deep", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
+		{"Room tone volume", "private ambient layer loudness", func(c CliksConfig) string { return bar(c.Listening.AmbientVolume) }, func(c *CliksConfig, d int) {
+			c.Listening.AmbientVolume = clamp(c.Listening.AmbientVolume+float64(d)*0.05, 0.05, 0.6)
+		}},
 		{"Muted", "silence local playback", func(c CliksConfig) string { return onOff(c.Listening.Muted) }, func(c *CliksConfig, _ int) { c.Listening.Muted = !c.Listening.Muted }},
 		{"Spatial audio", "pan teammates around your desk", func(c CliksConfig) string { return onOff(c.Listening.Spatial) }, func(c *CliksConfig, _ int) { c.Listening.Spatial = !c.Listening.Spatial }},
 		{"Dynamic circle", "move active teammates closer locally", func(c CliksConfig) string { return onOff(c.Listening.DynamicPlacement) }, func(c *CliksConfig, _ int) { c.Listening.DynamicPlacement = !c.Listening.DynamicPlacement }},
@@ -1763,10 +1997,14 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.message = err.Error()
 			return m, nil
 		}
-		m.mode = valuePlain(m.formReturnMode, "team")
+		returnMode := valuePlain(m.formReturnMode, "team")
+		m.mode = returnMode
 		m.cursor = 0
 		m.mouseOver = false
 		m.message = fmt.Sprintf("Nickname set to %s.", valuePlain(name, "anonymous"))
+		if returnMode == "first-setup" {
+			m.advanceOnboarding(m.message)
+		}
 		return m, nil
 	}
 	if m.mode == "audio-device" {
@@ -2057,7 +2295,11 @@ func createTeamCmd(name string, password string) tea.Cmd {
 		if err != nil {
 			return formDoneMsg{kind: "create", err: err}
 		}
-		return formDoneMsg{kind: "create", code: team.Code, message: clipboardStatus(team.Code), cfg: next}
+		message := clipboardStatus(team.Code)
+		if autostart := enableWantedAutostart(next); autostart != "" {
+			message += " " + autostart
+		}
+		return formDoneMsg{kind: "create", code: team.Code, message: message, cfg: next}
 	}
 }
 
@@ -2072,7 +2314,7 @@ func joinTeamCmd(code string) tea.Cmd {
 		if err != nil {
 			return formDoneMsg{kind: "join", code: team.Code, err: err}
 		}
-		return formDoneMsg{kind: "join", code: team.Code, cfg: next}
+		return formDoneMsg{kind: "join", code: team.Code, message: enableWantedAutostart(next), cfg: next}
 	}
 }
 
@@ -2103,12 +2345,22 @@ func toggleAutostartCmd(code string) tea.Cmd {
 	return func() tea.Msg {
 		if autostartEnabled() {
 			message, err := autostartAction([]string{"disable"})
+			if err == nil {
+				cfg := loadConfig()
+				cfg.AutostartWanted = false
+				_ = saveConfig(cfg)
+			}
 			return commandDoneMsg{message: message, err: err}
 		}
 		if code == "" {
 			return commandDoneMsg{err: fmt.Errorf("no team selected. Create or join a team first")}
 		}
 		message, err := autostartAction([]string{"enable", code})
+		if err == nil {
+			cfg := loadConfig()
+			cfg.AutostartWanted = true
+			_ = saveConfig(cfg)
+		}
 		return commandDoneMsg{message: message, err: err}
 	}
 }
@@ -2128,6 +2380,18 @@ func soundTestCmd() tea.Cmd {
 			return commandDoneMsg{err: err}
 		}
 		return commandDoneMsg{message: "Played keyboard and mouse test sounds."}
+	}
+}
+
+func onboardingPermissionCmd() tea.Cmd {
+	return func() tea.Msg {
+		steps := ensureCaptureReady()
+		for _, step := range steps {
+			if step.status == "action" {
+				return onboardingPermissionMsg{message: "Permission pane opened. Enable the requested switch, then restart Cliks if the OS asks."}
+			}
+		}
+		return onboardingPermissionMsg{message: "Capture permission already looks ready."}
 	}
 }
 
@@ -2211,7 +2475,6 @@ type sessionModel struct {
 	height         int
 	now            time.Time
 	helpOpen       bool
-	selectedPeer   int
 	welcomeUntil   time.Time
 	hoverAction    string
 }
@@ -2357,10 +2620,6 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.controller.toggle("spatial")
 		case "f":
 			m.controller.toggle("fade")
-		case "j":
-			m.selectedPeer = clampInt(m.selectedPeer+1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
-		case "k":
-			m.selectedPeer = clampInt(m.selectedPeer-1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
 		case "1":
 			m.sendLiveReaction("wave")
 		case "2":
@@ -2501,9 +2760,6 @@ func (m sessionModel) renderSpatialDesk(width int, height int) string {
 		if m.now.Sub(time.UnixMilli(peer.JoinedAt)) < 1600*time.Millisecond && (m.now.UnixMilli()/250)%2 == 0 {
 			marker = "◌"
 		}
-		if i == m.selectedPeer {
-			marker = "●"
-		}
 		label := marker + " " + truncateRunes(name, 10)
 		put(x-len([]rune(label))/2, y, label)
 		if latestReaction != nil && latestReaction.PeerID == peer.PeerID {
@@ -2615,18 +2871,8 @@ func (m sessionModel) liveActionLine(action string, label string) string {
 }
 
 func (m *sessionModel) sendLiveReaction(reaction string) {
-	peers := sortedRemotePeers(m.state)
-	target := ""
-	if len(peers) > 0 {
-		peer := peers[clampInt(m.selectedPeer, 0, len(peers)-1)]
-		target = peer.PeerID
-	}
-	if reaction == "wave" && target == "" {
-		m.message = "Choose a teammate before waving."
-		return
-	}
-	m.controller.sendReaction(reaction, target)
-	m.message = "Sent " + reactionGlyph(reaction) + "  " + reactionPhrase(reaction)
+	m.controller.sendReaction(reaction)
+	m.message = "Shared with the room  " + reactionGlyph(reaction) + "  " + reactionPhrase(reaction)
 }
 
 func (m sessionModel) liveHit(x int, y int) string {
@@ -2721,10 +2967,6 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		m.controller.toggle("muted")
 	case "spatial":
 		m.controller.toggle("spatial")
-	case "select-prev":
-		m.selectedPeer = clampInt(m.selectedPeer-1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
-	case "select-next", "select-peer":
-		m.selectedPeer = clampInt(m.selectedPeer+1, 0, maxInt(0, len(sortedRemotePeers(m.state))-1))
 	case "reaction-wave":
 		m.sendLiveReaction("wave")
 	case "reaction-nice":

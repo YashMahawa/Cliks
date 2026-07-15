@@ -37,7 +37,7 @@ cliks join CLIK-XXXXXX
 
 `cliks join` validates the code, saves it, and starts one background Cliks session automatically. Use `cliks join --no-start CLIK-XXXXXX` if you only want to save the team, or `cliks start CLIK-XXXXXX` if you want to select and start a code in one foreground command.
 
-`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. First run offers nickname, OS permissions, a real notification test, preferences, and server choice before showing Join Team and Create Team; every setup item is optional. After joining, the compact home screen shows the current team name and code, active connection status, and a one-click keep-running toggle; deeper controls live under More. A small footer keeps the selected team, connection state, volume, and room count visible while you browse other views. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. First run uses the full terminal and asks one thing at a time: nickname (or a generated funny name), listening mix, OS permission, notifications, background behavior, launch-at-login, and an optional private room tone. Every choice can be changed later. After joining, the compact home screen shows the current team name and code, active connection status, and a one-click keep-running toggle; deeper controls, including the public/self-hosted server URL, live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
 
 ## What It Sends
 
@@ -119,6 +119,14 @@ cliks sound-test
 cliks start --terminal --self
 ```
 
+For a completely offline room—no team, capture permission, or internet—open Solo Desk:
+
+```bash
+cliks solo
+```
+
+Choose 1–12 simulated coworkers, keyboard sounds, click sounds, and a personal rain, cafe, or deep-focus room tone. These generated soundscapes stay on your device and are never synchronized with a team.
+
 To turn self-monitoring back off:
 
 ```bash
@@ -143,6 +151,7 @@ cliks join --no-start CLIK-XXXXXX
 cliks nickname "YourName"
 cliks start
 cliks start CLIK-XXXXXX
+cliks solo
 cliks settings
 cliks setup
 cliks preset deep
@@ -161,11 +170,11 @@ cliks fix-terminal
 cliks doctor
 ```
 
-Bare `cliks` opens a full-terminal control screen with Open Live, Keep Running, Stop, More, and Quit. The selected team name and a one-click copyable code stay visible. Normal launches use a three-second desk animation with bundled sound. The first launch and post-reset launch use a ten-second spatial welcome with a sound burst, then open guided nickname, OS permissions, notification testing, preferences, and server setup. Every step is optional and safe defaults are already selected. More contains Preferences, Advanced, Team, Connection, and Diagnostics. Preferences includes direct row toggles for notifications, notification sound, sharing, listening, presence, server, and the Ember/Ocean/Mono themes. Advanced includes a confirmed Factory Reset that clears only this device, stops its session, and replays first-run onboarding without deleting the server room. Mouse hover/click and keyboard navigation operate the same actions; press `?` anywhere for the current shortcuts.
+Bare `cliks` opens a full-terminal control screen with Open Live, Solo Desk, Keep Running, Stop, More, and Quit. The selected team name and a one-click copyable code stay visible. Normal launches use a three-second desk animation with bundled sound. The first launch and post-reset launch use a ten-second spatial welcome with sound bursts, then a one-card-at-a-time setup that uses the full terminal. More contains Preferences, Advanced, Team, Connection, and Diagnostics. Preferences includes direct row toggles for notifications, notification sound, room tone, sharing, listening, presence, server, and the Ember/Ocean/Mono themes. Advanced includes a confirmed Factory Reset that clears only this device, stops its session, and replays first-run onboarding without deleting the server room. Mouse hover/click and keyboard navigation operate the same actions; press `?` anywhere for the current shortcuts.
 
 Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
-While `cliks start` is open, Cliks uses the terminal as a full spatial desk: you sit in the center, teammates occupy adaptive rings, active typers light up, and large rooms collapse overflow into calm semantic dots. Wave, nice, coffee, celebrate, and break signals are fixed low-cost events. Each signal animates at its sender's place in the circle and can produce an OS-native notification whose title contains the sender, emoji, and fixed message, even when the OS hides notification body text. The action rail makes code copy, notifications, notification sound, mute, spatial audio, all five signals, Preferences, Back, and Stop directly clickable. Keyboard equivalents remain visible in the footer and under `?`.
+While `cliks start` is open, Cliks uses the terminal as a full spatial desk: you sit in the center, teammates occupy adaptive rings, active typers light up, and large rooms collapse overflow into calm semantic dots. Wave, nice, coffee, celebrate, and break signals are fixed low-cost room-wide events—no teammate selection required. Each signal animates at its sender's place in the circle and can produce an OS-native notification with a sender title and fixed message body. Local mute suppresses remote signal animation and notifications. The action rail makes code copy, notifications, notification sound, mute, spatial audio, all five signals, Preferences, Back, and Stop directly clickable. Keyboard equivalents remain visible in the footer and under `?`.
 
 Rooms automatically expire after 48 hours without a live connection. A successful connection refreshes the 48-hour clock; a room that remains connected is kept alive.
 

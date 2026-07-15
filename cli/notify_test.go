@@ -28,14 +28,23 @@ func TestReactionNotificationCopyIsFixedAndDistinct(t *testing.T) {
 
 func TestReactionNotificationTitleContainsSenderAndMessage(t *testing.T) {
 	title, body := reactionNotificationContent("Mira", "break")
-	if title != "Mira 🧘 Let’s take a break." {
+	if title != "Mira sent 🧘" {
 		t.Fatalf("title = %q", title)
 	}
-	if body != "Cliks quick signal" {
+	if body != "Let’s take a break. · Cliks quick signal" {
 		t.Fatalf("body = %q", body)
 	}
 	title, _ = reactionNotificationContent("", "wave")
-	if title != "A teammate 👋 Hey there!" {
+	if title != "A teammate sent 👋" {
 		t.Fatalf("anonymous title = %q", title)
+	}
+}
+
+func TestMutedListeningSuppressesReactionNotification(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Notifications.Enabled = true
+	cfg.Listening.Muted = true
+	if err := notifyReaction(cfg, "Mira", "wave"); err != nil {
+		t.Fatalf("muted notification should be a no-op: %v", err)
 	}
 }

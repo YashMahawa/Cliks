@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -53,6 +53,8 @@ func run(args []string) error {
 		return cmdNickname(rest[1:])
 	case "start":
 		return cmdStart(rest[1:])
+	case "solo":
+		return runSoloTUI(loadConfig())
 	case "settings", "ui":
 		return runHomeTUI(loadConfig())
 	case "setup":
@@ -159,8 +161,12 @@ func cmdJoin(args []string) error {
 			return err
 		}
 	}
+	autostartMessage := enableWantedAutostart(cfg)
 	if !autoStart {
 		fmt.Printf("Joined %s. Run \"cliks start\" to begin.\n", formatTeamLabel(team.Name, team.Code))
+		if autostartMessage != "" {
+			fmt.Println(autostartMessage)
+		}
 		if warning := quickDoctorWarning(cfg); warning != "" {
 			fmt.Println(warning)
 		}
@@ -171,6 +177,9 @@ func cmdJoin(args []string) error {
 		return fmt.Errorf("joined %s, but could not start Cliks in the background: %w", formatTeamLabel(team.Name, team.Code), err)
 	}
 	fmt.Printf("Joined %s.\n%s\n", formatTeamLabel(team.Name, team.Code), message)
+	if autostartMessage != "" {
+		fmt.Println(autostartMessage)
+	}
 	if warning := quickDoctorWarning(cfg); warning != "" {
 		fmt.Println(warning)
 	}
@@ -209,6 +218,9 @@ func cmdCreate(args []string) error {
 	_ = saveConfig(cfg)
 	fmt.Printf("Created %s.\n", formatTeamLabel(team.Name, team.Code))
 	fmt.Println(clipboardStatus(team.Code))
+	if message := enableWantedAutostart(cfg); message != "" {
+		fmt.Println(message)
+	}
 	fmt.Printf("Start now: cliks start\n")
 	return nil
 }
@@ -447,6 +459,30 @@ func cmdSet(args []string) error {
 		cfg.Listening.Spatial = boolValue
 	case "hear.fade":
 		cfg.Listening.FatigueProtection = boolValue
+	case "ambient":
+		mode := strings.ToLower(strings.TrimSpace(value))
+		switch mode {
+		case "off", "rain", "cafe", "deep":
+			cfg.Listening.Ambient = mode
+		default:
+			return fmt.Errorf("ambient must be off, rain, cafe, or deep")
+		}
+	case "ambient.volume":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		cfg.Listening.AmbientVolume = clamp(parsed, .05, .6)
+	case "solo.people":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		cfg.Solo.People = clampInt(parsed, 1, 12)
+	case "solo.keyboard":
+		cfg.Solo.Keyboard = boolValue
+	case "solo.mouse":
+		cfg.Solo.Mouse = boolValue
 	case "notifications":
 		cfg.Notifications.Enabled = boolValue
 		cfg.Notifications.Configured = true
@@ -653,6 +689,7 @@ Usage:
   %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience
   %[1]s start CODE       Join/select a code and start immediately
+  %[1]s solo             Open an offline simulated coworking room
   %[1]s settings         Open the control screen
   %[1]s setup            One-time easy setup (sound + capture)
   %[1]s doctor           Print the full setup and permission report

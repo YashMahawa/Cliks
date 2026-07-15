@@ -91,6 +91,14 @@ type ListeningConfig struct {
 	DynamicPlacement  bool    `json:"dynamicPlacement"`
 	ShuffleMinutes    int     `json:"shuffleMinutes"`
 	AudioDevice       string  `json:"audioDevice,omitempty"`
+	Ambient           string  `json:"ambient,omitempty"`
+	AmbientVolume     float64 `json:"ambientVolume,omitempty"`
+}
+
+type SoloConfig struct {
+	People   int  `json:"people"`
+	Keyboard bool `json:"keyboard"`
+	Mouse    bool `json:"mouse"`
 }
 
 type NotificationConfig struct {
@@ -110,10 +118,12 @@ type CliksConfig struct {
 	OnboardingSeen  bool               `json:"onboardingSeen,omitempty"`
 	Theme           string             `json:"theme,omitempty"`
 	KeepRunning     bool               `json:"keepRunning"`
+	AutostartWanted bool               `json:"autostartWanted,omitempty"`
 	Teams           []TeamConfig       `json:"teams"`
 	Sharing         SharingConfig      `json:"sharing"`
 	Listening       ListeningConfig    `json:"listening"`
 	Notifications   NotificationConfig `json:"notifications"`
+	Solo            SoloConfig         `json:"solo"`
 	BatchWindowMs   int                `json:"batchWindowMs"`
 }
 
@@ -142,7 +152,10 @@ func defaultConfig() CliksConfig {
 			Density:           0.8,
 			DynamicPlacement:  true,
 			ShuffleMinutes:    10,
+			Ambient:           "off",
+			AmbientVolume:     0.22,
 		},
+		Solo:          SoloConfig{People: 4, Keyboard: true, Mouse: true},
 		BatchWindowMs: 500,
 	}
 }
@@ -380,6 +393,19 @@ func normalizeConfig(cfg *CliksConfig) {
 	if cfg.Listening.ShuffleMinutes > 60 {
 		cfg.Listening.ShuffleMinutes = 60
 	}
+	switch cfg.Listening.Ambient {
+	case "off", "rain", "cafe", "deep":
+	default:
+		cfg.Listening.Ambient = def.Listening.Ambient
+	}
+	if cfg.Listening.AmbientVolume == 0 {
+		cfg.Listening.AmbientVolume = def.Listening.AmbientVolume
+	}
+	cfg.Listening.AmbientVolume = clamp(cfg.Listening.AmbientVolume, 0.05, 0.6)
+	if cfg.Solo.People == 0 {
+		cfg.Solo = def.Solo
+	}
+	cfg.Solo.People = clampInt(cfg.Solo.People, 1, 12)
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
 	cfg.Listening.AudioDevice = strings.TrimSpace(cfg.Listening.AudioDevice)
 }

@@ -28,7 +28,6 @@ const (
 	webSocketOutboundBuffer     = 32
 	maxReactionsPerWindow       = 6
 	reactionRateWindow          = 10 * time.Second
-	waveCooldown                = 30 * time.Second
 )
 
 type ActivityEvent struct {
@@ -74,7 +73,6 @@ type peer struct {
 	status              string
 	reactionWindowStart time.Time
 	reactionCount       int
-	lastWaves           map[string]time.Time
 }
 
 type room struct {
@@ -276,7 +274,6 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 		lastSeen:  joinedAt,
 		compactV1: compactV1,
 		status:    status,
-		lastWaves: map[string]time.Time{},
 	}
 
 	var previousPayload any
@@ -345,7 +342,7 @@ func (h *RoomHub) updatePeerProfile(peerID string, nickname string, status strin
 	sendToPeers(peers, payload)
 }
 
-func (h *RoomHub) forwardReaction(peerID string, reaction string, targetPeerID string) {
+func (h *RoomHub) forwardReaction(peerID string, reaction string, _ string) {
 	reaction = normalizeReaction(reaction)
 	if reaction == "" {
 		return
@@ -367,18 +364,8 @@ func (h *RoomHub) forwardReaction(peerID string, reaction string, targetPeerID s
 				}
 				if sender.reactionCount < maxReactionsPerWindow {
 					sender.reactionCount++
-					if reaction == "wave" {
-						if targetPeerID == "" || targetPeerID == peerID || currentRoom.peers[targetPeerID] == nil || now.Sub(sender.lastWaves[targetPeerID]) < waveCooldown {
-							sender = nil
-						} else {
-							sender.lastWaves[targetPeerID] = now
-							recipients = []*peer{sender, currentRoom.peers[targetPeerID]}
-						}
-					} else {
-						targetPeerID = ""
-						for _, p := range currentRoom.peers {
-							recipients = append(recipients, p)
-						}
+					for _, p := range currentRoom.peers {
+						recipients = append(recipients, p)
 					}
 					if sender != nil {
 						senderID = sender.id
@@ -396,7 +383,7 @@ func (h *RoomHub) forwardReaction(peerID string, reaction string, targetPeerID s
 	}
 	payload := map[string]any{
 		"type": "peer_reaction", "peerId": senderID, "nickname": senderNickname,
-		"reaction": reaction, "targetPeerId": targetPeerID, "sentAt": now.UnixMilli(),
+		"reaction": reaction, "sentAt": now.UnixMilli(),
 	}
 	sendToPeers(recipients, payload)
 }

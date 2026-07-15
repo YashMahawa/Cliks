@@ -87,12 +87,11 @@ Reactions are ephemeral social signals. The relay does not persist them. The fix
 ```json
 {
   "type": "reaction",
-  "reaction": "wave",
-  "targetPeerId": "peer_xyz987"
+  "reaction": "wave"
 }
 ```
 
-`wave` is targeted and requires a current peer in the sender's room. It is delivered only to the sender and recipient, with a 30-second per-recipient cooldown. Other reactions are room-wide. Each peer is limited to six accepted reactions per 10 seconds. Rejected, invalid, or rate-limited reactions are silently ignored so they do not become a secondary error-notification channel.
+Every reaction is a room-wide signal delivered to the sender and all currently connected teammates. Legacy `targetPeerId` input is ignored. Each peer is limited to six accepted reactions per 10 seconds. Rejected, invalid, or rate-limited reactions are silently ignored so they do not become a secondary error-notification channel.
 
 ## Server to client
 
@@ -131,12 +130,11 @@ Reactions are ephemeral social signals. The relay does not persist them. The fix
   "peerId": "peer_abc123",
   "nickname": "Mira",
   "reaction": "wave",
-  "targetPeerId": "peer_xyz987",
   "sentAt": 1780000000400
 }
 ```
 
-The CLI keeps only a short in-memory recent-reaction view. Any incoming allowlisted reaction may become an OS-native notification when the recipient explicitly enabled notifications. Focus and do-not-disturb presence suppress those native notifications locally; notification sound is a separate local preference. The title combines the sender's sanitized presence nickname with a fixed emoji and fixed phrase so compact OS banners still show who sent what. Reactions never carry arbitrary message text.
+The CLI keeps only a short in-memory recent-reaction view. Any incoming allowlisted reaction may become an OS-native notification when the recipient explicitly enabled notifications. Local mute suppresses remote reaction animation and notification delivery; focus and do-not-disturb presence suppress native notifications locally. Notification sound is a separate local preference. The title combines the sender's sanitized presence nickname with the fixed emoji, and the body carries the fixed phrase. Reactions never carry arbitrary message text.
 
 ### Peer activity
 

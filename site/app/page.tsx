@@ -57,6 +57,10 @@ const faqs = [
     a: "No. Teammates receive tiny timing pulses. Your computer plays local keyboard and mouse samples.",
   },
   {
+    q: "Can I use it alone or offline?",
+    a: "Yes. Run cliks solo for a local simulated desk with 1–12 coworkers and personal rain, cafe, or deep-focus room tones. It uses no team, capture permission, or internet.",
+  },
+  {
     q: "What gets stored?",
     a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 48 hours without a live connection; reconnecting refreshes the clock.",
   },

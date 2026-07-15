@@ -8,7 +8,7 @@ import (
 )
 
 func notifyReaction(cfg CliksConfig, sender string, reaction string) error {
-	if !cfg.Notifications.Enabled || cfg.PresenceStatus == "focus" || cfg.PresenceStatus == "dnd" {
+	if !cfg.Notifications.Enabled || cfg.Listening.Muted || cfg.PresenceStatus == "focus" || cfg.PresenceStatus == "dnd" {
 		return nil
 	}
 	title, body := reactionNotificationContent(sender, reaction)
@@ -20,7 +20,7 @@ func reactionNotificationContent(sender string, reaction string) (string, string
 	if sender == "" {
 		sender = "A teammate"
 	}
-	return sender + " " + reactionGlyph(reaction) + " " + reactionPhrase(reaction), "Cliks quick signal"
+	return sender + " sent " + reactionGlyph(reaction), reactionPhrase(reaction) + " · Cliks quick signal"
 }
 
 func notifyWave(cfg CliksConfig, sender string) error {

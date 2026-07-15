@@ -24,6 +24,8 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 - requests Input Monitoring on macOS and opens the exact pane (one switch)
 - runs `cliks setup` for a plain-language readiness check
 
+The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission.
+
 ---
 
 ## Per operating system
@@ -34,6 +36,7 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 |------|-----------------|-------------------------|
 | Spatial sound | Built into the Cliks binary (stereo pan + distance) | Nothing |
 | Background capture | Uses a built-in listen-only CoreGraphics Event Tap | **One** permission: System Settings → Privacy & Security → **Input Monitoring** → enable Cliks or the terminal app that launches it (Terminal / iTerm / Warp / VS Code). |
+| Launch at login | User LaunchAgent, refreshed automatically after upgrades | Choose it during first setup or run `cliks service enable` |
 
 After granting Input Monitoring, restart Cliks once:
 
@@ -74,6 +77,7 @@ cliks join CLIK-XXXXXX
 |------|-----------------|-------------------------|
 | Spatial sound | Installer installs **mpv** | Nothing if install finished cleanly |
 | Background capture | Tries session access + `input` group automatically | Sometimes: log out and back in **once** after group change |
+| Launch at login | systemd user service with one-session locking | Choose it during first setup or run `cliks service enable` |
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash
@@ -112,6 +116,11 @@ cliks start --terminal --self
 | `cliks doctor` | Detailed report (also under More → Diagnostics in the TUI) |
 | `cliks capture-test` | Confirm activity is detected while you type/click |
 | `cliks` | Friendly on-screen control panel |
+| `cliks solo` | Offline simulated desk; no team, capture, server, or internet |
+
+## Solo Desk and personal room tones
+
+Run `cliks solo` to open a local spatial room with 1–12 simulated coworkers. Keyboard ambience, click ambience, and the generated rain/cafe/deep-focus room tone are independent personal switches. Nothing from Solo Desk is captured or sent. The same room-tone preference can be used in a live room from Preferences or with `cliks set ambient rain`.
 
 ## Public or self-hosted server
 

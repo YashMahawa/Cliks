@@ -14,6 +14,11 @@ const launchAgentID = "io.cliks.app"
 
 func cmdAutostart(args []string) error {
 	message, err := autostartAction(args)
+	if err == nil && len(args) > 0 && (args[0] == "enable" || args[0] == "disable") {
+		cfg := loadConfig()
+		cfg.AutostartWanted = args[0] == "enable"
+		_ = saveConfig(cfg)
+	}
 	if message != "" {
 		fmt.Println(message)
 	}
@@ -142,6 +147,11 @@ func macAutostart(action, code string) (string, error) {
 			return "", err
 		}
 		exe := stableServiceExecutable()
+		// Reloading by label first makes upgrades idempotent when an older
+		// LaunchAgent is already registered with launchd.
+		domain := fmt.Sprintf("gui/%d", os.Getuid())
+		_ = exec.Command("launchctl", "bootout", domain+"/"+launchAgentID).Run()
+		_ = exec.Command("launchctl", "bootout", domain, path).Run()
 		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -162,6 +172,8 @@ func macAutostart(action, code string) (string, error) {
   </dict>
   <key>RunAtLoad</key>
   <true/>
+	<key>ProcessType</key>
+	<string>Background</string>
   <key>KeepAlive</key>
   <false/>
   <key>StandardOutPath</key>
@@ -174,7 +186,7 @@ func macAutostart(action, code string) (string, error) {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
-		err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), path).Run()
+		err := exec.Command("launchctl", "bootstrap", domain, path).Run()
 		if err != nil {
 			return fmt.Sprintf("LaunchAgent written for %s. Run: launchctl bootstrap gui/$(id -u) %q", code, path), nil
 		}
@@ -182,6 +194,17 @@ func macAutostart(action, code string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}
+}
+
+func enableWantedAutostart(cfg CliksConfig) string {
+	if !cfg.AutostartWanted || cfg.CurrentTeamCode == "" {
+		return ""
+	}
+	message, err := autostartAction([]string{"enable", cfg.CurrentTeamCode})
+	if err != nil {
+		return "Launch at login still needs attention: " + err.Error()
+	}
+	return message
 }
 
 func windowsAutostart(action, code string) (string, error) {

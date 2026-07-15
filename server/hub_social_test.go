@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestPresenceStatusAndTargetedWave(t *testing.T) {
+func TestPresenceStatusAndRoomWideWave(t *testing.T) {
 	url, closeServer := testWebSocketURL(t)
 	defer closeServer()
 
@@ -13,6 +13,8 @@ func TestPresenceStatusAndTargetedWave(t *testing.T) {
 	defer sender.Close()
 	recipient := dialTestWebSocket(t, url)
 	defer recipient.Close()
+	secondRecipient := dialTestWebSocket(t, url)
+	defer secondRecipient.Close()
 
 	join := joinMessage("CLIK-LOCAL")
 	join["nickname"] = "Mira"
@@ -22,8 +24,9 @@ func TestPresenceStatusAndTargetedWave(t *testing.T) {
 	senderID := senderWelcome["peerId"].(string)
 
 	writeTestJSON(t, recipient, joinMessage("CLIK-LOCAL"))
-	recipientWelcome := readUntilType(t, recipient, "welcome")
-	recipientID := recipientWelcome["peerId"].(string)
+	readUntilType(t, recipient, "welcome")
+	writeTestJSON(t, secondRecipient, joinMessage("CLIK-LOCAL"))
+	readUntilType(t, secondRecipient, "welcome")
 
 	presence := readUntilType(t, sender, "presence")
 	foundStatus := false
@@ -37,18 +40,16 @@ func TestPresenceStatusAndTargetedWave(t *testing.T) {
 		t.Fatalf("presence did not preserve the sender's focus status: %#v", presence)
 	}
 
-	writeTestJSON(t, sender, map[string]any{"type": "reaction", "reaction": "wave", "targetPeerId": recipientID})
+	writeTestJSON(t, sender, map[string]any{"type": "reaction", "reaction": "wave", "targetPeerId": "ignored-old-client-target"})
 	reaction := readUntilType(t, recipient, "peer_reaction")
-	if reaction["reaction"] != "wave" || reaction["peerId"] != senderID || reaction["targetPeerId"] != recipientID {
-		t.Fatalf("unexpected targeted wave: %#v", reaction)
+	if reaction["reaction"] != "wave" || reaction["peerId"] != senderID {
+		t.Fatalf("unexpected room-wide wave: %#v", reaction)
 	}
-
-	// A repeated targeted wave is silently ignored during the cooldown so a
-	// background teammate cannot be notification-spammed.
-	writeTestJSON(t, sender, map[string]any{"type": "reaction", "reaction": "wave", "targetPeerId": recipientID})
-	_ = recipient.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
-	if _, _, err := recipient.ReadMessage(); err == nil {
-		t.Fatal("second wave bypassed the per-target cooldown")
+	if _, ok := reaction["targetPeerId"]; ok {
+		t.Fatalf("room-wide reaction leaked a target: %#v", reaction)
+	}
+	if got := readUntilType(t, secondRecipient, "peer_reaction")["reaction"]; got != "wave" {
+		t.Fatalf("second teammate did not receive room-wide wave: %v", got)
 	}
 }
 

@@ -64,7 +64,7 @@ func TestKeepRunningToggleWithoutActiveSessionDoesNotStart(t *testing.T) {
 	model := homeModel{
 		cfg:    cfg,
 		mode:   "home",
-		cursor: 1,
+		cursor: 2,
 	}
 
 	updated, cmd := model.activate()
@@ -249,22 +249,20 @@ func TestFirstLiveViewTeachesSpatialDeskWithoutNetworkPeers(t *testing.T) {
 	}
 }
 
-func TestFirstSetupOffersPermissionsNotificationsPreferencesAndServer(t *testing.T) {
-	model := homeModel{cfg: defaultConfig(), mode: "home", onboardingPending: true}
+func TestFirstSetupShowsOneDecisionAtATime(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "home", onboardingPending: true, onboardingSuggestion: "CozyOtter"}
 	model.finishLaunch()
 	if model.mode != "first-setup" {
 		t.Fatalf("mode = %q, want first-setup", model.mode)
 	}
 	items := model.items()
-	wants := map[string]bool{"nickname": false, "setup": false, "notification-test": false, "preferences": false, "backend-url": false, "first-setup-done": false}
-	for _, item := range items {
-		if _, ok := wants[item.key]; ok {
-			wants[item.key] = true
-		}
+	if len(items) != 3 || items[0].key != "nickname" || items[1].key != "onboarding-random-name" {
+		t.Fatalf("nickname step items = %#v", items)
 	}
-	for key, found := range wants {
-		if !found {
-			t.Fatalf("first setup is missing %q", key)
+	view := model.View()
+	for _, want := range []string{"SETUP  1/7", "What should the room call you?", "CozyOtter"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("first setup view is missing %q:\n%s", want, view)
 		}
 	}
 }
@@ -280,8 +278,8 @@ func TestFirstSetupNicknameReturnsToOnboarding(t *testing.T) {
 	form.nicknameValue = "Mira"
 	updated, _ = form.submitForm()
 	got := updated.(homeModel)
-	if got.mode != "first-setup" || got.cfg.Nickname != "Mira" {
-		t.Fatalf("after nickname mode=%q nickname=%q", got.mode, got.cfg.Nickname)
+	if got.mode != "first-setup" || got.cfg.Nickname != "Mira" || got.onboardingStep != 1 {
+		t.Fatalf("after nickname mode=%q nickname=%q step=%d", got.mode, got.cfg.Nickname, got.onboardingStep)
 	}
 }
 
@@ -362,14 +360,14 @@ func TestLiveShortcutGuideDocumentsSessionControls(t *testing.T) {
 func TestFirstRunSurfacesJoinCreateAndSoundCheck(t *testing.T) {
 	model := homeModel{cfg: defaultConfig(), mode: "home"}
 	items := model.items()
-	want := []string{"join", "create", "sound", "doctor"}
+	want := []string{"solo", "join", "create", "sound", "doctor"}
 	for index, key := range want {
 		if items[index].key != key {
 			t.Fatalf("first-run item %d = %q, want %q", index, items[index].key, key)
 		}
 	}
 	view := model.View()
-	if !strings.Contains(view, "Set up Cliks") || !strings.Contains(view, "Join Team") {
+	if !strings.Contains(view, "Set up Cliks") || !strings.Contains(view, "Solo Desk") || !strings.Contains(view, "Join Team") {
 		t.Fatalf("first-run view does not expose setup actions:\n%s", view)
 	}
 }

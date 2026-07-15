@@ -84,6 +84,7 @@ type AudioEngine struct {
 	keyboardSamples []string
 	mouseSamples    []string
 	queue           chan playbackJob
+	ambient         *ambientController
 	warned          bool
 	mu              sync.Mutex
 	recent          []time.Time
@@ -111,6 +112,8 @@ func newAudioEngineWithContext(parent context.Context, listening ListeningConfig
 		queue:          make(chan playbackJob, 96),
 		fatigueGain:    1,
 	}
+	engine.ambient = newAmbientController(ctx)
+	engine.ambient.update(listening)
 	for i := 0; i < 4; i++ {
 		engine.workers.Add(1)
 		go func() {
@@ -126,6 +129,9 @@ func (a *AudioEngine) Close() {
 		return
 	}
 	a.closeOnce.Do(func() {
+		if a.ambient != nil {
+			a.ambient.close()
+		}
 		a.cancel()
 		a.workers.Wait()
 	})
@@ -140,6 +146,9 @@ func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.listening = listening
 	a.recomputePlacementsLocked(false)
 	a.mu.Unlock()
+	if a.ambient != nil {
+		a.ambient.update(listening)
+	}
 }
 
 func (a *AudioEngine) updatePeers(peers []PeerPresence, ownPeerID string) {
