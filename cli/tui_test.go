@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -179,6 +180,47 @@ func TestLiveReactionButtonsUseExactRenderedHitboxes(t *testing.T) {
 	}
 	if got := model.liveHit(waveX+ansi.StringWidth("[ 👋 Wave ]")+1, niceY); got != "" {
 		t.Fatalf("gap between reaction buttons hit %q", got)
+	}
+}
+
+func TestLiveActionHitboxesFollowRenderedRowsAtWideTerminalSizes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.height = 40
+	targets := []struct {
+		needle string
+		action string
+	}{
+		{"[ Notifications", "notifications"},
+		{"[ Notify sound", "notification-sound"},
+		{"[ Mute", "mute"},
+		{"[ Spatial", "spatial"},
+		{"[ 👋 Wave ]", "reaction-wave"},
+		{"[ 👍 Nice ]", "reaction-nice"},
+		{"[ ☕ Coffee ]", "reaction-coffee"},
+		{"[ 🎉 Celebrate ]", "reaction-celebrate"},
+		{"[ 🧘 Break ]", "reaction-break"},
+		{"[ Preferences ]", "prefs"},
+		{"[ Back ]", "back"},
+		{"[ Stop ]", "stop"},
+	}
+	for _, width := range []int{120, 180, 220} {
+		model.width = width
+		if got := lipgloss.Height(model.liveHeader(maxInt(44, panelWidth(width)))); got != 1 {
+			t.Fatalf("width %d header height = %d, want 1", width, got)
+		}
+		view := model.View()
+		for _, target := range targets {
+			x, y := renderedTextPosition(t, view, target.needle)
+			if got := model.liveHit(x+2, y); got != target.action {
+				t.Fatalf("width %d %s hit at rendered row %d = %q, want %q", width, target.needle, y, got, target.action)
+			}
+			if got := model.liveHit(x+2, y+1); got == target.action {
+				t.Fatalf("width %d %s still highlights one row below the rendered button", width, target.needle)
+			}
+		}
 	}
 }
 

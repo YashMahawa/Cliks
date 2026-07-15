@@ -2671,16 +2671,18 @@ func (m sessionModel) View() string {
 func (m sessionModel) liveHeader(width int) string {
 	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
-	left := " Cliks  /  " + valuePlain(team, "Team")
+	left := "Cliks  /  " + valuePlain(team, "Team")
 	if code != "" {
 		left += "  ·  " + code
 	}
-	right := connectionStyle(m.state.ConnectionStatus) + "  ·  " + fmt.Sprintf("%d here", maxInt(1, m.state.ActiveCount)) + " "
-	contentWidth := maxInt(20, width-2)
+	right := connectionStyle(m.state.ConnectionStatus) + "  ·  " + fmt.Sprintf("%d here", maxInt(1, m.state.ActiveCount))
+	// Lip Gloss Width includes padding. Budget the actual inner width so the
+	// header cannot gain a surprise second row and shift every panel below it.
+	contentWidth := maxInt(20, width-styleTitle.GetPaddingLeft()-styleTitle.GetPaddingRight())
 	rightWidth := ansi.StringWidth(right)
 	left = ansi.Truncate(left, maxInt(8, contentWidth-rightWidth-2), "…")
 	gap := maxInt(2, contentWidth-ansi.StringWidth(left)-rightWidth)
-	return styleTitle.Width(contentWidth).Render(left + strings.Repeat(" ", gap) + right)
+	return styleTitle.Width(width).MaxWidth(width).Render(left + strings.Repeat(" ", gap) + right)
 }
 
 func (m sessionModel) renderSpatialDesk(width int, height int) string {
@@ -2835,6 +2837,14 @@ func reactionGlyph(value string) string {
 func (m sessionModel) liveActivityView(width int) string {
 	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	navigation := m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop")
+	navigationLines := []string{navigation}
+	if ansi.StringWidth(navigation) > width {
+		navigationLines = []string{
+			m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back"),
+			m.liveActionLine("stop", "Stop"),
+		}
+	}
 	lines := []string{
 		styleAccent.Render(valuePlain(team, "Your room")),
 		m.liveActionLine("copy-code", code+"  COPY"),
@@ -2854,8 +2864,8 @@ func (m sessionModel) liveActivityView(width int) string {
 		m.liveActionLine("reaction-coffee", "☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "🎉 Celebrate"),
 		m.liveActionLine("reaction-break", "🧘 Break"),
 		"",
-		m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop"),
 	}
+	lines = append(lines, navigationLines...)
 	if m.message != "" {
 		lines = append(lines, "", styleDim.Render(m.message))
 	}
@@ -2876,55 +2886,24 @@ func (m *sessionModel) sendLiveReaction(reaction string) {
 }
 
 func (m sessionModel) liveHit(x int, y int) string {
-	if m.teamCodeHit(x, y) {
-		return "copy-code"
-	}
-	width := maxInt(44, panelWidth(m.width))
-	if width < 74 {
-		return ""
-	}
-	mapWidth := int(float64(width) * 0.68)
-	contentX := lipgloss.Width(stylePanel.Width(mapWidth).Render("")) + 5
-	if x < contentX {
-		return ""
-	}
-	// Header plus the panel border and top padding place the first rail row at y=5.
-	// Keep this tied to the rendered panel so hover and click land on the text itself.
-	contentTop := 5
-	switch y - contentTop {
-	case 1:
-		return inlineLiveHit(x, contentX, []liveHitTarget{{"copy-code", valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode) + "  COPY", 0}})
-	case 9:
-		return inlineLiveHit(x, contentX, []liveHitTarget{{"notifications", "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled), 0}})
-	case 10:
-		return inlineLiveHit(x, contentX, []liveHitTarget{{"notification-sound", "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound), 0}})
-	case 11:
-		return inlineLiveHit(x, contentX, []liveHitTarget{
-			{"mute", "Mute " + onOff(m.state.Listening.Muted), 3},
-			{"spatial", "Spatial " + onOff(m.state.Listening.Spatial), 0},
-		})
-	case 14:
-		return inlineLiveHit(x, contentX, []liveHitTarget{
-			{"reaction-wave", "👋 Wave", 4},
-			{"reaction-nice", "👍 Nice", 0},
-		})
-	case 15:
-		return inlineLiveHit(x, contentX, []liveHitTarget{
-			{"reaction-coffee", "☕ Coffee", 2},
-			{"reaction-celebrate", "🎉 Celebrate", 0},
-		})
-	case 16:
-		return inlineLiveHit(x, contentX, []liveHitTarget{{"reaction-break", "🧘 Break", 0}})
-	case 18:
-		return inlineLiveHit(x, contentX, []liveHitTarget{
-			{"prefs", "Preferences", 3},
-			{"back", "Back", 3},
-			{"stop", "Stop", 0},
-		})
+	for _, region := range m.liveHitRegions() {
+		if y == region.y && x >= region.x && x < region.x+region.width {
+			return region.action
+		}
 	}
 	return ""
 }
 
+type liveHitRegion struct {
+	action string
+	x      int
+	y      int
+	width  int
+}
+
+// liveHitTarget and inlineLiveHit are used by compact single-line rails such
+// as Solo Desk. The live team room uses rendered regions because its header
+// and panel can change height with terminal width.
 type liveHitTarget struct {
 	action string
 	label  string
@@ -2941,6 +2920,64 @@ func inlineLiveHit(x int, startX int, targets []liveHitTarget) string {
 		cursor += width + target.gap
 	}
 	return ""
+}
+
+func (m sessionModel) liveHitRegions() []liveHitRegion {
+	width := maxInt(44, panelWidth(m.width))
+	var regions []liveHitRegion
+	addRenderedRegion := func(action string, rendered string, needle string, baseX int, baseY int) {
+		for localY, styledLine := range strings.Split(rendered, "\n") {
+			line := ansi.Strip(styledLine)
+			if index := strings.Index(line, needle); index >= 0 {
+				regions = append(regions, liveHitRegion{
+					action: action,
+					x:      baseX + ansi.StringWidth(line[:index]),
+					y:      baseY + localY,
+					width:  ansi.StringWidth(needle),
+				})
+				return
+			}
+		}
+	}
+	header := m.liveHeader(width)
+	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
+	if code != "" {
+		addRenderedRegion("copy-code", header, code, 0, 0)
+	}
+	if width < 74 {
+		return regions
+	}
+	mapWidth := int(float64(width) * 0.68)
+	infoWidth := width - mapWidth - 2
+	bodyHeight := maxInt(12, m.height-7)
+	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render("")
+	rail := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
+	baseX := lipgloss.Width(desk) + 2
+	baseY := lipgloss.Height(header)
+	labels := []struct {
+		action string
+		label  string
+	}{
+		{"copy-code", code + "  COPY"},
+		{"notifications", "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled)},
+		{"notification-sound", "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound)},
+		{"mute", "Mute " + onOff(m.state.Listening.Muted)},
+		{"spatial", "Spatial " + onOff(m.state.Listening.Spatial)},
+		{"reaction-wave", "👋 Wave"},
+		{"reaction-nice", "👍 Nice"},
+		{"reaction-coffee", "☕ Coffee"},
+		{"reaction-celebrate", "🎉 Celebrate"},
+		{"reaction-break", "🧘 Break"},
+		{"prefs", "Preferences"},
+		{"back", "Back"},
+		{"stop", "Stop"},
+	}
+	for _, item := range labels {
+		if item.label != "" {
+			addRenderedRegion(item.action, rail, "[ "+item.label+" ]", baseX, baseY)
+		}
+	}
+	return regions
 }
 
 func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
@@ -2990,19 +3027,6 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 	}
 	m.state = m.controller.viewState()
 	return m, nil
-}
-
-func (m sessionModel) teamCodeHit(x int, y int) bool {
-	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
-	if code == "" {
-		return false
-	}
-	if y == 0 {
-		team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
-		codeX := ansi.StringWidth(" Cliks  /  "+valuePlain(team, "Team")+"  ·  ") + 1
-		return x >= codeX && x < codeX+ansi.StringWidth(code)
-	}
-	return false
 }
 
 func (m sessionModel) settingsHit(x int, y int) int {
