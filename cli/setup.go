@@ -18,7 +18,7 @@ type setupStep struct {
 
 // cmdSetup makes a fresh machine ready for capture + spatial sound with
 // plain-language guidance. It auto-applies every safe fix and only asks the
-// user for OS permission dialogs that apps cannot skip (macOS Accessibility).
+// user for OS permission dialogs that apps cannot skip (macOS Input Monitoring).
 func cmdSetup(args []string) error {
 	quiet := false
 	for _, arg := range args {
@@ -57,7 +57,7 @@ func runSetupChecks(verifySound bool) []setupStep {
 	steps = append(steps, ensureAudioReady()...)
 	steps = append(steps, ensureCaptureReady()...)
 	if ready, detail := nativeNotificationStatus(); ready {
-		steps = append(steps, setupStep{title: "Native notifications", status: "ok", detail: "Optional waves can use " + detail + ". They stay off until you enable them in Preferences."})
+		steps = append(steps, setupStep{title: "Native notifications", status: "ok", detail: "Quick signals can use " + detail + ". You control banners and their sound separately in Preferences."})
 	} else {
 		steps = append(steps, setupStep{title: "Native notifications", status: "tip", detail: "Optional and currently off: " + detail + "."})
 	}
@@ -178,20 +178,11 @@ func tryInstallMpv() (bool, string) {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		if _, err := exec.LookPath("brew"); err != nil {
-			return false, "Homebrew not found; install mpv with: brew install mpv"
-		}
-		cmd := exec.Command("brew", "install", "mpv")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return false, "Could not install mpv automatically with Homebrew."
-		}
-		return true, "Installed mpv via Homebrew."
+		return false, "Cliks already includes stereo audio on macOS; mpv is optional only for advanced output-device routing."
 	case "linux":
 		return tryLinuxInstallMpv()
 	case "windows":
-		return tryWindowsInstallMpv()
+		return false, "Cliks already includes stereo audio on Windows; mpv is optional only for advanced output-device routing."
 	default:
 		return false, "Automatic audio install is not available on this platform."
 	}
@@ -223,34 +214,6 @@ func tryLinuxInstallMpv() (bool, string) {
 		}
 	}
 	return false, "Could not install mpv automatically (sudo may be required). Run: sudo apt install mpv"
-}
-
-func tryWindowsInstallMpv() (bool, string) {
-	if _, err := exec.LookPath("winget.exe"); err == nil {
-		cmd := exec.Command("winget.exe", "install", "--id", "mpv.mpv", "-e", "--accept-package-agreements", "--accept-source-agreements")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			return true, "Installed mpv via winget."
-		}
-	}
-	if _, err := exec.LookPath("scoop"); err == nil {
-		cmd := exec.Command("scoop", "install", "mpv")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			return true, "Installed mpv via scoop."
-		}
-	}
-	if _, err := exec.LookPath("choco.exe"); err == nil {
-		cmd := exec.Command("choco.exe", "install", "mpv", "-y")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			return true, "Installed mpv via chocolatey."
-		}
-	}
-	return false, "Could not install mpv automatically. Install from https://mpv.io or: winget install mpv.mpv"
 }
 
 func ensureCaptureReady() []setupStep {

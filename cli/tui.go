@@ -176,6 +176,7 @@ type homeModel struct {
 	codeHover             bool
 	launchStartedAt       time.Time
 	launchUntil           time.Time
+	launchSoundPhase      int
 	firstLaunch           bool
 	onboardingPending     bool
 }
@@ -268,7 +269,7 @@ type launchTickMsg time.Time
 
 func (m homeModel) Init() tea.Cmd {
 	commands := []tea.Cmd{homeTick(), launchTick()}
-	commands = append(commands, welcomeSoundCmd(m.cfg.Listening, m.firstLaunch))
+	commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
 	return tea.Batch(commands...)
 }
 
@@ -276,17 +277,23 @@ func launchTick() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg { return launchTickMsg(t) })
 }
 
-func welcomeSoundCmd(listening ListeningConfig, firstLaunch bool) tea.Cmd {
+func welcomeSoundCmd(listening ListeningConfig) tea.Cmd {
 	return func() tea.Msg {
 		audio := newAudioEngine(listening)
 		defer audio.Close()
 		_ = audio.preview()
-		if firstLaunch {
-			time.Sleep(350 * time.Millisecond)
-			_ = audio.preview()
-		}
 		return nil
 	}
+}
+
+func launchSoundCuePhase(elapsed time.Duration) int {
+	if elapsed >= 7*time.Second {
+		return 2
+	}
+	if elapsed >= 3500*time.Millisecond {
+		return 1
+	}
+	return 0
 }
 
 func (m *homeModel) finishLaunch() {
@@ -303,7 +310,15 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case launchTickMsg:
 		if time.Now().Before(m.launchUntil) {
-			return m, launchTick()
+			commands := []tea.Cmd{launchTick()}
+			if m.firstLaunch {
+				phase := launchSoundCuePhase(time.Since(m.launchStartedAt))
+				if phase > m.launchSoundPhase {
+					m.launchSoundPhase = phase
+					commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
+				}
+			}
+			return m, tea.Batch(commands...)
 		}
 		m.finishLaunch()
 		return m, nil
@@ -533,28 +548,130 @@ func (m homeModel) launchView() string {
 	width := maxInt(40, panelWidth(m.width))
 	height := maxInt(14, m.height-7)
 	elapsed := time.Since(m.launchStartedAt)
-	frame := int(elapsed.Milliseconds()/90) % 4
-	dots := []string{"·", "· ·", "· · ·", "· · · ·"}[frame]
-	var lines []string
-	if m.firstLaunch {
-		burst := []string{"✦      ·      ✦", "·   ✦  ✦  ✦   ·", "✦ ·  ✹  · ✦", "·  ✦  ·  ✦  ·"}[frame]
-		lines = []string{
-			"              " + burst,
-			"            ·       ○ Mira       ·",
-			"        ·                         ·",
-			"      ○ Noor       [ YOU ]       ○ Sam",
-			"        ·                         ·",
-			"            ·       ○ Kai        ·",
-			"",
-			"Your quiet coworking room is waking up",
-			"Hear the room. Send a signal. Never share key values.",
-		}
-	} else {
-		lines = []string{"       ·   ✦   ·", "          [ YOU ]", "       ·   ✦   ·", "Opening your desk"}
+	canvas := renderLaunchCanvas(maxInt(34, width-6), maxInt(10, height-4), elapsed, m.firstLaunch, teamLabel(m.cfg, m.cfg.CurrentTeamCode))
+	return stylePanel.Width(width).Height(height).Render(styleAccent.Render(canvas))
+}
+
+func renderLaunchCanvas(width int, height int, elapsed time.Duration, firstLaunch bool, team string) string {
+	width = maxInt(34, width)
+	height = maxInt(10, height)
+	grid := make([][]rune, height)
+	for y := range grid {
+		grid[y] = []rune(strings.Repeat(" ", width))
 	}
-	lines = append(lines, "", dots)
-	content := styleAccent.Render(strings.Join(lines, "\n"))
-	return stylePanel.Width(width).Height(height).Align(lipgloss.Center).AlignVertical(lipgloss.Center).Render(content)
+	put := func(x int, y int, value string) {
+		if y < 0 || y >= height {
+			return
+		}
+		for index, char := range []rune(value) {
+			px := x + index
+			if px >= 0 && px < width {
+				grid[y][px] = char
+			}
+		}
+	}
+	center := func(y int, value string) {
+		put((width-len([]rune(value)))/2, y, value)
+	}
+	cx, cy := width/2, (height+1)/2
+	frame := int(elapsed.Milliseconds()/180) % 4
+	ringProgress := clamp(elapsed.Seconds()/1.8, 0, 1)
+	steps := int(180 * ringProgress)
+	rx := float64(width) * 0.39
+	ry := float64(height) * 0.28
+	for step := 0; step < 180; step++ {
+		angle := -math.Pi/2 + float64(step)*2*math.Pi/180
+		glyph := "·"
+		if step < steps && step%11 == 0 {
+			glyph = "✦"
+		} else if step < steps {
+			glyph = "•"
+		}
+		put(cx+int(math.Cos(angle)*rx), cy+int(math.Sin(angle)*ry), glyph)
+	}
+	pulse := []string{"·   ·", "• · •", "✦ · ✦", "• ✦ •"}[frame]
+	center(cy-1, pulse)
+	center(cy, "[ YOU ]")
+
+	if !firstLaunch {
+		name := valuePlain(team, "your desk")
+		center(0, "CLIKS  /  WARM DESK")
+		center(maxInt(1, cy-3), "Opening "+name)
+		beat := []string{"·", "✦", "•", "✦"}[frame]
+		center(minInt(height-2, cy+2), beat+"  listening  "+beat)
+		center(height-1, launchProgress(elapsed, 3*time.Second, width)+"  Enter skips")
+		return launchGridString(grid)
+	}
+
+	phaseTitle := "A quiet room is taking shape"
+	if elapsed >= 2*time.Second {
+		phaseTitle = "Your people find their places"
+	}
+	if elapsed >= 4*time.Second {
+		phaseTitle = "Activity becomes ambience"
+	}
+	if elapsed >= 6*time.Second {
+		phaseTitle = "Small signals cross the room"
+	}
+	if elapsed >= 8500*time.Millisecond {
+		phaseTitle = "Your desk is ready"
+	}
+	center(0, "CLIKS  /  YOUR FIRST WARM DESK")
+	center(1, phaseTitle)
+
+	type launchPeer struct {
+		name      string
+		x         int
+		y         int
+		appearsAt time.Duration
+	}
+	peers := []launchPeer{
+		{name: "Mira", x: cx, y: cy - int(ry), appearsAt: 1200 * time.Millisecond},
+		{name: "Sam", x: cx + int(rx), y: cy, appearsAt: 2100 * time.Millisecond},
+		{name: "Kai", x: cx, y: cy + int(ry), appearsAt: 2900 * time.Millisecond},
+		{name: "Noor", x: cx - int(rx), y: cy, appearsAt: 3600 * time.Millisecond},
+	}
+	for index, peer := range peers {
+		if elapsed < peer.appearsAt {
+			continue
+		}
+		marker := "○"
+		if elapsed >= 4*time.Second && (index == 0 || index == 3) && frame%2 == 0 {
+			marker = "◆"
+		}
+		label := marker + " " + peer.name
+		put(peer.x-len([]rune(label))/2, peer.y, label)
+	}
+	if elapsed >= 4*time.Second && elapsed < 6*time.Second {
+		center(minInt(height-3, cy+2), "Mira and Noor are typing  ◆  ◆")
+	}
+	if elapsed >= 6*time.Second && elapsed < 8500*time.Millisecond {
+		burst := []string{"· 👋 ✦", "✦ 👋 ·", "· 👋 ·", "✦ 👋 ✦"}[frame]
+		put(cx+int(rx)-len([]rune(burst))/2, maxInt(1, cy-2), burst)
+		center(minInt(height-3, cy+2), "Sam  👋  Hey there!  •  a signal, not a meeting")
+	}
+	if elapsed >= 8500*time.Millisecond {
+		burst := []string{"✦   ·   ✦", "·  ✦✦✦  ·", "✦  ·✹·  ✦", "·   ✦   ·"}[frame]
+		center(maxInt(1, cy-2), burst)
+		center(minInt(height-3, cy+2), "Hear the room  •  never share key values")
+	}
+	center(height-2, launchProgress(elapsed, 10*time.Second, width))
+	center(height-1, "Enter skips  •  this is a local demo  •  nothing is sent")
+	return launchGridString(grid)
+}
+
+func launchProgress(elapsed time.Duration, duration time.Duration, width int) string {
+	barWidth := clampInt(width/5, 8, 20)
+	filled := clampInt(int(float64(barWidth)*clamp(float64(elapsed)/float64(duration), 0, 1)), 0, barWidth)
+	return "[" + strings.Repeat("━", filled) + strings.Repeat("─", barWidth-filled) + "]"
+}
+
+func launchGridString(grid [][]rune) string {
+	lines := make([]string, len(grid))
+	for index := range grid {
+		lines[index] = strings.TrimRight(string(grid[index]), " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m homeModel) fullPanel() lipgloss.Style {
@@ -693,10 +810,11 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.firstLaunch = true
 		m.onboardingPending = true
+		m.launchSoundPhase = 0
 		m.launchStartedAt = time.Now()
 		m.launchUntil = m.launchStartedAt.Add(10 * time.Second)
 		m.message = "Factory reset complete. Welcome back to the beginning."
-		return m, tea.Batch(launchTick(), welcomeSoundCmd(m.cfg.Listening, true))
+		return m, tea.Batch(launchTick(), welcomeSoundCmd(m.cfg.Listening))
 	case "first-setup-done":
 		m.cfg.OnboardingSeen = true
 		_ = saveConfig(m.cfg)
@@ -1540,7 +1658,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		{"Hear keyboard", "play teammate keyboard events", func(c CliksConfig) string { return onOff(c.Listening.Keyboard) }, func(c *CliksConfig, _ int) { c.Listening.Keyboard = !c.Listening.Keyboard }},
 		{"Hear mouse", "play teammate click events", func(c CliksConfig) string { return onOff(c.Listening.Mouse) }, func(c *CliksConfig, _ int) { c.Listening.Mouse = !c.Listening.Mouse }},
 		{"Self monitor", "hear your own local test events", func(c CliksConfig) string { return onOff(c.Listening.Self) }, func(c *CliksConfig, _ int) { c.Listening.Self = !c.Listening.Self }},
-		{"Notifications", "native alerts for direct waves", func(c CliksConfig) string { return onOff(c.Notifications.Enabled) }, func(c *CliksConfig, _ int) {
+		{"Notifications", "native alerts with sender and signal message", func(c CliksConfig) string { return onOff(c.Notifications.Enabled) }, func(c *CliksConfig, _ int) {
 			c.Notifications.Enabled = !c.Notifications.Enabled
 			c.Notifications.Configured = true
 		}},

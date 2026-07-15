@@ -54,10 +54,7 @@ func nativeNotificationStatus() (bool, string) {
 		}
 		return false, "osascript is unavailable"
 	case "windows":
-		if _, err := exec.LookPath("powershell"); err == nil {
-			return true, "Windows toast notifications"
-		}
-		return false, "Windows PowerShell is unavailable"
+		return true, "Windows Notification Center (built in)"
 	case "linux":
 		if isTermuxRuntime() {
 			if _, err := exec.LookPath("termux-notification"); err == nil {

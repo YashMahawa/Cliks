@@ -9,8 +9,8 @@ For non-technical setup, start with **[setup.md](./setup.md)** and `cliks setup`
 | Platform | Default (`cliks start`) | Fallback |
 |----------|-------------------------|----------|
 | **Linux** | Readable `/dev/input/event*` (evdev) | Terminal mode if devices are locked down |
-| **macOS** | Global hooks (`gohook` / OS event hooks) after Accessibility | Terminal mode; soft prompt to open Settings |
-| **Windows** | Global hooks for normal-privilege apps | Terminal mode; elevated windows may pause capture (UIPI) |
+| **macOS** | First-party CoreGraphics listen-only Event Tap after Input Monitoring | Terminal mode; setup requests access and opens the correct pane |
+| **Windows** | First-party Win32 low-level keyboard/mouse hooks | Terminal mode; elevated windows may pause capture (UIPI) |
 
 ### Commands
 
@@ -45,21 +45,24 @@ Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop se
 
 ### macOS
 
-- Accessibility permission is required for global hooks (OS rule — apps cannot skip the dialog)
-- Permission is **per parent app**: if you switch from Terminal to iTerm/Warp/VS Code, enable Accessibility for the new app
+- Input Monitoring permission is required for the native listen-only Event Tap (OS rule — apps cannot bypass it)
+- Cliks calls Apple's preflight/request APIs and opens the Input Monitoring pane; enable Cliks or the terminal responsible for launching it
 - `cliks setup` and the installer open System Settings to the right pane
 - Enable the **terminal that launches Cliks**, then rerun `cliks setup`
 
 ### Windows
 
-- No special permission dialog for standard-user global hooks
+- No special permission dialog for the built-in standard-user hooks
 - **UIPI:** while an *elevated* window is focused, hooks may pause; capture resumes on normal windows  
 - This is a tip, not a setup failure
 
-## Production direction
+## Implementation and next steps
 
-- Windows: keep low-level hooks; optional elevated helper for Admin-window coverage  
-- macOS: optional native Event Tap / helper binary without third-party hooks  
+- Windows uses `SetWindowsHookExW` with `WH_KEYBOARD_LL` / `WH_MOUSE_LL` on a dedicated message-loop thread.
+- macOS uses `CGEventTapCreate` with a listen-only mask containing only key-down and left/right mouse-down.
+- Both native callbacks enqueue only an activity kind; key codes and event payloads are never copied into the Cliks event model.
+- `cliks doctor` probes native hook initialization on both platforms.
+- An optional elevated Windows helper could cover Administrator windows in a future release.
 - Linux Wayland: XDG InputCapture portal when distros expose it widely  
 - Privilege-separated helpers remain optional; default path stays simple for non-tech users  
 

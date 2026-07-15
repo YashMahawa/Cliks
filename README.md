@@ -104,13 +104,13 @@ cliks sound-test     # hear sample clicks
 cliks join CLIK-XXXXXX
 ```
 
-- **macOS:** if capture is quiet, enable your Terminal app under System Settings → Privacy & Security → Accessibility (the installer opens this pane).
+- **macOS:** if capture is quiet, enable Cliks or your Terminal app under System Settings → Privacy & Security → Input Monitoring (setup opens this pane).
 - **Windows:** capture works for normal apps with no extra permission dialog.
 - **Linux:** the installer/`cliks setup` request input-device access; log out/in once only if permanent group membership was just added.
 
 Cliks still does not send which key was pressed — only activity kind + coarse timing.
 
-**Spatial sound:** best with **mpv** (stereo pan + distance). Installer installs it when possible. Without mpv/ffplay, Cliks falls back to basic system players (distance/volume only). Details: [docs/setup.md](docs/setup.md).
+**Spatial sound:** built into the macOS and Windows release binaries. Linux setup installs **mpv** when possible and falls back to available system players. Details: [docs/setup.md](docs/setup.md).
 
 For a local self-test where you hear your own typing:
 
@@ -247,10 +247,10 @@ curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.s
 Designed for non-technical users. It:
 
 - downloads the current native GitHub Release (source build only as a fallback)
-- installs **mpv** for stereo spatial sound when a package manager is available
+- includes stereo audio on macOS/Windows and installs **mpv** on Linux when possible
 - adds `~/.local/bin` (or platform equivalent) to common shell PATH files
 - prepares Linux input access automatically when possible
-- opens macOS Accessibility settings when needed
+- requests macOS Input Monitoring and opens the correct settings pane when needed
 - runs `cliks setup` and prints plain next steps
 
 Windows users should use `cli/install.ps1` from PowerShell; Git Bash remains a supported fallback. Tagged releases are built and tested natively on Linux x64/arm64, macOS Intel/Apple Silicon, and Windows x64. In Termux, the source-build wrapper goes to `$PREFIX/bin` and desktop input-group steps are skipped.
@@ -337,7 +337,7 @@ docker compose up
 
 Cliks is an active prototype. The website, longer team codes, Go WebSocket relay, team deletion with live deleted-room signals, Go CLI config, event batching, reconnect loop, Bubble Tea terminal dashboard/control screen, single local session guard, autostart, spatial-capable CLI playback, and sample-based sounds are working.
 
-Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS uses global hooks after Accessibility is granted to the terminal app launching Cliks; Windows global hooks work for normal-privilege applications, while capture may pause when an elevated window is focused. `cliks setup`, `cliks doctor`, and `cliks capture-test` provide platform-specific readiness checks and fixes.
+Linux global capture has a `/dev/input` mode for Wayland and Xorg when permission is granted. macOS uses a built-in, listen-only CoreGraphics Event Tap after Input Monitoring is granted to Cliks or its terminal. Windows uses built-in low-level Win32 hooks for normal-privilege applications; capture may pause only while an elevated window is focused. `cliks setup`, `cliks doctor`, and `cliks capture-test` provide platform-specific readiness checks and native-backend probes.
 
 Local configuration and session state are written atomically. Invalid saved JSON produces a visible warning instead of silently replacing settings with defaults, and one session lock prevents foreground, background, and login-started copies from connecting at the same time. WebSocket heartbeat writes are synchronized with other socket writes.
 

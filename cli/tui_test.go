@@ -285,6 +285,37 @@ func TestFirstSetupNicknameReturnsToOnboarding(t *testing.T) {
 	}
 }
 
+func TestFirstLaunchChoreographyTeachesPresenceTypingAndSignals(t *testing.T) {
+	tests := []struct {
+		elapsed time.Duration
+		wants   []string
+	}{
+		{500 * time.Millisecond, []string{"A quiet room is taking shape", "[ YOU ]"}},
+		{2500 * time.Millisecond, []string{"Your people find their places", "Mira", "Sam"}},
+		{4500 * time.Millisecond, []string{"Activity becomes ambience", "Mira and Noor are typing"}},
+		{6500 * time.Millisecond, []string{"Small signals cross the room", "Sam", "Hey there!"}},
+		{9 * time.Second, []string{"Your desk is ready", "never share key values", "Enter skips"}},
+	}
+	for _, test := range tests {
+		view := renderLaunchCanvas(100, 24, test.elapsed, true, "Sol")
+		for _, want := range test.wants {
+			if !strings.Contains(view, want) {
+				t.Fatalf("at %s launch view is missing %q:\n%s", test.elapsed, want, view)
+			}
+		}
+	}
+}
+
+func TestNormalLaunchUsesResponsiveDeskAndOneSoundPhase(t *testing.T) {
+	view := renderLaunchCanvas(90, 20, 2*time.Second, false, "Sol")
+	if !strings.Contains(view, "WARM DESK") || !strings.Contains(view, "Opening Sol") || !strings.Contains(view, "[ YOU ]") || !strings.Contains(view, "listening") || !strings.Contains(view, "Enter skips") {
+		t.Fatalf("normal launch view is incomplete:\n%s", view)
+	}
+	if launchSoundCuePhase(3*time.Second) != 0 || launchSoundCuePhase(4*time.Second) != 1 || launchSoundCuePhase(8*time.Second) != 2 {
+		t.Fatal("first-launch sound cue phases changed")
+	}
+}
+
 func TestReactionAnimationNamesSenderInsideDesk(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

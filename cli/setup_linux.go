@@ -51,9 +51,9 @@ func platformCaptureSetup() []setupStep {
 				})
 			} else {
 				steps = append(steps, setupStep{
-					title:  "Capture after reboot",
-					status: "tip",
-					detail: "Session access is ready. For permanent access after reboot: sudo usermod -aG input $USER then log out/in.",
+					title:   "Capture after reboot",
+					status:  "tip",
+					detail:  "Session access is ready. For permanent access after reboot: sudo usermod -aG input $USER then log out/in.",
 					command: "sudo usermod -aG input " + input.username,
 				})
 			}

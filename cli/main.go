@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.3.2"
+const version = "0.4.0"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.

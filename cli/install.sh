@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Cliks one-line installer — designed for non-technical users.
-# Installs the CLI, spatial audio (mpv), and prepares capture access.
+# Installs the CLI and prepares native audio/capture access.
 set -euo pipefail
 
 REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.3.2}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.4.0}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
 if [ -z "$AUTO_YES" ]; then
@@ -184,24 +184,11 @@ if [ "$PREBUILT" = "0" ]; then
   ok "Go ready"
 fi
 
-# --- spatial audio (mpv) + helpers ---
+# --- platform helpers (Linux audio/notifications; desktop builds include audio) ---
 install_system_deps() {
   case "$(uname -s)" in
     Darwin)
-      if ! command -v brew >/dev/null 2>&1; then
-        say "Installing Homebrew..."
-        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        if [ -x /opt/homebrew/bin/brew ]; then
-          eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [ -x /usr/local/bin/brew ]; then
-          eval "$(/usr/local/bin/brew shellenv)"
-        fi
-      fi
-      if ! command -v mpv >/dev/null 2>&1; then
-        say "Installing mpv for stereo spatial sound..."
-        brew install mpv
-      fi
-      ok "Spatial audio (mpv)"
+      ok "Spatial audio (built into Cliks)"
       ;;
     Linux)
       if is_termux; then
@@ -231,26 +218,7 @@ install_system_deps() {
       fi
       ;;
     MINGW*|MSYS*|CYGWIN*)
-      if ! command -v winget.exe >/dev/null 2>&1 && ! command -v choco.exe >/dev/null 2>&1 && ! command -v scoop >/dev/null 2>&1; then
-        say "Installing Scoop package manager..."
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression" || true
-        export PATH="$HOME/scoop/shims:$PATH"
-      fi
-      if ! command -v mpv >/dev/null 2>&1; then
-        say "Installing mpv for stereo spatial sound..."
-        if command -v winget.exe >/dev/null 2>&1; then
-          winget.exe install --id mpv.mpv -e --accept-package-agreements --accept-source-agreements || true
-        elif command -v choco.exe >/dev/null 2>&1; then
-          choco.exe install mpv -y || true
-        elif command -v scoop >/dev/null 2>&1; then
-          scoop install mpv || true
-        fi
-      fi
-      if command -v mpv >/dev/null 2>&1; then
-        ok "Spatial audio (mpv)"
-      else
-        tip "If sound has no left/right placement later, install mpv: winget install mpv.mpv"
-      fi
+      ok "Spatial audio (built into Cliks)"
       ;;
   esac
 }
@@ -356,11 +324,11 @@ if [ "$(uname -s)" = "Linux" ] && ! is_termux && [ -d /dev/input ]; then
   fi
 fi
 
-# --- macOS Accessibility nudge (open Settings; cannot fully automate) ---
+# --- macOS Input Monitoring nudge (the OS requires one user toggle) ---
 if [ "$(uname -s)" = "Darwin" ]; then
-  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility" 2>/dev/null || \
-    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
-  tip "If a Settings window opened: enable your Terminal app under Accessibility (once)."
+  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent" 2>/dev/null || \
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent" 2>/dev/null || true
+  tip "If Settings opened: enable Cliks or your Terminal app under Input Monitoring, then restart Cliks once."
 fi
 
 # --- final guided setup ---

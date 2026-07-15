@@ -55,6 +55,7 @@ type audioPlayer struct {
 	Command       string
 	Spatial       bool
 	DeviceRouting bool
+	Play          func(context.Context, playbackJob) error
 	// VolumeCapable is true when ArgsFor applies job.Gain natively.
 	// When false, playWorker soft-scales the WAV before playback.
 	VolumeCapable bool
@@ -394,6 +395,9 @@ func (a *AudioEngine) playWorker() {
 }
 
 var audioCommandRunner = func(ctx context.Context, player *audioPlayer, job playbackJob) error {
+	if player != nil && player.Play != nil {
+		return player.Play(ctx, job)
+	}
 	playJob := job
 	cleanup := func() {}
 	if player != nil && !player.VolumeCapable && job.Gain < 0.995 {
@@ -495,8 +499,12 @@ func (a *AudioEngine) warnUnavailableOnce() {
 }
 
 func detectAudioPlayer() *audioPlayer {
-	// Prefer players that can stereo-pan teammates (spatial desk feel).
-	// Order: mpv (best cross-platform), ffplay, then OS-native fallbacks.
+	// macOS and Windows ship a built-in stereo PCM path, so ordinary installs
+	// do not need mpv, PowerShell audio, or another player.
+	if builtIn := newBuiltInAudioPlayer(); builtIn != nil {
+		return builtIn
+	}
+	// Linux/Termux prefer players that can stereo-pan teammates.
 	if _, err := exec.LookPath("mpv"); err == nil {
 		return mpvAudioPlayer()
 	}
@@ -517,7 +525,7 @@ func detectAudioPlayer() *audioPlayer {
 		}}
 	}
 	if runtime.GOOS == "windows" {
-		// MediaPlayer supports Volume (0-1). Falls back to soft WAV gain if assembly load fails at runtime.
+		// Compatibility fallback for unusual Windows builds where native audio is unavailable.
 		return windowsMediaPlayer()
 	}
 	if isTermuxRuntime() {
@@ -732,9 +740,9 @@ func getAudioPlayerStatus(device ...string) (player string, spatial bool, hint s
 func audioInstallHint() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "install mpv for stereo spatial sound: brew install mpv (Cliks can still play via afplay without pan)."
+		return "Cliks includes stereo spatial audio on macOS. Install mpv only if you need advanced output-device routing."
 	case "windows":
-		return "install mpv for stereo spatial sound (winget install mpv.mpv), or re-run the Cliks installer."
+		return "Cliks includes stereo spatial audio on Windows. Install mpv only if you need advanced output-device routing."
 	case "linux":
 		if isTermuxRuntime() {
 			return "install Termux:API for phone audio: pkg install termux-api (or install mpv)."
@@ -748,9 +756,9 @@ func audioInstallHint() string {
 func audioInstallCommands() []string {
 	switch runtime.GOOS {
 	case "darwin":
-		return []string{"brew install mpv"}
+		return nil
 	case "windows":
-		return []string{"winget install --id mpv.mpv -e", "scoop install mpv"}
+		return nil
 	case "linux":
 		if isTermuxRuntime() {
 			return []string{"pkg install termux-api", "pkg install mpv"}

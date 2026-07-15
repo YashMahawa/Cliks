@@ -19,9 +19,9 @@ cliks join CLIK-XXXXXX
 That is usually enough on macOS and Linux. It downloads a native release first, so Go and Git are not required on normal machines. The installer:
 
 - installs the native `cliks` command (with its real sound pack embedded)
-- installs **mpv** for stereo spatial sound when possible
+- includes stereo spatial audio directly on macOS and Windows; installs **mpv** on Linux when possible
 - prepares background capture access on Linux
-- opens Accessibility settings on macOS (one switch)
+- requests Input Monitoring on macOS and opens the exact pane (one switch)
 - runs `cliks setup` for a plain-language readiness check
 
 ---
@@ -32,10 +32,10 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 
 | Need | What Cliks does | What you might do once |
 |------|-----------------|-------------------------|
-| Spatial sound | Installer adds **mpv** via Homebrew when possible; falls back to built-in `afplay` (distance only) | Nothing if install finished cleanly |
-| Background capture | Uses system hooks | **One** permission: System Settings → Privacy & Security → **Accessibility** → enable the **terminal app that launches Cliks** (Terminal / iTerm / Warp / VS Code). Permission is **per app** — if you switch terminals, enable the new one too. |
+| Spatial sound | Built into the Cliks binary (stereo pan + distance) | Nothing |
+| Background capture | Uses a built-in listen-only CoreGraphics Event Tap | **One** permission: System Settings → Privacy & Security → **Input Monitoring** → enable Cliks or the terminal app that launches it (Terminal / iTerm / Warp / VS Code). |
 
-After granting Accessibility:
+After granting Input Monitoring, restart Cliks once:
 
 ```bash
 cliks setup
@@ -48,8 +48,8 @@ No key values are ever read or sent — only “keyboard activity” / “mouse 
 
 | Need | What Cliks does | What you might do once |
 |------|-----------------|-------------------------|
-| Spatial sound | Installer installs **mpv** via winget/scoop/choco when possible | Reopen the terminal if `mpv` is new on PATH |
-| Background capture | Works for normal apps with **no** special Windows permission dialog | Nothing for everyday use |
+| Spatial sound | Built into the Cliks binary (stereo pan + distance) | Nothing |
+| Background capture | Built-in Win32 low-level hooks work for normal apps with **no** special permission dialog | Nothing for everyday use |
 | Settings location | Config lives under `%APPDATA%\cliks\` (native Windows path) | Older installs auto-migrate from `.config\cliks` |
 | Launch at login | Silent VBScript startup (no console flash) | `cliks service enable` once |
 
@@ -132,21 +132,11 @@ You should **not** need to debug raw permissions by hand. Prefer `cliks setup` o
 
 ## Spatial sound quality
 
-Best experience (stereo pan + distance):
+macOS and Windows releases include the stereo player and embedded WAV pack. No media player installation is required. Linux prefers **mpv** or **ffplay** for left/right placement and can fall back to PulseAudio, PipeWire, or ALSA players.
 
-- **mpv** (preferred on all platforms)
-- or **ffplay** (FFmpeg)
-
-If only a basic player is available (`afplay` on macOS, PowerShell on Windows, `paplay` on Linux), Cliks still plays sound with **distance/volume** cues. Install mpv when you want full left/right placement:
+For Linux:
 
 ```bash
-# macOS
-brew install mpv
-
-# Windows
-winget install --id mpv.mpv -e
-
-# Linux
 sudo apt install mpv   # or: sudo dnf install mpv / sudo pacman -S mpv
 ```
 
@@ -165,7 +155,7 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 
 | Mode | When |
 |------|------|
-| Auto (default) | Linux evdev when readable; macOS/Windows global hooks |
+| Auto (default) | Linux evdev when readable; macOS Event Tap; Windows low-level hooks |
 | `--evdev` | Force Linux `/dev/input` capture |
 | `--terminal --self` | Capture only this terminal; good for demos / locked-down machines |
 
@@ -177,13 +167,13 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 |---------|-----|
 | `cliks: command not found` | Open a **new** terminal, or `export PATH="$HOME/.local/bin:$PATH"` |
 | No sound | `cliks setup` then `cliks sound-test` |
-| “Could not locate bundled sounds” | Update to Cliks 0.3.2 or newer; release binaries contain the WAV pack |
+| “Could not locate bundled sounds” | Update to Cliks 0.4.0 or newer; release binaries contain the WAV pack and macOS/Windows player |
 | No signal notification | Enable Notifications in Preferences, then run `cliks notification-test`; Linux background sessions reconnect to the user D-Bus socket automatically |
 | Teammates cannot hear you | `cliks capture-test` then `cliks setup` |
-| macOS capture silent | Accessibility for your terminal app, then restart Cliks |
+| macOS capture silent | Enable Cliks/your terminal under Input Monitoring, restart Cliks, then run `cliks capture-test` |
 | Linux capture silent after install | Log out/in once if you were added to the `input` group |
 | Terminal looks weird after a crash | `cliks fix-terminal` |
-| Volume keys do nothing | Install mpv (`cliks setup`) — fallbacks still scale gain where possible |
+| Volume keys do nothing | Run `cliks sound-test`; on Linux, rerun `cliks setup` to install a supported player |
 | Autostart broke after updating Cliks | `cliks setup` refreshes the launch path |
 
 ---

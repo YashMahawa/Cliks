@@ -25,7 +25,7 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "hear.keyboard", Label: "Hear keyboard", Description: "play teammate keyboard activity (on/off)"},
 	{Key: "hear.mouse", Label: "Hear mouse", Description: "play teammate left/right clicks (on/off)"},
 	{Key: "hear.self", Label: "Self monitor", Description: "play your own captured activity locally (on/off)"},
-	{Key: "notifications", Label: "Notifications", Description: "show native notifications for direct waves (on/off)"},
+	{Key: "notifications", Label: "Notifications", Description: "show native alerts for quick signals (on/off)"},
 	{Key: "notifications.sound", Label: "Notification sound", Description: "play sound with native wave notifications (on/off)"},
 	{Key: "presence", Label: "Presence", Description: "available, focus, break, or dnd"},
 	{Key: "theme", Label: "Theme", Description: "ember, ocean, or mono terminal palette"},
