@@ -120,7 +120,7 @@ cliks start --terminal --self
 
 ## Solo Desk and personal room tones
 
-Run `cliks solo` to open a local spatial room with 1–12 simulated coworkers. Keyboard ambience, click ambience, and the generated rain/cafe/deep-focus room tone are independent personal switches. Nothing from Solo Desk is captured or sent. The same room-tone preference can be used in a live room from Preferences or with `cliks set ambient rain`.
+Run `cliks solo` to open a local spatial room with 1-12 simulated coworkers. Keyboard ambience, click ambience, and the embedded room tone have separate local levels. Choose rain, fireside, coffee house, cloud drift, contemplation, or night drive. Nothing from Solo Desk is captured or sent. The same private room-tone preference can be used in a live room from Preferences or with `cliks set ambient rain`.
 
 ## Public or self-hosted server
 

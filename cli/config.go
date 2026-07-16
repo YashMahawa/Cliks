@@ -96,9 +96,11 @@ type ListeningConfig struct {
 }
 
 type SoloConfig struct {
-	People   int  `json:"people"`
-	Keyboard bool `json:"keyboard"`
-	Mouse    bool `json:"mouse"`
+	People         int     `json:"people"`
+	Keyboard       bool    `json:"keyboard"`
+	Mouse          bool    `json:"mouse"`
+	KeyboardVolume float64 `json:"keyboardVolume,omitempty"`
+	MouseVolume    float64 `json:"mouseVolume,omitempty"`
 }
 
 type NotificationConfig struct {
@@ -155,7 +157,7 @@ func defaultConfig() CliksConfig {
 			Ambient:           "off",
 			AmbientVolume:     0.22,
 		},
-		Solo:          SoloConfig{People: 4, Keyboard: true, Mouse: true},
+		Solo:          SoloConfig{People: 4, Keyboard: true, Mouse: true, KeyboardVolume: 0.7, MouseVolume: 0.8},
 		BatchWindowMs: 500,
 	}
 }
@@ -394,7 +396,7 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.Listening.ShuffleMinutes = 60
 	}
 	switch cfg.Listening.Ambient {
-	case "off", "rain", "cafe", "deep":
+	case "off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
 	default:
 		cfg.Listening.Ambient = def.Listening.Ambient
 	}
@@ -406,6 +408,14 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.Solo = def.Solo
 	}
 	cfg.Solo.People = clampInt(cfg.Solo.People, 1, 12)
+	if cfg.Solo.KeyboardVolume == 0 {
+		cfg.Solo.KeyboardVolume = def.Solo.KeyboardVolume
+	}
+	if cfg.Solo.MouseVolume == 0 {
+		cfg.Solo.MouseVolume = def.Solo.MouseVolume
+	}
+	cfg.Solo.KeyboardVolume = clamp(cfg.Solo.KeyboardVolume, 0.05, 1)
+	cfg.Solo.MouseVolume = clamp(cfg.Solo.MouseVolume, 0.05, 1)
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
 	cfg.Listening.AudioDevice = strings.TrimSpace(cfg.Listening.AudioDevice)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,46 @@ func TestRateLimitHelpers(t *testing.T) {
 	}
 	if got := rateLimitWait(nil); got != 5*time.Minute {
 		t.Fatalf("default rateLimitWait = %v", got)
+	}
+}
+
+func TestAttachedControllerReadsOwnerViewWithoutNewSession(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	active := ActiveSessionState{
+		PID:      os.Getpid(),
+		TeamCode: "CLIK-ATTACH",
+		Mode:     runModeBackground,
+		View: SessionViewState{
+			TeamCode:         "CLIK-ATTACH",
+			TeamName:         "Night Shift",
+			ConnectionStatus: "connected",
+			ActiveCount:      4,
+		},
+	}
+	if err := writeActiveSessionState(active); err != nil {
+		t.Fatal(err)
+	}
+	controller := newAttachedSessionController(active)
+	defer controller.stop()
+	state := controller.viewState()
+	if !controller.attached || state.TeamName != "Night Shift" || state.ActiveCount != 4 {
+		t.Fatalf("attached state = %+v, attached=%v", state, controller.attached)
+	}
+}
+
+func TestLocalSessionCommandBridgeQueuesRoomReaction(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := enqueueSessionCommand(localSessionCommand{Type: "reaction", Reaction: "wave"}); err != nil {
+		t.Fatal(err)
+	}
+	var got []localSessionCommand
+	consumeSessionCommands(func(command localSessionCommand) { got = append(got, command) })
+	if len(got) != 1 || got[0].Type != "reaction" || got[0].Reaction != "wave" {
+		t.Fatalf("commands = %#v", got)
+	}
+	consumeSessionCommands(func(command localSessionCommand) { got = append(got, command) })
+	if len(got) != 1 {
+		t.Fatalf("command was consumed more than once: %#v", got)
 	}
 }
 

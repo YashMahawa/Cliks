@@ -31,7 +31,10 @@ func playAmbient(ctx context.Context, mode string, volume float64) error {
 	if err != nil {
 		return err
 	}
-	pcm := ambientStereoPCM(mode, 12)
+	pcm, err := ambientStereoPCM(mode)
+	if err != nil {
+		return err
+	}
 	player := audioCtx.NewPlayer(&loopingPCMReader{data: pcm})
 	player.SetVolume(clamp(volume, 0, 0.6))
 	defer player.Close()

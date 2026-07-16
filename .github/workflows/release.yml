@@ -29,6 +29,15 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: cli/go.sum
+      - name: Verify tag matches CLI version
+        shell: bash
+        run: |
+          cli_version="$(cd cli && go run . version)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          test "$cli_version" = "$tag_version" || {
+            echo "Tag $GITHUB_REF_NAME does not match CLI version $cli_version"
+            exit 1
+          }
       - name: Test
         working-directory: cli
         run: go test ./...
@@ -86,4 +95,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          make_latest: true
           files: dist/*

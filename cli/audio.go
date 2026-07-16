@@ -194,6 +194,10 @@ func (a *AudioEngine) recomputePlacementsLocked(useActivity bool) {
 }
 
 func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent) {
+	a.scheduleBatchScaled(peerID, events, 1)
+}
+
+func (a *AudioEngine) scheduleBatchScaled(peerID string, events []RemoteActivityEvent, sourceGain float64) {
 	a.mu.Lock()
 	a.activityScores[peerID] += len(events)
 	a.maybeShufflePlacementsLocked(time.Now())
@@ -228,7 +232,7 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 			case <-a.ctx.Done():
 				return
 			default:
-				a.enqueue(event, placement)
+				a.enqueueScaled(event, placement, sourceGain)
 			}
 		})
 	}
@@ -303,14 +307,14 @@ func (a *AudioEngine) preview() error {
 		{Kind: "mouse", Button: "left"},
 	}
 	for _, event := range events {
-		a.enqueue(event, placement)
+		a.enqueueScaled(event, placement, 1)
 		time.Sleep(180 * time.Millisecond)
 	}
 	time.Sleep(350 * time.Millisecond)
 	return nil
 }
 
-func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement) {
+func (a *AudioEngine) enqueueScaled(event RemoteActivityEvent, placement peerPlacement, sourceGain float64) {
 	select {
 	case <-a.ctx.Done():
 		return
@@ -343,7 +347,7 @@ func (a *AudioEngine) enqueue(event RemoteActivityEvent, placement peerPlacement
 	}
 	job := playbackJob{
 		File:   samples[rand.Intn(len(samples))],
-		Gain:   clamp(listening.Volume*(1/placement.Distance)*fatigueGain, 0, 1),
+		Gain:   clamp(listening.Volume*sourceGain*(1/placement.Distance)*fatigueGain, 0, 1),
 		Pan:    0,
 		Device: listening.AudioDevice,
 	}

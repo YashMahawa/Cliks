@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSoloDeskUsesLocalSimulationConfig(t *testing.T) {
@@ -53,5 +54,42 @@ func TestSoloCanKeepBothActivitySoundsOff(t *testing.T) {
 	normalizeConfig(&cfg)
 	if cfg.Solo.Keyboard || cfg.Solo.Mouse {
 		t.Fatalf("normalization re-enabled Solo activity sounds: %#v", cfg.Solo)
+	}
+}
+
+func TestSoloShowsAndPersistsIndependentSoundLevels(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	model := newSoloModel(cfg)
+	defer model.audio.Close()
+	model.width, model.height = 120, 36
+	for _, want := range []string{"Master", "Keyboard level", "Click level", "Room tone level"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("solo view missing %q", want)
+		}
+	}
+	before := model.cfg.Solo.MouseVolume
+	updated, _ := model.activate("mouse-quieter")
+	got := updated.(soloModel)
+	if got.cfg.Solo.MouseVolume >= before {
+		t.Fatalf("mouse volume did not decrease: before=%v after=%v", before, got.cfg.Solo.MouseVolume)
+	}
+	if saved := loadConfig(); saved.Solo.MouseVolume != got.cfg.Solo.MouseVolume {
+		t.Fatalf("saved mouse volume=%v, want %v", saved.Solo.MouseVolume, got.cfg.Solo.MouseVolume)
+	}
+}
+
+func TestSoloNarrowLayoutKeepsControlsVisibleAndClickable(t *testing.T) {
+	cfg := defaultConfig()
+	model := newSoloModel(cfg)
+	defer model.audio.Close()
+	model.width, model.height = 68, 42
+	view := model.View()
+	x, y := renderedTextPosition(t, view, "[ Keyboard")
+	if action := model.hit(x+2, y); action != "keyboard" {
+		t.Fatalf("narrow Keyboard hit = %q, want keyboard at %d,%d; regions=%+v\n%s", action, x+2, y, model.hitRegions(), ansi.Strip(view))
+	}
+	if !strings.Contains(view, "Room tone level") {
+		t.Fatal("narrow Solo layout hid independent volume controls")
 	}
 }

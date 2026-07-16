@@ -127,6 +127,8 @@ type homeAction string
 const (
 	actionNone             homeAction = ""
 	actionStart            homeAction = "start"
+	actionAttach           homeAction = "attach"
+	actionSwitch           homeAction = "switch"
 	actionCreate           homeAction = "create"
 	actionDelete           homeAction = "delete"
 	actionSetup            homeAction = "setup"
@@ -163,7 +165,6 @@ type homeModel struct {
 	audioDeviceValue      string
 	batchWindowValue      string
 	backendURLValue       string
-	stopActiveOnExit      bool
 	busy                  bool
 	width                 int
 	height                int
@@ -192,12 +193,9 @@ func runHomeTUI(cfg CliksConfig) error {
 	applyTheme(cfg.Theme)
 	ctx, stopSignals := tuiSignalContext(context.Background())
 	defer stopSignals()
-	deferredMessage := consumeDeferredStopIfNeeded()
 	active, activeOK := activeSession()
 	message := welcomeMessage(cfg)
-	if deferredMessage != "" {
-		message = deferredMessage
-	} else if activeOK {
+	if activeOK {
 		message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
 		if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
 			message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
@@ -214,7 +212,7 @@ func runHomeTUI(cfg CliksConfig) error {
 	if firstLaunch {
 		launchDuration = 10 * time.Second
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, stopActiveOnExit: activeOK && deferredStopMatches(active), launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -224,14 +222,15 @@ func runHomeTUI(cfg CliksConfig) error {
 	if !ok {
 		result = model
 	}
-	if result.stopActiveOnExit {
-		_, _ = stopActiveSession()
-		_ = clearDeferredStop()
-	} else {
-		_ = clearDeferredStop()
-	}
 	switch result.action {
 	case actionStart:
+		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
+	case actionAttach:
+		return runAttachedSession(result.active)
+	case actionSwitch:
+		if _, err := stopActiveSession(); err != nil {
+			return err
+		}
 		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
 	case actionCreate:
 		return cmdCreate(nil)
@@ -531,12 +530,19 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.helpOpen = true
 			return m, nil
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "q":
 			if m.mode != "home" {
 				m.back()
 				return m, nil
 			}
 			return m, tea.Quit
+		case "esc":
+			if m.mode != "home" {
+				m.back()
+			} else {
+				m.message = "Cliks is still open. Choose Quit when you actually want to close it."
+			}
+			return m, nil
 		case "up", "k":
 			m.move(-1)
 			m.mouseOver = false
@@ -743,6 +749,23 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	item := m.items()[m.cursor]
+	if strings.HasPrefix(item.key, "team-connect:") {
+		code := strings.TrimPrefix(item.key, "team-connect:")
+		m.cfg.CurrentTeamCode = code
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		switch {
+		case m.activeOK && strings.EqualFold(m.active.TeamCode, code):
+			m.action = actionAttach
+		case m.activeOK:
+			m.action = actionSwitch
+		default:
+			m.action = actionStart
+		}
+		return m, tea.Quit
+	}
 	switch item.key {
 	case "start":
 		if m.cfg.CurrentTeamCode == "" {
@@ -750,8 +773,8 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.activeOK {
-			m.message = fmt.Sprintf("Already running as %s. Use Stop to disconnect first.", modeLabel(m.active.Mode))
-			return m, nil
+			m.action = actionAttach
+			return m, tea.Quit
 		}
 		m.action = actionStart
 		return m, tea.Quit
@@ -857,7 +880,12 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.cfg.AutostartWanted = item.key == "onboarding-autostart-on"
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Launch-at-login preference saved. It activates after you join a team.")
-	case "onboarding-ambient-off", "onboarding-ambient-rain", "onboarding-ambient-cafe", "onboarding-ambient-deep":
+	case "onboarding-theme-ember", "onboarding-theme-ocean", "onboarding-theme-mono":
+		m.cfg.Theme = strings.TrimPrefix(item.key, "onboarding-theme-")
+		applyTheme(m.cfg.Theme)
+		_ = saveConfig(m.cfg)
+		m.advanceOnboarding("Theme saved. Preferences has the deeper tuning whenever you want it.")
+	case "onboarding-ambient-off", "onboarding-ambient-rain", "onboarding-ambient-fire", "onboarding-ambient-cafe", "onboarding-ambient-cloud", "onboarding-ambient-contemplation", "onboarding-ambient-downtempo":
 		m.cfg.Listening.Ambient = strings.TrimPrefix(item.key, "onboarding-ambient-")
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Room tone saved. It stays private to your headphones.")
@@ -972,32 +1000,15 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.message = "Playing test sounds..."
 		return m, soundTestCmd()
 	case "background-toggle":
-		if m.activeOK {
-			m.stopActiveOnExit = !m.stopActiveOnExit
-			m.cfg.KeepRunning = !m.stopActiveOnExit
-			_ = saveConfig(m.cfg)
-			if m.stopActiveOnExit {
-				_ = scheduleDeferredStop(m.active.PID)
-				if m.active.Mode == runModeBoot {
-					m.message = "Keep Running is off. This connection will stop when this screen closes; launch-at-login remains on for the next login."
-				} else {
-					m.message = "Keep Running is off. This connection will stop when this control screen closes."
-				}
-			} else {
-				_ = clearDeferredStop()
-				m.message = "Keep Running is on. This connection will stay alive after this screen closes."
-			}
-			return m, nil
-		}
 		m.cfg.KeepRunning = !m.cfg.KeepRunning
 		if err := saveConfig(m.cfg); err != nil {
 			m.message = err.Error()
 			return m, nil
 		}
 		if m.cfg.KeepRunning {
-			m.message = "Keep Running is on. Future live sessions may stay connected after this terminal closes."
+			m.message = "Keep Running is on. Closing the app may hand a foreground room to the background."
 		} else {
-			m.message = "Keep Running is off. Future live sessions stop with their terminal unless started in background."
+			m.message = "Keep Running is off. Navigation never disconnects; only leaving the app or Stop does."
 		}
 		return m, nil
 	case "stop-connection":
@@ -1111,7 +1122,7 @@ func (m homeModel) itemPrefixLines() []string {
 
 func (m homeModel) firstSetupPrefixLines() []string {
 	step := clampInt(m.onboardingStep, 0, onboardingStepCount-1)
-	titles := []string{"What should the room call you?", "How present should the room feel?", "Let Cliks notice activity—not keys", "How should quick signals arrive?", "Should your chair stay warm?", "Wake Cliks after sign-in?", "Add a private room tone?"}
+	titles := []string{"What should the room call you?", "How present should the room feel?", "Let Cliks notice activity—not keys", "How should quick signals arrive?", "Should your chair stay warm?", "Wake Cliks after sign-in?", "Pick the desk lighting", "Add a private room tone?"}
 	details := []string{
 		"Your name is shared as plain presence text. It never comes from your OS account.",
 		"This changes only what you hear. Your teammates keep their own mix.",
@@ -1119,7 +1130,8 @@ func (m homeModel) firstSetupPrefixLines() []string {
 		"Every signal includes who sent it and the fixed message. Mute silences them locally.",
 		"Background mode keeps one small session alive after this terminal closes.",
 		"One launcher, one session, no surprise duplicate coworkers pretending to be you.",
-		"Room tones are generated and played locally. The team never hears your choice.",
+		"Choose a terminal palette now. Every detailed control remains available later in Preferences.",
+		"Room tones are embedded and played locally. The team never hears your choice.",
 	}
 	quips := []string{
 		"No stand-up meeting was scheduled to configure this.",
@@ -1128,6 +1140,7 @@ func (m homeModel) firstSetupPrefixLines() []string {
 		"The notification has one job, then it leaves.",
 		"Tiny daemon. Normal chair. Absolutely no blockchain.",
 		"Computers are excellent at remembering the boring part.",
+		"Interior design, except the entire office is ANSI escape codes.",
 		"Like office air-conditioning, except everyone controls their own.",
 	}
 	width := maxInt(30, panelWidth(m.width)-8)
@@ -1339,7 +1352,7 @@ type homeItem struct {
 	help  string
 }
 
-const onboardingStepCount = 7
+const onboardingStepCount = 8
 
 func (m homeModel) onboardingItems() []homeItem {
 	switch clampInt(m.onboardingStep, 0, onboardingStepCount-1) {
@@ -1376,12 +1389,21 @@ func (m homeModel) onboardingItems() []homeItem {
 			{key: "onboarding-autostart-on", label: "Start after sign-in", help: "activates after your first team join"},
 			{key: "onboarding-autostart-off", label: "I will start it", help: "no login launcher"},
 		}
+	case 6:
+		return []homeItem{
+			{key: "onboarding-theme-ember", label: "Ember", help: "warm orange, the Cliks default"},
+			{key: "onboarding-theme-ocean", label: "Ocean", help: "cool cyan and deep blue"},
+			{key: "onboarding-theme-mono", label: "Mono", help: "quiet grayscale for minimal terminals"},
+		}
 	default:
 		return []homeItem{
 			{key: "onboarding-ambient-off", label: "No room tone", help: "only coworker keyboard and click ambience"},
 			{key: "onboarding-ambient-rain", label: "Rain window", help: "private, low, and steady"},
-			{key: "onboarding-ambient-cafe", label: "Cafe hum", help: "soft room texture without voices"},
-			{key: "onboarding-ambient-deep", label: "Deep focus", help: "a slow low-frequency bed"},
+			{key: "onboarding-ambient-fire", label: "Fireside", help: "a calm fireplace loop"},
+			{key: "onboarding-ambient-cafe", label: "Coffee house", help: "soft jazz for a warm desk"},
+			{key: "onboarding-ambient-cloud", label: "Cloud drift", help: "light and spacious"},
+			{key: "onboarding-ambient-contemplation", label: "Contemplation", help: "gentle focus music"},
+			{key: "onboarding-ambient-downtempo", label: "Night drive", help: "steady downtempo momentum"},
 		}
 	}
 }
@@ -1434,14 +1456,29 @@ func (m homeModel) items() []homeItem {
 	case "first-setup":
 		return m.onboardingItems()
 	case "team":
-		return []homeItem{
+		items := []homeItem{
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
 			{key: "join", label: "Join", help: "save a team code and open live"},
 			{key: "create", label: "Create", help: "make a new team code"},
-			{key: "delete", label: "Delete", help: "delete the selected team with its password"},
-			{key: "switch-team", label: "Switch", help: "cycle through saved teams"},
-			{key: "back", label: "Back", help: "return to the menu"},
 		}
+		for _, team := range m.cfg.Teams {
+			marker := "○"
+			help := "connect to this saved team"
+			if m.activeOK && strings.EqualFold(m.active.TeamCode, team.Code) {
+				marker = "●"
+				help = "currently connected; opens Live without reconnecting"
+			}
+			items = append(items, homeItem{
+				key:   "team-connect:" + team.Code,
+				label: marker + " " + valuePlain(team.Name, "Unnamed"),
+				help:  team.Code + " · " + help,
+			})
+		}
+		items = append(items,
+			homeItem{key: "delete", label: "Delete", help: "delete the selected team with its password"},
+			homeItem{key: "back", label: "Back", help: "return to the menu"},
+		)
+		return items
 	case "connection":
 		return []homeItem{
 			{key: "background-toggle", label: "Keep Running", help: m.backgroundToggleHelp()},
@@ -1526,7 +1563,7 @@ func (m homeModel) viewHeader() (string, string) {
 
 func (m homeModel) startHelp() string {
 	if m.activeOK {
-		return "already running"
+		return "open the live view for the current running session"
 	}
 	if m.cfg.CurrentTeamCode == "" {
 		return "join or create a team first"
@@ -1550,10 +1587,10 @@ func batchWindowHelp(cfg CliksConfig) string {
 
 func (m homeModel) backgroundToggleHelp() string {
 	if m.activeOK {
-		if m.stopActiveOnExit {
-			return "off after close; press Enter to keep running"
+		if m.cfg.KeepRunning {
+			return fmt.Sprintf("on for app exit; %s stays connected while navigating", modeLabel(m.active.Mode))
 		}
-		return fmt.Sprintf("on (%s); use Stop to disconnect", modeLabel(m.active.Mode))
+		return fmt.Sprintf("off for app exit; %s stays connected while this TUI is open", modeLabel(m.active.Mode))
 	}
 	if m.cfg.KeepRunning {
 		return "on for future sessions; press Enter to turn off"
@@ -1878,7 +1915,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Listening.Muted = false
 		}},
 		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
-		{"Room tone", "private ambient layer: off, rain, cafe, or deep", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
+		{"Room tone", "private embedded soundscape with six choices", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
 		{"Room tone volume", "private ambient layer loudness", func(c CliksConfig) string { return bar(c.Listening.AmbientVolume) }, func(c *CliksConfig, d int) {
 			c.Listening.AmbientVolume = clamp(c.Listening.AmbientVolume+float64(d)*0.05, 0.05, 0.6)
 		}},
@@ -2463,20 +2500,23 @@ type sessionTickMsg time.Time
 type notificationTestMsg struct{ err error }
 
 type sessionModel struct {
-	controller     *sessionController
-	state          SessionViewState
-	mode           string
-	settingsCursor int
-	settingsHover  bool
-	codeHover      bool
-	message        string
-	exit           sessionExitAction
-	width          int
-	height         int
-	now            time.Time
-	helpOpen       bool
-	welcomeUntil   time.Time
-	hoverAction    string
+	controller         *sessionController
+	state              SessionViewState
+	mode               string
+	settingsReturnMode string
+	settingsCursor     int
+	settingsHover      bool
+	controlCursor      int
+	controlHover       bool
+	codeHover          bool
+	message            string
+	exit               sessionExitAction
+	width              int
+	height             int
+	now                time.Time
+	helpOpen           bool
+	welcomeUntil       time.Time
+	hoverAction        string
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
@@ -2491,6 +2531,9 @@ func newSessionModel(controller *sessionController) sessionModel {
 }
 
 func (m sessionModel) Init() tea.Cmd {
+	if m.controller.attached {
+		return sessionTick()
+	}
 	return tea.Batch(waitForSessionUpdate(m.controller), sessionTick())
 }
 
@@ -2505,6 +2548,9 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionTickMsg:
 		m.now = time.Time(msg)
 		m.state = m.controller.viewState()
+		if m.controller.attached {
+			m.controller.cfg = loadConfig()
+		}
 		return m, sessionTick()
 	case notificationTestMsg:
 		if msg.err != nil {
@@ -2515,6 +2561,28 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.MouseMsg:
 		if m.helpOpen {
+			return m, nil
+		}
+		if m.mode == "control" {
+			switch msg.Type {
+			case tea.MouseMotion:
+				if index := m.controlHit(msg.X, msg.Y); index >= 0 {
+					m.controlCursor = index
+					m.controlHover = true
+				} else {
+					m.controlHover = false
+				}
+			case tea.MouseLeft:
+				if index := m.controlHit(msg.X, msg.Y); index >= 0 {
+					m.controlCursor = index
+					m.controlHover = true
+					return m.activateControl()
+				}
+			case tea.MouseWheelUp:
+				m.controlCursor = clampInt(m.controlCursor-1, 0, len(m.controlItems())-1)
+			case tea.MouseWheelDown:
+				m.controlCursor = clampInt(m.controlCursor+1, 0, len(m.controlItems())-1)
+			}
 			return m, nil
 		}
 		if m.mode == "settings" {
@@ -2578,10 +2646,27 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpOpen = true
 			return m, nil
 		}
+		if m.mode == "control" {
+			switch msg.String() {
+			case "up", "k":
+				m.controlCursor = clampInt(m.controlCursor-1, 0, len(m.controlItems())-1)
+				m.controlHover = false
+			case "down", "j":
+				m.controlCursor = clampInt(m.controlCursor+1, 0, len(m.controlItems())-1)
+				m.controlHover = false
+			case "enter", " ":
+				return m.activateControl()
+			case "esc", "b", "q":
+				m.message = "Cliks is still running. Choose Resume Live, Quit App, or Stop."
+			case "?":
+				m.helpOpen = true
+			}
+			return m, nil
+		}
 		if m.mode == "settings" {
 			switch msg.String() {
 			case "esc", "tab", "q", "S":
-				m.mode = ""
+				m.mode = m.settingsReturnMode
 			case "up", "k":
 				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(settingsRows(m.controller.cfg))-1)
 			case "down", "j":
@@ -2597,12 +2682,11 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			m.exit = sessionExitStop
 			return m, tea.Quit
-		case "q", "esc":
-			m.exit = sessionExitBack
-			return m, tea.Quit
-		case "b":
-			m.exit = sessionExitBack
-			return m, tea.Quit
+		case "q", "esc", "b":
+			m.mode = "control"
+			m.controlCursor = 0
+			m.controlHover = false
+			m.message = "The live connection stays exactly where it is."
 		case "x":
 			m.exit = sessionExitStop
 			return m, tea.Quit
@@ -2633,6 +2717,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p":
 			m.controller.cyclePresence()
 		case "tab", "S":
+			m.settingsReturnMode = ""
 			m.mode = "settings"
 		}
 		if m.state.CaptureMode == "terminal" && m.state.Listening.Keyboard && isTerminalCaptureKey(msg.String()) {
@@ -2653,10 +2738,13 @@ func (m sessionModel) View() string {
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
 	}
+	if m.mode == "control" {
+		return m.sessionControlView()
+	}
 	width := maxInt(44, panelWidth(m.width))
 	bodyHeight := maxInt(12, m.height-7)
 	header := m.liveHeader(width)
-	footer := styleDim.Render(" ? Help   ↑/↓ Volume   ←/→ Density   Tab Preferences   Esc Back   Ctrl+C Stop")
+	footer := styleDim.Render(" ? Help   ↑/↓ Volume   ←/→ Density   Tab Preferences   Esc Menu   Ctrl+C Stop")
 	if width < 74 {
 		desk := stylePanel.Width(width).Height(bodyHeight).Render(m.renderSpatialDesk(width-6, bodyHeight-3))
 		return lipgloss.JoinVertical(lipgloss.Left, header, desk, footer)
@@ -2875,7 +2963,7 @@ func (m sessionModel) liveActivityView(width int) string {
 func (m sessionModel) liveActionLine(action string, label string) string {
 	text := "[ " + label + " ]"
 	if m.hoverAction == action {
-		return styleSelected.Render(text)
+		return styleSelected.Render(ansi.Strip(text))
 	}
 	return styleFocused.Render(text)
 }
@@ -3015,12 +3103,15 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 	case "reaction-break":
 		m.sendLiveReaction("break")
 	case "prefs":
+		m.settingsReturnMode = ""
 		m.mode = "settings"
 		m.settingsCursor = 0
 		m.settingsHover = false
 	case "back":
-		m.exit = sessionExitBack
-		return m, tea.Quit
+		m.mode = "control"
+		m.controlCursor = 0
+		m.controlHover = false
+		m.message = "The live connection stays exactly where it is."
 	case "stop":
 		m.exit = sessionExitStop
 		return m, tea.Quit
@@ -3060,11 +3151,142 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 		state.Listening = m.controller.cfg.Listening
 		state.HearingSelf = m.controller.cfg.Listening.Self
 	})
-	m.controller.audio.updateListening(m.controller.cfg.Listening)
+	if m.controller.audio != nil {
+		m.controller.audio.updateListening(m.controller.cfg.Listening)
+	}
 	if previousStatus != m.controller.cfg.PresenceStatus {
-		m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus)
+		if !m.controller.attached {
+			m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus)
+		}
 	}
 	m.state = m.controller.viewState()
+}
+
+type sessionControlItem struct {
+	key   string
+	label string
+	help  string
+}
+
+func (m sessionModel) controlItems() []sessionControlItem {
+	items := []sessionControlItem{
+		{key: "resume", label: "Resume Live", help: "return to the same connection; nothing reconnects"},
+		{key: "preferences", label: "Preferences", help: "sound, theme, sharing, notifications, and server"},
+	}
+	cfg := loadConfig()
+	activeCode := strings.ToUpper(valuePlain(m.state.TeamCode, cfg.CurrentTeamCode))
+	for _, team := range cfg.Teams {
+		label := valuePlain(team.Name, "Unnamed team") + "  ·  " + team.Code
+		help := "connect to this saved team"
+		if strings.EqualFold(team.Code, activeCode) {
+			label = "● " + label
+			help = "currently connected"
+		}
+		items = append(items, sessionControlItem{key: "team:" + team.Code, label: label, help: help})
+	}
+	items = append(items,
+		sessionControlItem{key: "quit", label: "Quit App", help: "close the TUI; Keep Running decides whether a foreground session stays"},
+		sessionControlItem{key: "stop", label: "Stop", help: "disconnect this device now"},
+	)
+	return items
+}
+
+func (m sessionModel) activateControl() (tea.Model, tea.Cmd) {
+	items := m.controlItems()
+	if len(items) == 0 {
+		return m, nil
+	}
+	item := items[clampInt(m.controlCursor, 0, len(items)-1)]
+	switch {
+	case item.key == "resume":
+		m.mode = ""
+		m.hoverAction = ""
+		m.message = "Still connected. No reconnect happened."
+	case item.key == "preferences":
+		m.settingsReturnMode = "control"
+		m.mode = "settings"
+		m.settingsCursor = 0
+		m.settingsHover = false
+	case strings.HasPrefix(item.key, "team:"):
+		code := strings.TrimPrefix(item.key, "team:")
+		if strings.EqualFold(code, m.state.TeamCode) {
+			m.mode = ""
+			m.message = "Already in " + valuePlain(teamNameForCode(loadConfig(), code), code) + "."
+			return m, nil
+		}
+		cfg := loadConfig()
+		cfg.CurrentTeamCode = code
+		if err := saveConfig(cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.controller.cfg = cfg
+		m.exit = sessionExitSwitch
+		return m, tea.Quit
+	case item.key == "quit":
+		m.exit = sessionExitBack
+		return m, tea.Quit
+	case item.key == "stop":
+		m.exit = sessionExitStop
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m sessionModel) sessionControlView() string {
+	width := maxInt(44, panelWidth(m.width))
+	items := m.controlItems()
+	start, end := settingsWindow(len(items), m.controlCursor, m.height)
+	lines := []string{
+		styleAccent.Render("Cliks is still connected"),
+		"Moving around this screen never restarts the room.",
+		"",
+	}
+	if start > 0 {
+		lines = append(lines, styleDim.Render("↑ more saved teams"))
+	}
+	for index := start; index < end; index++ {
+		item := items[index]
+		line := "[ " + item.label + " ]  " + styleDim.Render(item.help)
+		if index == m.controlCursor {
+			if m.controlHover {
+				line = styleSelected.Render(ansi.Strip("[ "+item.label+" ]")) + "  " + styleDim.Render(item.help)
+			} else {
+				line = styleFocused.Render("> [ "+item.label+" ]") + "  " + styleDim.Render(item.help)
+			}
+		}
+		lines = append(lines, line)
+	}
+	if end < len(items) {
+		lines = append(lines, styleDim.Render("↓ more options"))
+	}
+	lines = append(lines, "", styleDim.Render("Esc stays here  ·  Enter chooses  ·  Stop is the only immediate disconnect"))
+	if m.message != "" {
+		lines = append(lines, styleDim.Render(m.message))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		styleTitle.Width(width).Render("Cliks  /  Control"),
+		stylePanel.Width(width).Height(maxInt(12, m.height-7)).Render(strings.Join(lines, "\n")),
+	)
+}
+
+func (m sessionModel) controlHit(x int, y int) int {
+	view := m.sessionControlView()
+	for index, item := range m.controlItems() {
+		needle := "[ " + item.label + " ]"
+		for row, styledLine := range strings.Split(view, "\n") {
+			line := ansi.Strip(styledLine)
+			position := strings.Index(line, needle)
+			if position < 0 {
+				continue
+			}
+			startX := ansi.StringWidth(line[:position])
+			if y == row && x >= startX && x < startX+ansi.StringWidth(needle) {
+				return index
+			}
+		}
+	}
+	return -1
 }
 
 func (m sessionModel) sessionSettingsView() string {

@@ -28,8 +28,9 @@ const clientWebSocketReadTimeout = 75 * time.Second
 type sessionExitAction string
 
 const (
-	sessionExitStop sessionExitAction = "stop"
-	sessionExitBack sessionExitAction = "back"
+	sessionExitStop   sessionExitAction = "stop"
+	sessionExitBack   sessionExitAction = "back"
+	sessionExitSwitch sessionExitAction = "switch"
 )
 
 type SessionViewState struct {
@@ -87,6 +88,8 @@ type sessionController struct {
 	ownPeerID        string
 	capture          *ActivityCapture
 	rateLimitedUntil time.Time
+	attached         bool
+	attachedPID      int
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
@@ -95,8 +98,8 @@ func startSession(cfg CliksConfig, opts StartOptions) error {
 	if err != nil {
 		return err
 	}
-	if exit == sessionExitBack && isInteractiveTerminal() {
-		return runHomeTUI(loadConfig())
+	if exit == sessionExitSwitch && isInteractiveTerminal() {
+		return startSession(loadConfig(), opts)
 	}
 	return nil
 }
@@ -147,6 +150,35 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 	}
 }
 
+func runAttachedSession(active ActiveSessionState) error {
+	controller := newAttachedSessionController(active)
+	defer controller.stop()
+	tuiCtx, stopSignals := tuiSignalContext(context.Background())
+	defer stopSignals()
+	model := newSessionModel(controller)
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(tuiCtx))
+	finalModel, err := program.Run()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	result, ok := finalModel.(sessionModel)
+	if !ok {
+		result = model
+	}
+	switch result.exit {
+	case sessionExitStop:
+		_, err := stopActiveSession()
+		return err
+	case sessionExitSwitch:
+		if _, err := stopActiveSession(); err != nil {
+			return err
+		}
+		return startSession(loadConfig(), StartOptions{CaptureMode: "auto", SelfMonitor: loadConfig().Listening.Self})
+	default:
+		return nil
+	}
+}
+
 func finishSessionForExit(controller *sessionController, keepRunning bool) (string, error) {
 	code := controller.cfg.CurrentTeamCode
 	controller.stop()
@@ -192,6 +224,34 @@ func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionI
 	return controller
 }
 
+func newAttachedSessionController(active ActiveSessionState) *sessionController {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := loadConfig()
+	state := active.View
+	if state.TeamCode == "" {
+		state = SessionViewState{
+			TeamName:            valuePlain(active.TeamName, active.TeamCode),
+			TeamCode:            active.TeamCode,
+			ActiveCount:         maxInt(1, active.ActiveCount),
+			ConnectionStatus:    valuePlain(active.ConnectionStatus, "running"),
+			CaptureMode:         active.CaptureMode,
+			LocalCapturedEvents: active.LocalCapturedEvents,
+			LocalSentEvents:     active.LocalSentEvents,
+			Listening:           cfg.Listening,
+		}
+	}
+	return &sessionController{
+		cfg:         cfg,
+		ctx:         ctx,
+		cancel:      cancel,
+		updates:     make(chan SessionViewState),
+		local:       make(chan LocalActivityEvent),
+		state:       state,
+		attached:    true,
+		attachedPID: active.PID,
+	}
+}
+
 func (s *sessionController) start() error {
 	// Capture init can block on OS hooks; keep the TUI responsive by warming it up in the background.
 	s.set(func(state *SessionViewState) {
@@ -201,6 +261,7 @@ func (s *sessionController) start() error {
 	go s.startCaptureAsync()
 	go s.batchLoop(s.local)
 	go s.configLoop()
+	go s.commandLoop()
 	go s.connectLoop()
 	return nil
 }
@@ -255,6 +316,10 @@ func (s *sessionController) startCaptureAsync() {
 }
 
 func (s *sessionController) stop() {
+	if s.attached {
+		s.cancel()
+		return
+	}
 	s.stopOnce.Do(func() {
 		s.cancel()
 		s.mu.Lock()
@@ -275,6 +340,15 @@ func (s *sessionController) stop() {
 }
 
 func (s *sessionController) viewState() SessionViewState {
+	if s.attached {
+		if active, ok := activeSession(); ok && active.PID == s.attachedPID {
+			if active.View.TeamCode != "" {
+				s.mu.Lock()
+				s.state = active.View
+				s.mu.Unlock()
+			}
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
@@ -299,12 +373,14 @@ func (s *sessionController) set(mutator func(*SessionViewState)) {
 	}
 }
 
+const sessionViewWriteInterval = 250 * time.Millisecond
+
 func (s *sessionController) writeSessionState(force bool) {
-	if s.instance == nil {
+	if s.instance == nil || s.attached {
 		return
 	}
 	now := time.Now()
-	if force || now.Sub(s.lastStateWrite) >= time.Second {
+	if force || now.Sub(s.lastStateWrite) >= sessionViewWriteInterval {
 		s.flushSessionState()
 		return
 	}
@@ -314,7 +390,7 @@ func (s *sessionController) writeSessionState(force bool) {
 	if s.stateWriteTimer != nil {
 		s.stateWriteTimer.Stop()
 	}
-	delay := time.Second - now.Sub(s.lastStateWrite)
+	delay := sessionViewWriteInterval - now.Sub(s.lastStateWrite)
 	if delay < 50*time.Millisecond {
 		delay = 50 * time.Millisecond
 	}
@@ -345,7 +421,9 @@ func (s *sessionController) adjustVolume(delta float64) {
 		}
 		s.cfg.Listening = state.Listening
 	})
-	s.audio.updateListening(s.viewState().Listening)
+	if s.audio != nil {
+		s.audio.updateListening(s.viewState().Listening)
+	}
 	_ = saveConfig(s.cfg)
 }
 
@@ -354,7 +432,9 @@ func (s *sessionController) adjustDensity(delta float64) {
 		state.Listening.Density = clamp(state.Listening.Density+delta, 0.15, 1)
 		s.cfg.Listening = state.Listening
 	})
-	s.audio.updateListening(s.viewState().Listening)
+	if s.audio != nil {
+		s.audio.updateListening(s.viewState().Listening)
+	}
 	_ = saveConfig(s.cfg)
 }
 
@@ -370,11 +450,16 @@ func (s *sessionController) toggle(key string) {
 		}
 		s.cfg.Listening = state.Listening
 	})
-	s.audio.updateListening(s.viewState().Listening)
+	if s.audio != nil {
+		s.audio.updateListening(s.viewState().Listening)
+	}
 	_ = saveConfig(s.cfg)
 }
 
 func (s *sessionController) recordLocalActivity(event LocalActivityEvent) {
+	if s.attached {
+		return
+	}
 	s.set(func(state *SessionViewState) {
 		if !state.LastLocalActivityAt.IsZero() && event.At.Sub(state.LastLocalActivityAt) <= 5*time.Second {
 			state.LocalBurstCount++
@@ -464,7 +549,7 @@ func (s *sessionController) sendBatch(startedAt time.Time, events []RemoteActivi
 }
 
 func (s *sessionController) configLoop() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
@@ -494,6 +579,26 @@ func (s *sessionController) configLoop() {
 	}
 }
 
+func (s *sessionController) commandLoop() {
+	if s.attached {
+		return
+	}
+	ticker := time.NewTicker(120 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			consumeSessionCommands(func(command localSessionCommand) {
+				if command.Type == "reaction" {
+					s.sendReaction(command.Reaction)
+				}
+			})
+		}
+	}
+}
+
 func (s *sessionController) sendProfile(nickname string, status string) {
 	s.wsMu.Lock()
 	conn := s.ws
@@ -508,6 +613,10 @@ func (s *sessionController) sendProfile(nickname string, status string) {
 }
 
 func (s *sessionController) sendReaction(reaction string) {
+	if s.attached {
+		_ = enqueueSessionCommand(localSessionCommand{Type: "reaction", Reaction: reaction})
+		return
+	}
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 	if s.ws == nil {
@@ -519,7 +628,9 @@ func (s *sessionController) sendReaction(reaction string) {
 func (s *sessionController) cyclePresence() {
 	s.cfg.PresenceStatus = nextPresence(s.cfg.PresenceStatus, 1)
 	_ = saveConfig(s.cfg)
-	s.sendProfile(sanitizeNickname(s.cfg.Nickname), s.cfg.PresenceStatus)
+	if !s.attached {
+		s.sendProfile(sanitizeNickname(s.cfg.Nickname), s.cfg.PresenceStatus)
+	}
 }
 
 func (s *sessionController) connectLoop() {

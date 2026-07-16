@@ -67,7 +67,7 @@ func ambientWAVPath(mode string) (string, error) {
 	if err != nil {
 		root = os.TempDir()
 	}
-	dir := filepath.Join(root, "cliks", "ambient-v1")
+	dir := filepath.Join(root, "cliks", "ambient-v2")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -75,7 +75,11 @@ func ambientWAVPath(mode string) (string, error) {
 	if info, err := os.Stat(path); err == nil && info.Size() > 44 {
 		return path, nil
 	}
-	if err := atomicWriteFile(path, pcmWAV(ambientStereoPCM(mode, 20)), 0o644); err != nil {
+	pcm, err := ambientStereoPCM(mode)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWriteFile(path, pcmWAV(pcm), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

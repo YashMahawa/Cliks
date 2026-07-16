@@ -25,7 +25,7 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "hear.keyboard", Label: "Hear keyboard", Description: "play teammate keyboard activity (on/off)"},
 	{Key: "hear.mouse", Label: "Hear mouse", Description: "play teammate left/right clicks (on/off)"},
 	{Key: "hear.self", Label: "Self monitor", Description: "play your own captured activity locally (on/off)"},
-	{Key: "ambient", Label: "Room tone", Description: "personal generated soundscape: off, rain, cafe, or deep"},
+	{Key: "ambient", Label: "Room tone", Description: "private embedded soundscape with six CC0 choices"},
 	{Key: "ambient.volume", Label: "Room tone volume", Description: "personal room-tone volume from 0.05 to 0.6"},
 	{Key: "solo.people", Label: "Solo coworkers", Description: "number of locally simulated coworkers from 1 to 12"},
 	{Key: "solo.keyboard", Label: "Solo keyboard", Description: "simulate keyboard ambience in Solo Desk (on/off)"},

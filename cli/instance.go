@@ -17,18 +17,19 @@ const (
 )
 
 type ActiveSessionState struct {
-	PID                 int    `json:"pid"`
-	TeamCode            string `json:"teamCode"`
-	TeamName            string `json:"teamName,omitempty"`
-	Mode                string `json:"mode"`
-	ConnectionStatus    string `json:"connectionStatus"`
-	CaptureMode         string `json:"captureMode,omitempty"`
-	ActiveCount         int    `json:"activeCount,omitempty"`
-	LocalCapturedEvents int    `json:"localCapturedEvents,omitempty"`
-	LocalSentEvents     int    `json:"localSentEvents,omitempty"`
-	StartedAt           string `json:"startedAt"`
-	UpdatedAt           string `json:"updatedAt"`
-	DuplicateLocalPIDs  []int  `json:"-"`
+	PID                 int              `json:"pid"`
+	TeamCode            string           `json:"teamCode"`
+	TeamName            string           `json:"teamName,omitempty"`
+	Mode                string           `json:"mode"`
+	ConnectionStatus    string           `json:"connectionStatus"`
+	CaptureMode         string           `json:"captureMode,omitempty"`
+	ActiveCount         int              `json:"activeCount,omitempty"`
+	LocalCapturedEvents int              `json:"localCapturedEvents,omitempty"`
+	LocalSentEvents     int              `json:"localSentEvents,omitempty"`
+	StartedAt           string           `json:"startedAt"`
+	UpdatedAt           string           `json:"updatedAt"`
+	View                SessionViewState `json:"view,omitempty"`
+	DuplicateLocalPIDs  []int            `json:"-"`
 }
 
 type sessionInstance struct {
@@ -194,6 +195,7 @@ func (s *sessionInstance) update(view SessionViewState) {
 	s.state.ActiveCount = view.ActiveCount
 	s.state.LocalCapturedEvents = view.LocalCapturedEvents
 	s.state.LocalSentEvents = view.LocalSentEvents
+	s.state.View = view
 	s.state.UpdatedAt = now
 	_ = writeActiveSessionState(s.state)
 }
@@ -213,6 +215,7 @@ func (s *sessionInstance) release() {
 	if pid, ok := readBackgroundPID(); ok && pid == os.Getpid() {
 		_ = os.Remove(backgroundPIDPath())
 	}
+	_ = os.RemoveAll(sessionCommandDir())
 }
 
 func runModeFromEnv() string {
@@ -297,6 +300,7 @@ func stopActiveSession() (string, error) {
 
 func cleanupStaleSession() {
 	_ = os.Remove(sessionLockPath())
+	_ = os.RemoveAll(sessionCommandDir())
 	if pid, ok := readBackgroundPID(); ok && !processLooksAlive(pid) {
 		_ = os.Remove(backgroundPIDPath())
 	}

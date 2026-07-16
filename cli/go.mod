@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/ebitengine/oto/v3 v3.4.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	golang.org/x/sys v0.38.0
 	golang.org/x/term v0.37.0
 )

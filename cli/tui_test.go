@@ -93,11 +93,11 @@ func TestLiveEscapeReturnsToHomeInsteadOfStopping(t *testing.T) {
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	got := updated.(sessionModel)
-	if cmd == nil {
-		t.Fatalf("escape did not request quit/back transition")
+	if cmd != nil {
+		t.Fatalf("escape unexpectedly quit the live session")
 	}
-	if got.exit != sessionExitBack {
-		t.Fatalf("exit = %q, want back", got.exit)
+	if got.mode != "control" || got.exit != "" {
+		t.Fatalf("escape mode=%q exit=%q, want control without exit", got.mode, got.exit)
 	}
 }
 
@@ -123,11 +123,11 @@ func TestLiveActionRailHoverAndClickBack(t *testing.T) {
 
 	updated, cmd = got.Update(tea.MouseMsg{Type: tea.MouseLeft, X: x, Y: y})
 	got = updated.(sessionModel)
-	if cmd == nil {
-		t.Fatalf("back click did not request transition")
+	if cmd != nil {
+		t.Fatalf("back click unexpectedly quit the session")
 	}
-	if got.exit != sessionExitBack {
-		t.Fatalf("exit = %q, want back", got.exit)
+	if got.mode != "control" || got.exit != "" {
+		t.Fatalf("back click mode=%q exit=%q, want control without exit", got.mode, got.exit)
 	}
 }
 
@@ -158,6 +158,31 @@ func TestLiveNotificationRowTogglesDirectly(t *testing.T) {
 	got := updated.(sessionModel)
 	if !got.controller.cfg.Notifications.Enabled {
 		t.Fatal("clicking Notifications did not toggle it on")
+	}
+}
+
+func TestLiveToggleHoverKeepsSelectedStyleAcrossColoredValues(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	for _, action := range []string{"notifications", "notification-sound", "mute", "spatial"} {
+		model.hoverAction = action
+		var label string
+		switch action {
+		case "notifications":
+			label = "Notifications  " + onOff(model.controller.cfg.Notifications.Enabled)
+		case "notification-sound":
+			label = "Notify sound   " + onOff(model.controller.cfg.Notifications.Sound)
+		case "mute":
+			label = "Mute " + onOff(model.state.Listening.Muted)
+		case "spatial":
+			label = "Spatial " + onOff(model.state.Listening.Spatial)
+		}
+		got := model.liveActionLine(action, label)
+		want := styleSelected.Render(ansi.Strip("[ " + label + " ]"))
+		if got != want {
+			t.Fatalf("%s hover style was reset by nested value styling", action)
+		}
 	}
 }
 
@@ -235,6 +260,25 @@ func renderedTextPosition(t *testing.T, view string, needle string) (int, int) {
 	return 0, 0
 }
 
+func TestTeamMenuShowsEverySavedNameAndCode(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Teams = []TeamConfig{
+		{Code: "CLIK-AAAAAA", Name: "Studio"},
+		{Code: "CLIK-BBBBBB", Name: "Hack Night"},
+	}
+	model := homeModel{cfg: cfg, mode: "team"}
+	items := model.items()
+	joined := ""
+	for _, item := range items {
+		joined += item.label + " " + item.help + "\n"
+	}
+	for _, want := range []string{"Studio", "CLIK-AAAAAA", "Hack Night", "CLIK-BBBBBB"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("saved team menu missing %q:\n%s", want, joined)
+		}
+	}
+}
+
 func TestLiveTabOpensUnifiedPreferences(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()
@@ -302,7 +346,7 @@ func TestFirstSetupShowsOneDecisionAtATime(t *testing.T) {
 		t.Fatalf("nickname step items = %#v", items)
 	}
 	view := model.View()
-	for _, want := range []string{"SETUP  1/7", "What should the room call you?", "CozyOtter"} {
+	for _, want := range []string{"SETUP  1/8", "What should the room call you?", "CozyOtter"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("first setup view is missing %q:\n%s", want, view)
 		}

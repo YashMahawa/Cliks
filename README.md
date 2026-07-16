@@ -37,7 +37,7 @@ cliks join CLIK-XXXXXX
 
 `cliks join` validates the code, saves it, and starts one background Cliks session automatically. Use `cliks join --no-start CLIK-XXXXXX` if you only want to save the team, or `cliks start CLIK-XXXXXX` if you want to select and start a code in one foreground command.
 
-`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. First run uses the full terminal and asks one thing at a time: nickname (or a generated funny name), listening mix, OS permission, notifications, background behavior, launch-at-login, and an optional private room tone. Every choice can be changed later. After joining, the compact home screen shows the current team name and code, active connection status, and a one-click keep-running toggle; deeper controls, including the public/self-hosted server URL, live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
+`cliks create` copies the new code to your clipboard when the platform has a clipboard command available. If you run bare `cliks`, it opens the interactive Bubble Tea control screen. First run uses the full terminal and asks one thing at a time: nickname (or a generated funny name), listening mix, OS permission, notifications, background behavior, launch-at-login, theme, and an optional private room tone. Every choice can be changed later. After joining, the compact home screen shows the current team name and code, active connection status, and a one-click keep-running toggle; deeper controls, including the public/self-hosted server URL, live under More. If you run `cliks start` before joining a room, it prints the short setup checklist instead of failing with a stack trace.
 
 ## What It Sends
 
@@ -125,7 +125,7 @@ For a completely offline room—no team, capture permission, or internet—open 
 cliks solo
 ```
 
-Choose 1–12 simulated coworkers, keyboard sounds, click sounds, and a personal rain, cafe, or deep-focus room tone. These generated soundscapes stay on your device and are never synchronized with a team.
+Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Every sound stays on your device and is never synchronized with a team.
 
 To turn self-monitoring back off:
 

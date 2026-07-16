@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.5.1"
+const version = "0.5.2"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -462,10 +462,10 @@ func cmdSet(args []string) error {
 	case "ambient":
 		mode := strings.ToLower(strings.TrimSpace(value))
 		switch mode {
-		case "off", "rain", "cafe", "deep":
+		case "off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
 			cfg.Listening.Ambient = mode
 		default:
-			return fmt.Errorf("ambient must be off, rain, cafe, or deep")
+			return fmt.Errorf("ambient must be off, rain, fire, cafe, cloud, contemplation, or downtempo")
 		}
 	case "ambient.volume":
 		parsed, err := strconv.ParseFloat(value, 64)
