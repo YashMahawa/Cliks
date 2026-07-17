@@ -10,17 +10,16 @@ import (
 )
 
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
-	trusted, method := macInputMonitoringTrusted()
-	if trusted {
-		report.checks = append(report.checks, doctorCheck{"macOS Input Monitoring", "allowed (" + method + ")"})
+	if helper := macCaptureHelperPath(); helper != "" {
+		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "installed"})
 	} else {
-		report.checks = append(report.checks, doctorCheck{"macOS Input Monitoring", "not allowed (" + method + ")"})
+		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "missing"})
 		report.issues = append(report.issues, doctorIssue{
-			title:  "Allow Input Monitoring permission",
-			detail: "Cliks uses Apple's listen-only Event Tap. Enable Cliks or the terminal that launches it under Input Monitoring; switching terminal apps may require enabling the new app too.",
+			title:  "Install isolated macOS capture",
+			detail: "Reinstall Cliks, then grant Input Monitoring only to Cliks Capture.app. Do not grant it to your terminal unless you explicitly choose compatibility mode.",
 			commands: []string{
-				"Open System Settings > Privacy & Security > Input Monitoring",
-				"Allow Cliks or the terminal app you use to start it",
+				"Re-run the Cliks installer",
+				"Open System Settings > Privacy & Security > Input Monitoring > Cliks Capture",
 				"cliks capture-test",
 			},
 		})
@@ -76,7 +75,7 @@ func platformStartupCaptureNotice() string {
 	if trusted {
 		return ""
 	}
-	return "macOS: allow Input Monitoring for Cliks or the terminal that launches it. Restart Cliks after enabling it, then run cliks capture-test."
+	return "macOS: install and allow Cliks Capture.app under Input Monitoring. Keep terminal permission off unless using the labeled direct fallback."
 }
 
 func truncate(value string, max int) string {

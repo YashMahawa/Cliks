@@ -11,6 +11,8 @@ import (
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 	_ = thorough
 	input := linuxInputStatus()
+	isolated := isolatedLinuxCaptureReady()
+	report.checks = append(report.checks, doctorCheck{"Isolated capture helper", yesNo(isolated)})
 	report.checks = append(report.checks, doctorCheck{"Linux input devices", yesNo(input.hasInputDir)})
 	if input.hasInputDir {
 		report.checks = append(report.checks,
@@ -40,17 +42,17 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 		report.issues = append(report.issues, doctorIssue{"Use a desktop session for ambient capture", detail, []string{"cliks setup", "cliks start --terminal --self"}})
 	case input.eventCount == 0:
 		report.issues = append(report.issues, doctorIssue{"No input devices found", "Open Cliks from a real desktop session (not a remote shell).", []string{"cliks setup"}})
-	case input.readableCount == 0:
-		commands := []string{"cliks setup", "sudo usermod -aG input " + input.username, "Log out and back in once"}
-		detail := "One-time permission so Cliks can sense activity kinds (never key values). Easiest: cliks setup"
+	case !isolated:
+		commands := []string{"cliks setup", "Re-run the Cliks installer"}
+		detail := "Install the isolated helper so the Cliks client and unrelated user programs never receive raw input-device access."
 		if wayland || sandbox {
 			detail += " On some Wayland/sandbox setups you may need a normal host session."
 		}
-		report.issues = append(report.issues, doctorIssue{"Allow background capture (one-time)", detail, commands})
+		report.issues = append(report.issues, doctorIssue{"Install private background capture", detail, commands})
 	}
 
-	if input.readableCount > 0 {
-		report.recommendation = []string{"Recommended run command:", "cliks start --evdev"}
+	if isolated {
+		report.recommendation = []string{"Recommended run command:", "cliks start"}
 	} else {
 		report.recommendation = []string{"Recommended local test:", "cliks start --terminal --self"}
 	}
@@ -58,14 +60,14 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 
 func platformStartupCaptureNotice() string {
 	input := linuxInputStatus()
-	if input.readableCount > 0 {
+	if isolatedLinuxCaptureReady() {
 		return ""
 	}
 	if os.Getenv("FLATPAK_ID") != "" || os.Getenv("container") != "" {
 		return "Linux: sandboxed session — global capture may be blocked. Prefer host install or cliks start --terminal --self."
 	}
 	if input.hasInputDir && input.readableCount == 0 {
-		return "Linux: cannot read /dev/input yet. Join the input group or use terminal capture."
+		return "Linux: isolated capture helper is not ready. Run cliks setup. Direct input-group access is a labeled compatibility fallback only."
 	}
 	return ""
 }

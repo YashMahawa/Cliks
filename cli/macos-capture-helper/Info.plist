@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key><string>Cliks Capture</string>
+  <key>CFBundleExecutable</key><string>cliks-capture</string>
+  <key>CFBundleIdentifier</key><string>io.cliks.capture</string>
+  <key>CFBundleName</key><string>Cliks Capture</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.6.0</string>
+  <key>LSBackgroundOnly</key><true/>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>Cliks senses only keyboard and left/right click activity kinds to create coworking ambience. It never receives or shares what you type.</string>
+</dict>
+</plist>

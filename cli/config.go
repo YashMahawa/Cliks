@@ -109,6 +109,15 @@ type NotificationConfig struct {
 	Configured bool `json:"configured,omitempty"`
 }
 
+// CaptureConfig controls the local trust boundary. "isolated" is the safe
+// default: a tiny OS-specific companion receives broad input permission and
+// emits only allowlisted activity kinds to the network client. "direct" is a
+// clearly opt-in compatibility fallback, and "terminal" never observes other
+// applications.
+type CaptureConfig struct {
+	Mode string `json:"mode,omitempty"`
+}
+
 type CliksConfig struct {
 	APIURL          string             `json:"apiUrl"`
 	WSURL           string             `json:"wsUrl"`
@@ -125,6 +134,7 @@ type CliksConfig struct {
 	Sharing         SharingConfig      `json:"sharing"`
 	Listening       ListeningConfig    `json:"listening"`
 	Notifications   NotificationConfig `json:"notifications"`
+	Capture         CaptureConfig      `json:"capture"`
 	Solo            SoloConfig         `json:"solo"`
 	BatchWindowMs   int                `json:"batchWindowMs"`
 }
@@ -138,6 +148,7 @@ func defaultConfig() CliksConfig {
 		PresenceStatus: "available",
 		Theme:          "ember",
 		Notifications:  NotificationConfig{Sound: true, Configured: true},
+		Capture:        CaptureConfig{Mode: "isolated"},
 		Teams:          []TeamConfig{},
 		Sharing: SharingConfig{
 			Keyboard: true,
@@ -328,6 +339,11 @@ func formatTeamLabel(name string, code string) string {
 
 func normalizeConfig(cfg *CliksConfig) {
 	def := defaultConfig()
+	switch cfg.Capture.Mode {
+	case "isolated", "direct", "terminal":
+	default:
+		cfg.Capture = def.Capture
+	}
 	if !cfg.Notifications.Configured {
 		cfg.Notifications = def.Notifications
 	}

@@ -34,6 +34,7 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "notifications.sound", Label: "Notification sound", Description: "play sound with native wave notifications (on/off)"},
 	{Key: "presence", Label: "Presence", Description: "available, focus, break, or dnd"},
 	{Key: "theme", Label: "Theme", Description: "ember, ocean, or mono terminal palette"},
+	{Key: "capture.mode", Label: "Capture safety", Description: "isolated (recommended), terminal-only, or direct compatibility fallback"},
 	{Key: "share.keyboard", Label: "Share keyboard", Description: "send keyboard activity kind only (on/off)"},
 	{Key: "share.mouse", Label: "Share mouse", Description: "send left/right click activity only (on/off)"},
 	{Key: "spatial.dynamic", Label: "Dynamic circle", Description: "move active teammates closer locally (on/off)"},

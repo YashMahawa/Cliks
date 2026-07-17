@@ -186,6 +186,29 @@ func TestLiveToggleHoverKeepsSelectedStyleAcrossColoredValues(t *testing.T) {
 	}
 }
 
+func TestLiveToggleMouseMotionHighlightsExactRenderedButtons(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width, model.height = 180, 40
+	for _, target := range []struct{ needle, action string }{
+		{"[ Notifications", "notifications"},
+		{"[ Notify sound", "notification-sound"},
+		{"[ Mute", "mute"},
+		{"[ Spatial", "spatial"},
+	} {
+		x, y := renderedTextPosition(t, model.View(), target.needle)
+		updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x + 2, Y: y})
+		model = updated.(sessionModel)
+		if model.hoverAction != target.action {
+			t.Fatalf("hovering %s selected %q, want %q", target.needle, model.hoverAction, target.action)
+		}
+		if !strings.Contains(ansi.Strip(model.View()), target.needle) {
+			t.Fatalf("hovered frame lost %s", target.needle)
+		}
+	}
+}
+
 func TestLiveReactionButtonsUseExactRenderedHitboxes(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

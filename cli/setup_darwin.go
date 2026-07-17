@@ -8,36 +8,40 @@ import (
 
 func platformCaptureSetup() []setupStep {
 	steps := []setupStep{}
-	trusted, method := macInputMonitoringTrusted()
-	if trusted {
+	helper := macCaptureHelperPath()
+	ready := helper != "" && macCaptureHelperReady()
+	if ready {
 		steps = append(steps, setupStep{
-			title:  "Background capture",
+			title:  "Private background capture",
 			status: "ok",
-			detail: "macOS Input Monitoring is allowed (" + method + "). The native Event Tap is ready.",
+			detail: "Cliks Capture.app is installed and allowed. Input Monitoring is isolated from your terminal.",
 		})
-		return steps
-	}
-
-	// Ask through Apple's API first so macOS registers the responsible app,
-	// then open the exact pane so the remaining action is one toggle.
-	_ = requestMacListenEventAccess()
-	opened := openMacInputMonitoringSettings()
-	detail := "macOS needs Input Monitoring so Cliks can sense keyboard/mouse activity kinds (never what you type)."
-	if opened {
-		detail += " System Settings was opened for you — enable Cliks or the terminal you use to start it (Terminal / iTerm / Warp / VS Code), restart Cliks, then run: cliks setup"
+	} else if helper != "" {
+		steps = append(steps, setupStep{title: "Private background capture", status: "action", detail: "Enable only Cliks Capture in Input Monitoring, then restart Cliks. Do not enable Terminal, iTerm, Warp, or VS Code.", command: "Open System Settings → Privacy & Security → Input Monitoring"})
 	} else {
-		detail += " Open System Settings → Privacy & Security → Input Monitoring, enable Cliks or its terminal, restart Cliks, then run: cliks setup"
+		steps = append(steps, setupStep{
+			title: "Private background capture", status: "action",
+			detail:  "Cliks Capture.app is missing. Reinstall Cliks to add the isolated open-source helper.",
+			command: "Re-run the Cliks curl installer",
+		})
+	}
+	opened := false
+	if !ready {
+		opened = openMacInputMonitoringSettings()
+	}
+	detail := "If unsigned Cliks Capture is blocked, use Privacy & Security → Open Anyway once. This is Apple's warning for community builds, not a request to disable Gatekeeper."
+	if opened {
+		detail += " Settings was opened for you."
 	}
 	steps = append(steps, setupStep{
-		title:   "Background capture",
-		status:  "action",
-		detail:  detail,
-		command: "Open System Settings → Privacy & Security → Input Monitoring",
+		title:  "Community build note",
+		status: "tip",
+		detail: detail,
 	})
 	steps = append(steps, setupStep{
-		title:  "Meanwhile",
+		title:  "Compatibility fallback",
 		status: "tip",
-		detail: "You can still join a room. If capture is quiet, grant Input Monitoring and restart Cliks once.",
+		detail: "If the helper fails, direct mode can temporarily use your terminal's Input Monitoring permission: cliks set capture.mode direct. This is less safe. Disable that terminal permission when done, then run: cliks set capture.mode isolated",
 	})
 	return steps
 }

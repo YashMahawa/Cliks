@@ -68,7 +68,8 @@ type windowsHookStart struct {
 	err      error
 }
 
-func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig) CaptureState {
+func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig, mode string) CaptureState {
+	_ = mode // Windows hooks require no special cross-application permission.
 	ready := make(chan windowsHookStart, 1)
 	go c.runWindowsHooks(ctx, sharing, ready)
 	select {

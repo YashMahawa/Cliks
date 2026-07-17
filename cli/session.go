@@ -173,7 +173,8 @@ func runAttachedSession(active ActiveSessionState) error {
 		if _, err := stopActiveSession(); err != nil {
 			return err
 		}
-		return startSession(loadConfig(), StartOptions{CaptureMode: "auto", SelfMonitor: loadConfig().Listening.Self})
+		cfg := loadConfig()
+		return startSession(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
 	default:
 		return nil
 	}

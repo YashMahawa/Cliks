@@ -64,10 +64,14 @@ const faqs = [
     q: "What gets stored?",
     a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 48 hours without a live connection; reconnecting refreshes the clock.",
   },
-	{
-		q: "Can I use my own server?",
-		a: "Yes. Paste its HTTPS URL under Cliks → More → Server. The shared public relay stays at 20 people and 500 ms batching; self-hosting unlocks configurable room capacity and 100–2000 ms batches.",
-	},
+  {
+    q: "Does my terminal get input permission?",
+    a: "Not by default. macOS grants Input Monitoring to the separate Cliks Capture app, Linux uses an isolated system helper, and Windows needs no extra input permission. A clearly labeled direct compatibility mode is optional and reversible.",
+  },
+  {
+    q: "Can I use my own server?",
+    a: "Yes. Paste its HTTPS URL under Cliks → More → Server. The shared public relay stays at 20 people and 500 ms batching; self-hosting unlocks configurable room capacity and 100–2000 ms batches.",
+  },
 ];
 
 export default function HomePage() {

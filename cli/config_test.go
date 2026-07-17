@@ -8,6 +8,18 @@ import (
 	"testing"
 )
 
+func TestCaptureDefaultsToIsolatedAndRejectsUnknownModes(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.Capture.Mode != "isolated" {
+		t.Fatalf("default capture mode = %q, want isolated", cfg.Capture.Mode)
+	}
+	cfg.Capture.Mode = "trust-everything"
+	normalizeConfig(&cfg)
+	if cfg.Capture.Mode != "isolated" {
+		t.Fatalf("normalized capture mode = %q, want isolated", cfg.Capture.Mode)
+	}
+}
+
 func TestForgetTeamRemovesCurrentAndSelectsNext(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

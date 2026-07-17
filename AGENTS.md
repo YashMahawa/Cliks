@@ -120,9 +120,9 @@ Current modes:
 - `cliks create` / `cliks delete [CODE]`: create or delete teams from the CLI. The bare TUI also has in-app create/delete forms. Team > Join should let users paste a code, save the team name/code, and auto-open the live room.
 - `cliks join CODE`: validates and saves the team, then starts one detached background session by default. `cliks join --no-start CODE` only saves/selects the team for users who explicitly want the old manual flow.
 - `cliks nickname [NAME]` / `cliks set nickname NAME`: configures the optional display name shared in live presence and peer activity. Names are capped at 10 characters. Empty names should be treated as anonymous; never infer names from the OS user, Git config, hostname, app/window title, or typed text.
-- `cliks start`: on Linux, tries `/dev/input` evdev capture first. macOS uses a first-party listen-only CoreGraphics Event Tap; Windows uses first-party Win32 low-level keyboard/mouse hooks on a dedicated message-loop thread. Native callbacks pass only activity kind through a fast dispatcher; they never copy key values or coordinates. Capture init is async so the TUI is not blocked. `cliks start CODE` validates, saves, selects, and starts that code even when local config is empty.
-- `cliks setup`: one-time easy setup for non-tech users — built-in macOS/Windows spatial audio or automatic Linux mpv setup, plus platform capture access (Linux ACL/group, macOS Input Monitoring pane, Windows ready-by-default). Prefer this over asking users to run raw system commands.
-- `cliks start --evdev`: Linux global capture through `/dev/input/event*`. This is intended to work across Wayland and Xorg when permission is granted.
+- `cliks start`: defaults to privacy-isolated capture. Linux connects to a hardened root-owned `cliks-capture` helper whose socket emits only `k/l/r` tokens; the desktop user is never automatically added to `input`. macOS launches the dedicated open-source Cliks Capture.app and Input Monitoring belongs to that app, not Terminal. Windows uses first-party Win32 low-level hooks and needs no extra input permission. `capture.mode` can select `isolated`, `terminal`, or an explicitly less-safe `direct` compatibility fallback.
+- `cliks setup`: one-time easy setup for non-tech users - built-in macOS/Windows spatial audio or automatic Linux mpv setup, plus isolated platform capture (Linux system helper, macOS Cliks Capture.app, Windows ready-by-default).
+- `cliks start --evdev`: legacy alias for explicit direct Linux evdev capture. Prefer isolated mode; this broad fallback requires user `/dev/input` permission.
 - `cliks start --terminal --self`: local test mode. It captures keyboard bytes and terminal mouse-report events from the active terminal and plays self audio.
 - `cliks start` before joining a room prints first-run setup steps instead of a raw error.
 - `cliks sound-test`: plays sample sounds without joining a room.
@@ -135,15 +135,15 @@ Current modes:
 - `cliks preset deep|balanced|social|quiet`: applies listening presets for volume, density, spatial, and fatigue fade.
 - `cliks autostart enable|disable|status`: manages login-time background autoconnect for the selected team through systemd user services, macOS LaunchAgents, or the Windows Startup folder. Linux services should use `Restart=on-failure`, macOS LaunchAgents should not set `KeepAlive`, and shared stop paths must gracefully stop the current process without disabling launch-at-login. A stopped boot session should stay stopped until the next login/boot; disabling autostart is a separate explicit action. Deleted/unavailable teams may still disable launch-at-login because the stored code is invalid.
 - `cliks fix-terminal`: restores sane terminal input and disables terminal mouse reporting after interrupted terminal-mode tests.
-- `cli/install.sh`: hassle-free macOS/Linux installer — downloads a matching tagged native release first, with source compilation only as a fallback; exports PATH, installs mpv plus desktop helpers on Linux, prepares Linux input ACL/group access, opens macOS Input Monitoring settings, and ends with `cliks setup`. macOS/Windows audio is built into the release binary. `cli/install.ps1` is the native Windows x64 installer. Non-interactive shell installs use `CLIKS_AUTO_YES=1`. Termux is a best-effort second-device client: prefer the Linux ARM64 release, `termux-media-player`, `termux-notification`, and `termux-clipboard-set`; never send it through sudo/input-group setup or claim desktop-wide capture. Keep installers user-facing and never request or print backend provider tokens.
+- `cli/install.sh`: installs a matching native release plus Cliks Capture.app on macOS or the hardened system helper on Linux, then runs `cliks setup`. It must never automatically grant the desktop user raw input ACL/group access. `cli/install.ps1` remains the native Windows installer. Termux never receives desktop-wide capture claims or sudo setup.
 - `docs/setup.md`: non-technical setup guide for macOS, Windows, and Linux.
 
 Important platform reality:
 
 - Windows can use low-level hooks.
-- macOS uses a listen-only Event Tap with Input Monitoring permission, preflighted/requested through CoreGraphics.
+- macOS uses a dedicated listen-only Cliks Capture.app with Input Monitoring permission. Direct terminal permission is compatibility-only.
 - Linux Xorg can use XRecord/XInput/native hooks.
-- Linux Wayland intentionally blocks normal desktop global input APIs. The current practical path is evdev via `/dev/input`, which requires local input-device permission. The CLI must never send key codes even though evdev exposes them locally; it should emit only `keyboard` or `mouse` event kind and coarse timing.
+- Linux Wayland intentionally blocks normal desktop global input APIs. A hardened `cliks-capture` system helper reads evdev and exposes only fixed activity-kind tokens over a local Unix socket. Direct evdev is an explicit compatibility fallback.
 - Mouse activity means left/right click only. Do not count middle clicks, side buttons, scroll/wheel events, touchpad movement, app/window hover, pointer coordinates, or generic gestures. Linux evdev touchpads use a conservative tap heuristic: short stationary one-finger tap is left click, short stationary two-finger tap is right click, physical `BTN_LEFT`/`BTN_RIGHT` clicks are emitted directly, movement/long-press/three-or-more-finger gestures are ignored, and physical button clicks suppress duplicate tap emission.
 - Evdev mode should only be reported after readable event devices are confirmed. Do not count streams that later fail with async `EACCES`, because that creates a false "connected but not sending" state. Non-EOF read failures use cancel-aware exponential retries from 1s to 30s instead of a busy loop.
 - Local capture and session channels use bounded 1024-event buffers with cancellation-aware backpressure. Do not reintroduce silent default-case drops for human keyboard/click bursts. Offline WebSocket activity remains best-effort after it reaches the session send path.
@@ -231,7 +231,7 @@ Supabase should run `supabase/schema.sql`.
 ## Known Issues
 
 - `npm audit --omit=dev` currently reports moderate advisories through Next/PostCSS dependency metadata. Do not force downgrade to old Next; wait for a patched compatible release or reassess if Next dependency graph changes.
-- Global capture works on Linux (evdev), macOS (Event Tap + Input Monitoring), and Windows (low-level hooks; UIPI pauses only on elevated windows). Edge cases: sandboxes/Flatpak, remote SSH without `/dev/input`.
+- Global capture uses isolated helpers on Linux/macOS and native hooks on Windows. Edge cases include sandboxes/Flatpak, remote SSH, unsigned macOS Gatekeeper approval, and Windows UIPI over elevated windows.
 - Full stereo pan is built into macOS/Windows release binaries. Linux requires `mpv` or `ffplay` on PATH for stereo pan (mpv uses lavfi pan); basic Linux players may only support distance-based gain or unspatialized playback. Installer and `cliks setup` try to install mpv automatically on Linux.
 - The command is `cliks`; product name is Cliks.
 

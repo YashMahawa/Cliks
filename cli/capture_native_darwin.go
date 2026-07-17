@@ -26,7 +26,7 @@ type darwinCaptureSession struct {
 	sharing  SharingConfig
 }
 
-func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig) CaptureState {
+func (c *ActivityCapture) startDirectGlobalHook(ctx context.Context, sharing SharingConfig) CaptureState {
 	if !macListenEventAccessAllowed() {
 		return CaptureState{Mode: "off", PermissionHint: globalHookPermissionHint()}
 	}
@@ -105,7 +105,7 @@ func emitDarwinCaptureEvent(token uint64, kind int, button int) {
 }
 
 func globalHookPermissionHint() string {
-	return "macOS blocked its native Event Tap. Open System Settings → Privacy & Security → Input Monitoring, enable Cliks or the terminal that launches it, then restart Cliks and run cliks capture-test."
+	return "macOS blocked direct capture. This compatibility mode requires Input Monitoring for the terminal or launcher. Prefer isolated capture from cliks setup."
 }
 
 func macListenEventAccessAllowed() bool {

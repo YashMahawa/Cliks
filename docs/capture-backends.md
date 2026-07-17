@@ -8,15 +8,16 @@ For non-technical setup, start with **[setup.md](./setup.md)** and `cliks setup`
 
 | Platform | Default (`cliks start`) | Fallback |
 |----------|-------------------------|----------|
-| **Linux** | Readable `/dev/input/event*` (evdev) | Terminal mode if devices are locked down |
-| **macOS** | First-party CoreGraphics listen-only Event Tap after Input Monitoring | Terminal mode; setup requests access and opens the correct pane |
+| **Linux** | Root-owned minimal helper; local socket emits only allowlisted kinds | Direct evdev (explicit broad fallback) or terminal-only |
+| **macOS** | Dedicated Cliks Capture.app with a listen-only Event Tap | Direct terminal permission (explicit less-safe fallback) or terminal-only |
 | **Windows** | First-party Win32 low-level keyboard/mouse hooks | Terminal mode; elevated windows may pause capture (UIPI) |
 
 ### Commands
 
 ```bash
-cliks start                 # auto backend
-cliks start --evdev         # Linux global via /dev/input
+cliks start                 # isolated backend (default)
+cliks set capture.mode terminal
+cliks set capture.mode direct  # explicit compatibility fallback
 cliks start --terminal --self
 cliks capture-test
 cliks setup                 # grant access / check readiness
@@ -36,19 +37,17 @@ cliks setup                 # grant access / check readiness
 - Movement, scroll, multi-finger gestures ignored
 - Device read errors use exponential backoff + jitter (no busy loop)
 
-**Permissions (installer + `cliks setup` try to do this for you):**
-
-1. Session ACL on `/dev/input/event*` when `setfacl` + sudo work  
-2. Permanent: user in the `input` group (log out/in once)
+The installer creates a dedicated `cliks-capture` system user in the `input` group and runs a hardened helper. The desktop user receives only `k`, `l`, or `r` tokens over `/run/cliks/capture.sock`. Cliks no longer automatically grants per-user ACLs or adds the desktop user to `input`.
 
 Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop session or terminal mode.
 
 ### macOS
 
 - Input Monitoring permission is required for the native listen-only Event Tap (OS rule — apps cannot bypass it)
-- Cliks calls Apple's preflight/request APIs and opens the Input Monitoring pane; enable Cliks or the terminal responsible for launching it
+- Grant Input Monitoring only to Cliks Capture.app. The terminal remains unprivileged.
 - `cliks setup` and the installer open System Settings to the right pane
-- Enable the **terminal that launches Cliks**, then rerun `cliks setup`
+- Unsigned community builds may need Privacy & Security → Open Anyway once. Never disable Gatekeeper.
+- Direct mode is retained only as a labeled trial/fallback. Remove the terminal's Input Monitoring permission after use.
 
 ### Windows
 
@@ -62,8 +61,7 @@ Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop se
 - macOS uses `CGEventTapCreate` with a listen-only mask containing only key-down and left/right mouse-down.
 - Both native callbacks enqueue only an activity kind; key codes and event payloads are never copied into the Cliks event model.
 - `cliks doctor` probes native hook initialization on both platforms.
-- An optional elevated Windows helper could cover Administrator windows in a future release.
 - Linux Wayland: XDG InputCapture portal when distros expose it widely  
-- Privilege-separated helpers remain optional; default path stays simple for non-tech users  
+- Privilege-separated helpers are the default trust boundary on Linux and macOS.
 
 Privacy promise is unchanged on every backend: event kind + coarse timing only.

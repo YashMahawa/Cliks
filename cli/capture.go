@@ -73,15 +73,15 @@ func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, m
 		return CaptureState{Mode: "terminal"}
 	}
 	if runtime.GOOS == "linux" {
-		if state := c.startEvdev(ctx, sharing); state.Mode == "evdev" || mode == "evdev" {
-			return state
+		if mode == "isolated" || mode == "auto" || mode == "" {
+			return c.startLinuxCaptureHelper(ctx, sharing)
+		}
+		if mode == "direct" || mode == "evdev" {
+			return c.startEvdev(ctx, sharing)
 		}
 	}
-	if mode == "evdev" {
-		return CaptureState{Mode: "off", PermissionHint: "Linux evdev capture is only available on Linux desktops with readable /dev/input/event* devices."}
-	}
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		return c.startGlobalHook(ctx, sharing)
+		return c.startGlobalHook(ctx, sharing, mode)
 	}
 	return CaptureState{Mode: "off", PermissionHint: "Global capture is not available in this environment. Try: cliks start --terminal --self"}
 }
@@ -171,7 +171,7 @@ func (c *ActivityCapture) startEvdev(ctx context.Context, sharing SharingConfig)
 		file, err := os.Open(device)
 		if err != nil {
 			if os.IsPermission(err) {
-				hint = "Linux global capture needs permission to read /dev/input/event*. Add your user to the input group, then log out/in: sudo usermod -aG input $USER"
+				hint = "Direct Linux capture is blocked. This compatibility mode grants your user broad input-device access; prefer cliks setup to install isolated capture."
 			}
 			continue
 		}
@@ -180,7 +180,7 @@ func (c *ActivityCapture) startEvdev(ctx context.Context, sharing SharingConfig)
 	}
 	if opened == 0 {
 		if hint == "" {
-			hint = "Linux global capture could not open /dev/input/event*. Try: sudo usermod -aG input $USER, then log out and back in."
+			hint = "Direct Linux capture could not open /dev/input/event*. Prefer cliks setup for isolated capture."
 		}
 		if linuxSandboxHint := linuxCaptureSandboxHint(); linuxSandboxHint != "" {
 			hint = hint + " " + linuxSandboxHint

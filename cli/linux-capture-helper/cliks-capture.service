@@ -1,0 +1,33 @@
+[Unit]
+Description=Cliks privacy-isolated activity capture
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/cliks-capture-helper
+# Installer supplies CLIKS_CAPTURE_UID in a drop-in. The helper rejects every
+# other local account with SO_PEERCRED. It remains root only to open hotplugged
+# input devices; systemd removes filesystem/network capabilities around it.
+User=root
+Group=root
+RuntimeDirectory=cliks
+RuntimeDirectoryMode=0755
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

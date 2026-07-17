@@ -3,149 +3,54 @@
 package main
 
 import (
-	"fmt"
+	"bufio"
+	"net"
 	"os"
-	"os/exec"
 	"os/user"
-	"path/filepath"
 	"strings"
+	"time"
 )
 
 func platformCaptureSetup() []setupStep {
-	input := linuxInputStatus()
-	steps := []setupStep{}
-
-	if !input.hasInputDir {
+	if isolatedLinuxCaptureReady() {
 		return []setupStep{{
-			title:  "Background capture",
-			status: "tip",
-			detail: "This environment has no /dev/input (container/SSH/remote). Use a normal desktop session, or run: cliks start --terminal --self for a local test.",
+			title: "Private background capture", status: "ok",
+			detail: "The isolated Cliks helper is ready. Your terminal and user account cannot read raw input devices.",
 		}}
 	}
-
-	if input.readableCount > 0 {
-		steps = append(steps, setupStep{
-			title:  "Background capture",
-			status: "ok",
-			detail: fmt.Sprintf("Can read %d input device(s). Global keyboard/mouse ambience is ready.", input.readableCount),
-		})
-		return steps
+	input := linuxInputStatus()
+	if !input.hasInputDir {
+		return []setupStep{{title: "Background capture", status: "tip", detail: "No desktop input devices are visible here (common in Termux, containers, and SSH). Terminal-only capture is still available."}}
 	}
-
-	// Try session ACL grant first — works immediately without logout.
-	if granted, detail := tryLinuxInputACL(); granted {
-		// Re-check.
-		input = linuxInputStatus()
-		if input.readableCount > 0 {
-			steps = append(steps, setupStep{
-				title:  "Background capture",
-				status: "fixed",
-				detail: detail,
-			})
-			// Also ensure permanent group membership when possible.
-			if permanent, pdetail := tryLinuxInputGroup(); permanent {
-				steps = append(steps, setupStep{
-					title:  "Capture after reboot",
-					status: "fixed",
-					detail: pdetail,
-				})
-			} else {
-				steps = append(steps, setupStep{
-					title:   "Capture after reboot",
-					status:  "tip",
-					detail:  "Session access is ready. For permanent access after reboot: sudo usermod -aG input $USER then log out/in.",
-					command: "sudo usermod -aG input " + input.username,
-				})
-			}
-			return steps
-		}
+	detail := "Install the small root-owned Cliks capture helper. It can read input devices, but exposes only keyboard, left-click, and right-click activity kinds over a local socket."
+	command := "Re-run the Cliks installer, or install cli/linux-capture-helper/cliks-capture.service with sudo"
+	if input.readableCount > 0 || input.inputGroupActive {
+		detail += " Your account currently has broad /dev/input access from an older setup. After the helper works, remove your user from the input group and log out/in."
 	}
-
-	if permanent, detail := tryLinuxInputGroup(); permanent {
-		steps = append(steps, setupStep{
-			title:  "Background capture",
-			status: "fixed",
-			detail: detail + " Log out and back in once so the new group applies.",
-		})
-		return steps
+	return []setupStep{
+		{title: "Private background capture", status: "action", detail: detail, command: command},
+		{title: "Compatibility choices", status: "tip", detail: "Terminal-only is safest without installation. Direct mode is opt-in and broad: cliks set capture.mode direct. Undo it with: cliks set capture.mode isolated"},
 	}
-
-	// Sandbox / Wayland without access — gentle tip, not a scare.
-	sandbox := os.Getenv("FLATPAK_ID") != "" || os.Getenv("container") != ""
-	if _, err := os.Stat("/.flatpak-info"); err == nil {
-		sandbox = true
-	}
-	detail := "Cliks needs one-time permission to hear keyboard/mouse activity kinds (never key values)."
-	if sandbox {
-		detail = "Sandboxed session cannot read input devices. Install Cliks on your normal desktop user session."
-	}
-	steps = append(steps, setupStep{
-		title:   "Background capture",
-		status:  "action",
-		detail:  detail,
-		command: "sudo usermod -aG input " + input.username + " && echo 'Then log out and back in once.'",
-	})
-	steps = append(steps, setupStep{
-		title:  "Meanwhile",
-		status: "tip",
-		detail: "You can still try the room with terminal-only capture: cliks start --terminal --self",
-	})
-	return steps
 }
 
-func tryLinuxInputACL() (bool, string) {
-	username := currentUsername()
-	if username == "" {
-		return false, ""
+func isolatedLinuxCaptureReady() bool {
+	conn, err := net.DialTimeout("unix", linuxCaptureSocket(), 250*time.Millisecond)
+	if err != nil {
+		return false
 	}
-	// Need setfacl + sudo -n for noninteractive.
-	if _, err := exec.LookPath("setfacl"); err != nil {
-		return false, ""
-	}
-	if _, err := exec.LookPath("sudo"); err != nil {
-		return false, ""
-	}
-	devices, _ := filepath.Glob("/dev/input/event*")
-	if len(devices) == 0 {
-		return false, ""
-	}
-	ok := 0
-	for _, device := range devices {
-		cmd := exec.Command("sudo", "-n", "setfacl", "-m", "u:"+username+":r", device)
-		if err := cmd.Run(); err == nil {
-			ok++
-		}
-	}
-	if ok == 0 {
-		return false, ""
-	}
-	return true, fmt.Sprintf("Granted read access to %d input device(s) for this session.", ok)
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	return err == nil && strings.TrimSpace(line) == "ready"
 }
 
-func tryLinuxInputGroup() (bool, string) {
-	username := currentUsername()
-	if username == "" {
-		return false, ""
-	}
-	// Already in group?
-	if inGroup, _ := userInGroup(username, "input"); inGroup {
-		return true, "User is already in the input group."
-	}
-	if _, err := exec.LookPath("sudo"); err != nil {
-		return false, ""
-	}
-	cmd := exec.Command("sudo", "-n", "usermod", "-aG", "input", username)
-	if err := cmd.Run(); err != nil {
-		return false, ""
-	}
-	return true, "Added your user to the input group for permanent global capture."
-}
+// Kept for migration diagnostics only. Cliks no longer grants ACLs or adds the
+// desktop user to input automatically.
+func tryLinuxInputACL() (bool, string)   { return false, "disabled in favor of isolated capture" }
+func tryLinuxInputGroup() (bool, string) { return false, "disabled in favor of isolated capture" }
 
 func currentUsername() string {
 	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
-		return u
-	}
-	if u := strings.TrimSpace(os.Getenv("LOGNAME")); u != "" {
 		return u
 	}
 	if u, err := user.Current(); err == nil {
@@ -160,25 +65,12 @@ func userInGroup(username, groupName string) (bool, error) {
 		return false, err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.HasPrefix(line, groupName+":") {
-			continue
-		}
 		parts := strings.Split(line, ":")
-		if len(parts) < 4 {
-			return false, nil
-		}
-		for _, member := range strings.Split(parts[3], ",") {
-			if strings.TrimSpace(member) == username {
-				return true, nil
-			}
-		}
-	}
-	// Also check supplementary groups of current process.
-	if u, err := user.Current(); err == nil && u.Username == username {
-		gids, _ := u.GroupIds()
-		for _, gid := range gids {
-			if g, err := user.LookupGroupId(gid); err == nil && g.Name == groupName {
-				return true, nil
+		if len(parts) >= 4 && parts[0] == groupName {
+			for _, member := range strings.Split(parts[3], ",") {
+				if strings.TrimSpace(member) == username {
+					return true, nil
+				}
 			}
 		}
 	}

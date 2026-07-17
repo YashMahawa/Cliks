@@ -224,14 +224,14 @@ func runHomeTUI(cfg CliksConfig) error {
 	}
 	switch result.action {
 	case actionStart:
-		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
+		return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
 	case actionAttach:
 		return runAttachedSession(result.active)
 	case actionSwitch:
 		if _, err := stopActiveSession(); err != nil {
 			return err
 		}
-		return startSession(result.cfg, StartOptions{CaptureMode: "auto", SelfMonitor: result.cfg.Listening.Self})
+		return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
 	case actionCreate:
 		return cmdCreate(nil)
 	case actionDelete:
@@ -1939,6 +1939,16 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		}},
 		{"Presence", "available, focus, break, or dnd", func(c CliksConfig) string { return presenceLabel(c.PresenceStatus) }, func(c *CliksConfig, d int) { c.PresenceStatus = nextPresence(c.PresenceStatus, d) }},
 		{"Theme", "ember, ocean, or mono", func(c CliksConfig) string { return c.Theme }, func(c *CliksConfig, d int) { c.Theme = nextTheme(c.Theme, d) }},
+		{"Capture safety", "isolated recommended; direct grants this launcher broad access", func(c CliksConfig) string { return c.Capture.Mode }, func(c *CliksConfig, d int) {
+			modes := []string{"isolated", "terminal", "direct"}
+			index := 0
+			for i, mode := range modes {
+				if mode == c.Capture.Mode {
+					index = i
+				}
+			}
+			c.Capture.Mode = modes[(index+d+len(modes))%len(modes)]
+		}},
 		{"Share keyboard", "send keyboard activity kind only", func(c CliksConfig) string { return onOff(c.Sharing.Keyboard) }, func(c *CliksConfig, _ int) { c.Sharing.Keyboard = !c.Sharing.Keyboard }},
 		{"Share mouse", "send left/right click activity only", func(c CliksConfig) string { return onOff(c.Sharing.Mouse) }, func(c *CliksConfig, _ int) { c.Sharing.Mouse = !c.Sharing.Mouse }},
 		{"Keep Running", "saved terminal-close preference", func(c CliksConfig) string { return onOff(c.KeepRunning) }, func(c *CliksConfig, _ int) { c.KeepRunning = !c.KeepRunning }},
@@ -3011,37 +3021,29 @@ func inlineLiveHit(x int, startX int, targets []liveHitTarget) string {
 }
 
 func (m sessionModel) liveHitRegions() []liveHitRegion {
-	width := maxInt(44, panelWidth(m.width))
 	var regions []liveHitRegion
-	addRenderedRegion := func(action string, rendered string, needle string, baseX int, baseY int) {
+	// Derive every hitbox from the exact final frame shown to the terminal.
+	// Reconstructing panel offsets separately caused toggles to drift while
+	// reactions happened to remain aligned at some widths.
+	rendered := m.View()
+	addRenderedRegion := func(action string, needle string) {
 		for localY, styledLine := range strings.Split(rendered, "\n") {
 			line := ansi.Strip(styledLine)
 			if index := strings.Index(line, needle); index >= 0 {
 				regions = append(regions, liveHitRegion{
 					action: action,
-					x:      baseX + ansi.StringWidth(line[:index]),
-					y:      baseY + localY,
+					x:      ansi.StringWidth(line[:index]),
+					y:      localY,
 					width:  ansi.StringWidth(needle),
 				})
 				return
 			}
 		}
 	}
-	header := m.liveHeader(width)
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
 	if code != "" {
-		addRenderedRegion("copy-code", header, code, 0, 0)
+		addRenderedRegion("copy-code", "[ "+code+"  COPY ]")
 	}
-	if width < 74 {
-		return regions
-	}
-	mapWidth := int(float64(width) * 0.68)
-	infoWidth := width - mapWidth - 2
-	bodyHeight := maxInt(12, m.height-7)
-	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render("")
-	rail := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
-	baseX := lipgloss.Width(desk) + 2
-	baseY := lipgloss.Height(header)
 	labels := []struct {
 		action string
 		label  string
@@ -3062,7 +3064,7 @@ func (m sessionModel) liveHitRegions() []liveHitRegion {
 	}
 	for _, item := range labels {
 		if item.label != "" {
-			addRenderedRegion(item.action, rail, "[ "+item.label+" ]", baseX, baseY)
+			addRenderedRegion(item.action, "[ "+ansi.Strip(item.label)+" ]")
 		}
 	}
 	return regions

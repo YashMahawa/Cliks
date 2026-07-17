@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.5.2"
+const version = "0.6.0"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -286,12 +286,14 @@ func cmdNickname(args []string) error {
 
 func cmdStart(args []string) error {
 	cfg := loadConfig()
-	opts := StartOptions{CaptureMode: "auto", SelfMonitor: cfg.Listening.Self}
+	opts := StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self}
 	codeArg := ""
 	for _, arg := range args {
 		switch arg {
 		case "--evdev":
-			opts.CaptureMode = "evdev"
+			opts.CaptureMode = "direct"
+		case "--unsafe-direct":
+			opts.CaptureMode = "direct"
 		case "--terminal":
 			opts.CaptureMode = "terminal"
 		case "--self":
@@ -505,6 +507,14 @@ func cmdSet(args []string) error {
 		default:
 			return fmt.Errorf("theme must be ember, ocean, or mono")
 		}
+	case "capture.mode":
+		mode := strings.ToLower(strings.TrimSpace(value))
+		switch mode {
+		case "isolated", "direct", "terminal":
+			cfg.Capture.Mode = mode
+		default:
+			return fmt.Errorf("capture.mode must be isolated, direct, or terminal")
+		}
 	case "spatial.dynamic":
 		cfg.Listening.DynamicPlacement = boolValue
 	case "keep.running":
@@ -697,6 +707,7 @@ Usage:
   %[1]s notification-test
                          Send one native notification using your sound preference
   %[1]s capture-test     Verify local activity capture
+	                     Use --unsafe-direct only as a compatibility fallback
   %[1]s service ...      Canonical service control (background + login)
   %[1]s service start|stop|status [CODE]
   %[1]s service enable|disable [CODE]

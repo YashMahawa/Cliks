@@ -47,7 +47,15 @@ jobs:
         shell: bash
         run: |
           go build -trimpath -ldflags="-s -w" -o cliks .
-          tar -czf "../${{ matrix.asset }}.tar.gz" cliks
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            chmod +x macos-capture-helper/build.sh
+            macos-capture-helper/build.sh "Cliks Capture.app"
+            tar -czf "../${{ matrix.asset }}.tar.gz" cliks "Cliks Capture.app"
+          else
+            go build -trimpath -ldflags="-s -w" -o cliks-capture-helper ./linux-capture-helper
+            cp linux-capture-helper/cliks-capture.service .
+            tar -czf "../${{ matrix.asset }}.tar.gz" cliks cliks-capture-helper cliks-capture.service
+          fi
       - name: Build Windows archive
         if: runner.os == 'Windows'
         working-directory: cli
@@ -78,7 +86,9 @@ jobs:
         working-directory: cli
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o cliks .
-          tar -czf ../cliks-linux-arm64.tar.gz cliks
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o cliks-capture-helper ./linux-capture-helper
+          cp linux-capture-helper/cliks-capture.service .
+          tar -czf ../cliks-linux-arm64.tar.gz cliks cliks-capture-helper cliks-capture.service
       - uses: actions/upload-artifact@v4
         with:
           name: cliks-linux-arm64

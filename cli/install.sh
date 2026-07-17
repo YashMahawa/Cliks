@@ -7,7 +7,8 @@ REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.5.2}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.0}"
+CAPTURE_APP_DIR="${CLIKS_CAPTURE_APP_DIR:-$HOME/Applications/Cliks Capture.app}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
 if [ -z "$AUTO_YES" ]; then
@@ -81,6 +82,23 @@ install_prebuilt() {
     fi
     mkdir -p "$BIN_DIR"
     install -m 755 "$tmp/cliks" "$BIN_DIR/cliks"
+    if [ "$os" = "macos" ] && [ -d "$tmp/Cliks Capture.app" ]; then
+      mkdir -p "$(dirname "$CAPTURE_APP_DIR")"
+      rm -rf "$CAPTURE_APP_DIR"
+      cp -R "$tmp/Cliks Capture.app" "$CAPTURE_APP_DIR"
+      ok "Installed isolated Cliks Capture app"
+    fi
+    if [ "$os" = "linux" ] && [ -x "$tmp/cliks-capture-helper" ] && [ -f "$tmp/cliks-capture.service" ] && command -v systemctl >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo install -m 755 "$tmp/cliks-capture-helper" /usr/local/libexec/cliks-capture-helper
+        sudo install -m 644 "$tmp/cliks-capture.service" /etc/systemd/system/cliks-capture.service
+        sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
+        printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\n' "$(id -u)" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now cliks-capture.service
+        ok "Installed privacy-isolated input helper"
+      fi
+    fi
     PREBUILT=1
     ok "Downloaded native Cliks release"
   fi
@@ -243,6 +261,19 @@ if [ "$PREBUILT" = "0" ]; then
 exec "$INSTALL_DIR/cli/dist/cliks" "\$@"
 EOF
   chmod +x "$BIN_DIR/cliks"
+  if [ "$(uname -s)" = "Darwin" ] && command -v swiftc >/dev/null 2>&1; then
+    chmod +x macos-capture-helper/build.sh
+    macos-capture-helper/build.sh "$CAPTURE_APP_DIR"
+  fi
+  if [ "$(uname -s)" = "Linux" ] && ! is_termux && command -v systemctl >/dev/null 2>&1; then
+    go build -o dist/cliks-capture-helper ./linux-capture-helper
+    sudo install -m 755 dist/cliks-capture-helper /usr/local/libexec/cliks-capture-helper
+    sudo install -m 644 linux-capture-helper/cliks-capture.service /etc/systemd/system/cliks-capture.service
+    sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
+    printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\n' "$(id -u)" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now cliks-capture.service
+  fi
 fi
 
 # --- PATH for new terminals ---
@@ -283,53 +314,9 @@ ok "Version $installed_version (bundled sounds included)"
 
 "$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND" >/dev/null 2>&1 || true
 
-# --- Linux input access (auto, no scary prompts) ---
-if [ "$(uname -s)" = "Linux" ] && ! is_termux && [ -d /dev/input ]; then
-  USER_NAME="${USER:-$(id -un)}"
-  readable=0
-  for f in /dev/input/event*; do
-    [ -e "$f" ] || continue
-    if [ -r "$f" ]; then
-      readable=$((readable + 1))
-    fi
-  done
-  if [ "$readable" -eq 0 ]; then
-    # Session ACLs so capture works immediately without logout.
-    if command -v setfacl >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-      for f in /dev/input/event*; do
-        [ -e "$f" ] || continue
-        sudo -n setfacl -m "u:${USER_NAME}:r" "$f" 2>/dev/null || true
-      done
-    fi
-    # Permanent group membership.
-    if ! id -nG "$USER_NAME" 2>/dev/null | tr ' ' '\n' | grep -qx input; then
-      if [ "$AUTO_YES" = "1" ]; then
-        sudo -n usermod -aG input "$USER_NAME" 2>/dev/null && \
-          tip "Added you to the input group (log out/in once later for permanence)" || true
-      else
-        printf "Allow background keyboard/mouse ambience? (one-time, never reads key values) [Y/n] "
-        read -r answer || answer=Y
-        case "$answer" in
-          n|N|no|NO) tip "Skipped. You can run later: cliks setup" ;;
-          *)
-            sudo usermod -aG input "$USER_NAME" 2>/dev/null && \
-              tip "Added to input group — log out/in once for permanence" || \
-              tip "Could not change groups automatically. Run: cliks setup"
-            ;;
-        esac
-      fi
-    fi
-  else
-    ok "Background capture access"
-  fi
-fi
-
-# --- macOS Input Monitoring nudge (the OS requires one user toggle) ---
-if [ "$(uname -s)" = "Darwin" ]; then
-  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent" 2>/dev/null || \
-    open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent" 2>/dev/null || true
-  tip "If Settings opened: enable Cliks or your Terminal app under Input Monitoring, then restart Cliks once."
-fi
+# Cliks deliberately does not add desktop users to the Linux input group or
+# grant per-user ACLs anymore. Those permissions would let unrelated programs
+# under that account inspect raw device events.
 
 # --- final guided setup ---
 say ""

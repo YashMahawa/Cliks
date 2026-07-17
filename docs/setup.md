@@ -20,8 +20,8 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 
 - installs the native `cliks` command (with its real sound pack embedded)
 - includes stereo spatial audio directly on macOS and Windows; installs **mpv** on Linux when possible
-- prepares background capture access on Linux
-- requests Input Monitoring on macOS and opens the exact pane (one switch)
+- installs privacy-isolated background capture on Linux
+- installs Cliks Capture.app and opens Input Monitoring for that app only
 - runs `cliks setup` for a plain-language readiness check
 
 The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission.
@@ -35,7 +35,7 @@ The first `cliks` launch then uses one full-screen card at a time. It can genera
 | Need | What Cliks does | What you might do once |
 |------|-----------------|-------------------------|
 | Spatial sound | Built into the Cliks binary (stereo pan + distance) | Nothing |
-| Background capture | Uses a built-in listen-only CoreGraphics Event Tap | **One** permission: System Settings → Privacy & Security → **Input Monitoring** → enable Cliks or the terminal app that launches it (Terminal / iTerm / Warp / VS Code). |
+| Background capture | Dedicated listen-only Cliks Capture.app | **One** permission: Input Monitoring → enable **Cliks Capture** only. Keep terminal apps disabled. |
 | Launch at login | User LaunchAgent, refreshed automatically after upgrades | Choose it during first setup or run `cliks service enable` |
 
 After granting Input Monitoring, restart Cliks once:
@@ -76,7 +76,7 @@ cliks join CLIK-XXXXXX
 | Need | What Cliks does | What you might do once |
 |------|-----------------|-------------------------|
 | Spatial sound | Installer installs **mpv** | Nothing if install finished cleanly |
-| Background capture | Tries session access + `input` group automatically | Sometimes: log out and back in **once** after group change |
+| Background capture | Minimal root-owned helper works across Xorg and Wayland | Installer asks for sudo once; your user is not placed in `input` |
 | Launch at login | systemd user service with one-session locking | Choose it during first setup or run `cliks service enable` |
 
 ```bash
@@ -160,12 +160,13 @@ cliks sound-test
 
 ## Capture modes (advanced)
 
-Most people only need `cliks join` / `cliks start` (auto mode).
+Most people only need `cliks join` / `cliks start` (isolated mode).
 
 | Mode | When |
 |------|------|
-| Auto (default) | Linux evdev when readable; macOS Event Tap; Windows low-level hooks |
-| `--evdev` | Force Linux `/dev/input` capture |
+| Isolated (default) | Linux helper; macOS Cliks Capture.app; Windows native hooks |
+| `cliks set capture.mode terminal` | Focused terminal only; no global permission |
+| `cliks set capture.mode direct` | Compatibility fallback with broader Linux user/macOS terminal permission |
 | `--terminal --self` | Capture only this terminal; good for demos / locked-down machines |
 
 ---
@@ -179,8 +180,8 @@ Most people only need `cliks join` / `cliks start` (auto mode).
 | “Could not locate bundled sounds” | Update to Cliks 0.4.0 or newer; release binaries contain the WAV pack and macOS/Windows player |
 | No signal notification | Enable Notifications in Preferences, then run `cliks notification-test`; Linux background sessions reconnect to the user D-Bus socket automatically |
 | Teammates cannot hear you | `cliks capture-test` then `cliks setup` |
-| macOS capture silent | Enable Cliks/your terminal under Input Monitoring, restart Cliks, then run `cliks capture-test` |
-| Linux capture silent after install | Log out/in once if you were added to the `input` group |
+| macOS capture silent | Enable Cliks Capture under Input Monitoring. For unsigned builds, approve Open Anyway once. |
+| Linux capture silent after install | Run `systemctl status cliks-capture`, then rerun the installer or `cliks setup` |
 | Terminal looks weird after a crash | `cliks fix-terminal` |
 | Volume keys do nothing | Run `cliks sound-test`; on Linux, rerun `cliks setup` to install a supported player |
 | Autostart broke after updating Cliks | `cliks setup` refreshes the launch path |
