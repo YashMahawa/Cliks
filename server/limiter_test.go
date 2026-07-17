@@ -43,3 +43,12 @@ func TestRateLimiterExpiresEntries(t *testing.T) {
 		t.Fatal("expired limit should allow a new attempt")
 	}
 }
+
+func TestRateLimiterBackgroundPruneRemovesIdleKeys(t *testing.T) {
+	limiter := newRateLimiter(time.Minute, 1)
+	limiter.Allow("old-client")
+	limiter.PruneExpired(time.Now().Add(2 * time.Minute))
+	if len(limiter.hits) != 0 {
+		t.Fatalf("expired entries retained after background prune: %d", len(limiter.hits))
+	}
+}

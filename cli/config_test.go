@@ -150,6 +150,28 @@ func TestInvalidConfigSurfacesWarningInsteadOfSilentDefaults(t *testing.T) {
 	}
 }
 
+func TestInvalidConfigRecoversLastKnownGoodTeamHistory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfg := defaultConfig()
+	cfg.Nickname = "Mira"
+	cfg.CurrentTeamCode = "CLIK-SAFE12"
+	cfg.Teams = []TeamConfig{{Code: "CLIK-SAFE12", Name: "Safe room"}}
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath(), []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recovered := loadConfig()
+	if recovered.Nickname != "Mira" || recovered.CurrentTeamCode != "CLIK-SAFE12" || len(recovered.Teams) != 1 {
+		t.Fatalf("backup recovery lost identity or teams: %+v", recovered)
+	}
+	if !strings.Contains(lastConfigLoadWarning(), "Recovered") {
+		t.Fatalf("recovery warning = %q", lastConfigLoadWarning())
+	}
+}
+
 func TestSaveConfigIsAtomicAndReadable(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

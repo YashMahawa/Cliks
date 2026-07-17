@@ -666,7 +666,7 @@ func (s *sessionController) connectLoop() {
 				state.Notice = ""
 			}
 		})
-		conn, resp, err := websocket.DefaultDialer.Dial(s.cfg.WSURL, nil)
+		conn, resp, err := websocket.DefaultDialer.DialContext(s.ctx, s.cfg.WSURL, nil)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -825,6 +825,7 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 		_ = conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
 		var envelope struct {
 			Type           string                `json:"type"`
+			Code           string                `json:"code,omitempty"`
 			Message        string                `json:"message,omitempty"`
 			Reason         string                `json:"reason,omitempty"`
 			PeerID         string                `json:"peerId,omitempty"`
@@ -916,6 +917,13 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			return true
 		case "error":
 			msg := strings.TrimSpace(envelope.Message)
+			if envelope.Code == "room_full" {
+				s.set(func(state *SessionViewState) {
+					state.ConnectionStatus = "room full"
+					state.Notice = valuePlain(msg, "This room is full. Choose another saved team from the menu.")
+				})
+				return true
+			}
 			if isRateLimitMessage(msg) {
 				s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
 				s.set(func(state *SessionViewState) {

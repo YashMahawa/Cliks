@@ -125,7 +125,7 @@ For a completely offline room—no team, capture permission, or internet—open 
 cliks solo
 ```
 
-Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Every sound stays on your device and is never synchronized with a team.
+Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Coworkers type in short natural bursts with quiet gaps instead of scattered metronomic clicks. Every sound stays on your device and is never synchronized with a team.
 
 To turn self-monitoring back off:
 
@@ -348,7 +348,7 @@ Cliks is an active prototype. The website, longer team codes, Go WebSocket relay
 
 Linux isolated capture works on Wayland and Xorg through a tiny system helper that emits only keyboard/left-click/right-click kinds. macOS uses a dedicated listen-only Cliks Capture.app, so Input Monitoring does not belong to Terminal. Windows uses built-in low-level Win32 hooks and needs no extra input permission; capture may pause while an elevated window is focused. Direct Linux/macOS capture remains an explicitly labeled compatibility fallback (`cliks set capture.mode direct`) and should be disabled again with `cliks set capture.mode isolated`.
 
-Local configuration and session state are written atomically. Invalid saved JSON produces a visible warning instead of silently replacing settings with defaults, and one session lock prevents foreground, background, and login-started copies from connecting at the same time. WebSocket heartbeat writes are synchronized with other socket writes.
+Local configuration and session state are written atomically. Each settings save refreshes a last-known-good backup, so damaged JSON can restore team history and preferences with a visible warning instead of silently replacing them with defaults. One session lock prevents foreground, background, and login-started copies from connecting at the same time. WebSocket heartbeat writes are synchronized with other socket writes, shutdown cancels an in-progress connection attempt, and a full room stops with a clear message instead of retrying forever.
 
 The hosted backend keeps `/health` public for uptime checks, but it returns only anonymous aggregate counts. It does not expose team codes, team names, or per-room snapshots. Team lookups and failed WebSocket joins are limited per IP, inbound WebSocket messages are size/rate guarded, a socket is allowed in only one room at a time, and recovered background/connection panics are logged with stack traces instead of taking down unrelated rooms.
 

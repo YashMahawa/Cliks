@@ -81,13 +81,23 @@ func NewPostgresTeamStore(dsn string) (*PostgresTeamStore, error) {
 		return nil, err
 	}
 	store := &PostgresTeamStore{db: db}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	if err := store.init(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, 8*time.Second)
+		lastErr = store.init(attemptCtx)
+		attemptCancel()
+		if lastErr == nil {
+			return store, nil
+		}
+		select {
+		case <-ctx.Done():
+			_ = db.Close()
+			return nil, fmt.Errorf("postgres was not ready after %d attempts: %w", attempt, lastErr)
+		case <-time.After(time.Second):
+		}
 	}
-	return store, nil
 }
 
 func (s *PostgresTeamStore) init(ctx context.Context) error {

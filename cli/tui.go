@@ -1194,9 +1194,13 @@ func factoryResetDevice() error {
 	if err := os.Remove(configPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(configBackupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	legacy := legacyConfigPath()
 	if legacy != "" && legacy != configPath() {
 		_ = os.Remove(legacy)
+		_ = os.Remove(legacy + ".bak")
 	}
 	return os.RemoveAll(stateDir())
 }
@@ -2971,9 +2975,11 @@ func (m sessionModel) liveActivityView(width int) string {
 }
 
 func (m sessionModel) liveActionLine(action string, label string) string {
-	text := "[ " + label + " ]"
+	// Action labels can contain nested status colors. Strip those before wrapping
+	// the whole button so an inner ANSI reset cannot cancel hover highlighting.
+	text := ansi.Strip("[ " + label + " ]")
 	if m.hoverAction == action {
-		return styleSelected.Render(ansi.Strip(text))
+		return styleSelected.Render(text)
 	}
 	return styleFocused.Render(text)
 }

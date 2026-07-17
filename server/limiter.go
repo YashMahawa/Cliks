@@ -67,10 +67,29 @@ func (r *rateLimiter) Reset(key string) {
 	r.mu.Unlock()
 }
 
+func (r *rateLimiter) PruneExpired(now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneExpiredLocked(now)
+	r.nextCleanup = now.Add(maxDuration(r.window/4, 30*time.Second))
+}
+
 func (r *rateLimiter) pruneExpiredLocked(now time.Time) {
+	// Rebuild instead of deleting in place. Go maps retain their old bucket
+	// allocation after deletes, which lets one burst of unique IPs permanently
+	// raise the relay's resident heap.
+	active := make(map[string]rateLimitHit)
 	for key, value := range r.hits {
-		if !value.ResetAt.After(now) {
-			delete(r.hits, key)
+		if value.ResetAt.After(now) {
+			active[key] = value
 		}
 	}
+	r.hits = active
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }

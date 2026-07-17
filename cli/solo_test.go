@@ -57,6 +57,22 @@ func TestSoloCanKeepBothActivitySoundsOff(t *testing.T) {
 	}
 }
 
+func TestSoloTypingContinuesAsAPersonSpecificBurst(t *testing.T) {
+	cfg := defaultConfig()
+	model := newSoloModel(cfg)
+	defer model.audio.Close()
+	peer := model.state.Peers[0]
+	model.typingBursts[peer.PeerID] = 3
+	model.now = time.Now()
+	model.simulatePulse()
+	if model.typingBursts[peer.PeerID] != 2 {
+		t.Fatalf("typing burst remaining = %d, want 2", model.typingBursts[peer.PeerID])
+	}
+	if len(model.state.RecentPeerActivity) == 0 || model.state.RecentPeerActivity[0].PeerID != peer.PeerID {
+		t.Fatalf("burst did not stay attached to %s: %+v", peer.PeerID, model.state.RecentPeerActivity)
+	}
+}
+
 func TestSoloShowsAndPersistsIndependentSoundLevels(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

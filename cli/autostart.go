@@ -61,16 +61,10 @@ func currentExecutable() string {
 	return exe
 }
 
-// stableServiceExecutable prefers a PATH-based `cliks` when available so updates
-// that replace the binary under a user install dir still launch after upgrade.
-// Falls back to the absolute path of the running executable.
+// stableServiceExecutable registers the executable that handled the user's
+// enable command. Release installers update that stable path in place, while a
+// local build must not accidentally register an older global binary from PATH.
 func stableServiceExecutable() string {
-	if path, err := exec.LookPath("cliks"); err == nil && path != "" {
-		if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != "" {
-			return resolved
-		}
-		return path
-	}
 	return currentExecutable()
 }
 

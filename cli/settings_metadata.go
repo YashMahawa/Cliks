@@ -30,6 +30,8 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "solo.people", Label: "Solo coworkers", Description: "number of locally simulated coworkers from 1 to 12"},
 	{Key: "solo.keyboard", Label: "Solo keyboard", Description: "simulate keyboard ambience in Solo Desk (on/off)"},
 	{Key: "solo.mouse", Label: "Solo mouse", Description: "simulate click ambience in Solo Desk (on/off)"},
+	{Key: "solo.keyboardVolume", Label: "Solo keyboard level", Description: "offline simulated keyboard level from 0.05 to 1"},
+	{Key: "solo.mouseVolume", Label: "Solo click level", Description: "offline simulated mouse-click level from 0.05 to 1"},
 	{Key: "notifications", Label: "Notifications", Description: "show native alerts for quick signals (on/off)"},
 	{Key: "notifications.sound", Label: "Notification sound", Description: "play sound with native wave notifications (on/off)"},
 	{Key: "presence", Label: "Presence", Description: "available, focus, break, or dnd"},

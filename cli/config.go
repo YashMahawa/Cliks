@@ -189,6 +189,8 @@ func configPath() string {
 	return filepath.Join(home, ".config", "cliks", "config.json")
 }
 
+func configBackupPath() string { return configPath() + ".bak" }
+
 // legacyConfigPath is the pre-migration location (Unix-style path used on Windows too).
 func legacyConfigPath() string {
 	home, err := os.UserHomeDir()
@@ -222,8 +224,14 @@ func loadConfig() CliksConfig {
 		return applyEnvURLOverrides(cfg)
 	}
 	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
-		setConfigLoadWarning(fmt.Sprintf("Config file has invalid JSON (%s). Using safe defaults until you save settings again.", path))
-		cfg = defaultConfig()
+		backup, backupErr := os.ReadFile(configBackupPath())
+		if backupErr == nil && json.Unmarshal(backup, &cfg) == nil {
+			setConfigLoadWarning(fmt.Sprintf("Recovered settings and team history from the last-known-good backup (%s).", configBackupPath()))
+			_ = atomicWriteFile(path, backup, 0o644)
+		} else {
+			setConfigLoadWarning(fmt.Sprintf("Config file has invalid JSON (%s), and no valid backup was available. Using safe defaults until you save settings again.", path))
+			cfg = defaultConfig()
+		}
 		// Surface once on stderr so everyday commands are not silent about bad config.
 		printConfigLoadWarningOnce()
 	} else {
@@ -262,6 +270,9 @@ func saveConfig(cfg CliksConfig) error {
 	data = append(data, '\n')
 	if err := atomicWriteFile(path, data, 0o644); err != nil {
 		return err
+	}
+	if err := atomicWriteFile(configBackupPath(), data, 0o600); err != nil {
+		return fmt.Errorf("save config backup: %w", err)
 	}
 	setConfigLoadWarning("")
 	return nil

@@ -15,14 +15,15 @@ import (
 type soloTickMsg time.Time
 
 type soloModel struct {
-	cfg         CliksConfig
-	audio       *AudioEngine
-	state       SessionViewState
-	now         time.Time
-	width       int
-	height      int
-	hoverAction string
-	message     string
+	cfg          CliksConfig
+	audio        *AudioEngine
+	state        SessionViewState
+	now          time.Time
+	width        int
+	height       int
+	hoverAction  string
+	message      string
+	typingBursts map[string]int
 }
 
 var soloNames = []string{"Mira", "Noor", "Sam", "Juniper", "Otter", "Pixel", "Toast", "Mochi", "Orbit", "Noodle", "Pebble", "Basil"}
@@ -51,7 +52,7 @@ func newSoloModel(cfg CliksConfig) soloModel {
 		CaptureMode:      "simulation",
 		Listening:        cfg.Listening,
 	}
-	m := soloModel{cfg: cfg, audio: newAudioEngine(cfg.Listening), state: state, now: now, message: "A local room. No account, server, capture, or internet."}
+	m := soloModel{cfg: cfg, audio: newAudioEngine(cfg.Listening), state: state, now: now, message: "A local room. No account, server, capture, or internet.", typingBursts: map[string]int{}}
 	m.setPeople(cfg.Solo.People)
 	return m
 }
@@ -59,7 +60,7 @@ func newSoloModel(cfg CliksConfig) soloModel {
 func (m soloModel) Init() tea.Cmd { return soloTick() }
 
 func soloTick() tea.Cmd {
-	return tea.Tick(220*time.Millisecond, func(t time.Time) tea.Msg { return soloTickMsg(t) })
+	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg { return soloTickMsg(t) })
 }
 
 func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,25 +116,46 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *soloModel) simulatePulse() {
-	if len(m.state.Peers) == 0 || rand.Float64() > .32 {
+	if len(m.state.Peers) == 0 {
 		return
 	}
-	peer := m.state.Peers[rand.Intn(len(m.state.Peers))]
-	kind := ""
-	switch {
-	case m.cfg.Solo.Keyboard && m.cfg.Solo.Mouse:
-		if rand.Float64() < .82 {
-			kind = "keyboard"
-		} else {
-			kind = "mouse"
+	if m.typingBursts == nil {
+		m.typingBursts = map[string]int{}
+	}
+	emitted := false
+	if m.cfg.Solo.Keyboard {
+		for _, peer := range m.state.Peers {
+			remaining := m.typingBursts[peer.PeerID]
+			if remaining <= 0 {
+				continue
+			}
+			m.emitSoloEvent(peer, "keyboard")
+			emitted = true
+			remaining--
+			if remaining == 0 {
+				delete(m.typingBursts, peer.PeerID)
+			} else {
+				m.typingBursts[peer.PeerID] = remaining
+			}
 		}
-	case m.cfg.Solo.Keyboard:
-		kind = "keyboard"
-	case m.cfg.Solo.Mouse:
-		kind = "mouse"
-	default:
+	} else {
+		clear(m.typingBursts)
+	}
+	// Let an existing sentence finish before usually starting another one. This
+	// creates recognizable coworkers and quiet gaps instead of a click metronome.
+	if !emitted && m.cfg.Solo.Keyboard && rand.Float64() < .11 {
+		peer := m.state.Peers[rand.Intn(len(m.state.Peers))]
+		m.typingBursts[peer.PeerID] = 2 + rand.Intn(9)
+		m.emitSoloEvent(peer, "keyboard")
 		return
 	}
+	if m.cfg.Solo.Mouse && rand.Float64() < .035 {
+		peer := m.state.Peers[rand.Intn(len(m.state.Peers))]
+		m.emitSoloEvent(peer, "mouse")
+	}
+}
+
+func (m *soloModel) emitSoloEvent(peer PeerPresence, kind string) {
 	event := RemoteActivityEvent{Kind: kind}
 	if kind == "mouse" {
 		event.Button = "left"
@@ -166,6 +188,16 @@ func (m *soloModel) setPeople(count int) {
 		peers[index] = PeerPresence{PeerID: fmt.Sprintf("solo-%02d", index), Nickname: soloNames[index%len(soloNames)], JoinedAt: m.now.Add(-time.Duration(index+1) * time.Second).UnixMilli(), Status: []string{"available", "focus", "available", "break"}[index%4]}
 	}
 	m.state.Peers = peers
+	for peerID := range m.typingBursts {
+		if !strings.HasPrefix(peerID, "solo-") {
+			delete(m.typingBursts, peerID)
+			continue
+		}
+		var index int
+		if _, err := fmt.Sscanf(peerID, "solo-%02d", &index); err != nil || index >= count {
+			delete(m.typingBursts, peerID)
+		}
+	}
 	m.state.ActiveCount = count + 1
 	m.audio.updatePeers(peers, m.state.OwnPeerID)
 	m.persist()

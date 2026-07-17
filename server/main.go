@@ -40,15 +40,21 @@ func main() {
 	}
 
 	joinTeamLimiter := newRateLimiter(5*time.Minute, 20)
+	createTeamLimiter := newRateLimiter(5*time.Minute, 20)
+	deleteTeamLimiter := newRateLimiter(5*time.Minute, 30)
+	lookupTeamLimiter := newRateLimiter(5*time.Minute, 40)
 	srv := &apiServer{
 		store:             store,
 		hub:               NewRoomHub(store, joinTeamLimiter),
 		corsOrigins:       parseCORSOrigins(os.Getenv("CORS_ORIGIN")),
 		allowAnyOrigin:    os.Getenv("CORS_ORIGIN") == "",
-		createTeamLimiter: newRateLimiter(5*time.Minute, 20),
-		deleteTeamLimiter: newRateLimiter(5*time.Minute, 30),
-		lookupTeamLimiter: newRateLimiter(5*time.Minute, 40),
+		createTeamLimiter: createTeamLimiter,
+		deleteTeamLimiter: deleteTeamLimiter,
+		lookupTeamLimiter: lookupTeamLimiter,
 	}
+	go runSafely("rate limiter cleanup", func() {
+		rateLimiterCleanupLoop([]*rateLimiter{joinTeamLimiter, createTeamLimiter, deleteTeamLimiter, lookupTeamLimiter})
+	})
 	go runSafely("heartbeat loop", func() { srv.hub.heartbeatLoop(heartbeatInterval) })
 	go runSafely("team expiry loop", srv.teamExpiryLoop)
 
@@ -74,6 +80,16 @@ func main() {
 	log.Printf("cliks server listening on :%s", port)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+}
+
+func rateLimiterCleanupLoop(limiters []*rateLimiter) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		for _, limiter := range limiters {
+			limiter.PruneExpired(now)
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.2"
+const version = "0.6.3"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -429,8 +429,38 @@ func cmdSet(args []string) error {
 		printSettingCatalog()
 		return nil
 	}
+	if len(args) >= 4 && len(args)%2 == 0 {
+		batch := true
+		for index := 0; index < len(args); index += 2 {
+			if !isConfigSettingKey(args[index]) {
+				batch = false
+				break
+			}
+		}
+		if batch {
+			for index := 0; index < len(args); index += 2 {
+				if err := cmdSetOne(args[index : index+2]); err != nil {
+					return fmt.Errorf("%s: %w", args[index], err)
+				}
+			}
+			return nil
+		}
+	}
+	return cmdSetOne(args)
+}
+
+func isConfigSettingKey(key string) bool {
+	for _, item := range configSettingCatalog {
+		if item.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func cmdSetOne(args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: cliks set <key> <value>\n       cliks set --list")
+		return errors.New("usage: cliks set <key> <value> [<key> <value> ...]\n       cliks set --list")
 	}
 	cfg := loadConfig()
 	key, value := args[0], args[1]
@@ -485,6 +515,18 @@ func cmdSet(args []string) error {
 		cfg.Solo.Keyboard = boolValue
 	case "solo.mouse":
 		cfg.Solo.Mouse = boolValue
+	case "solo.keyboardVolume":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		cfg.Solo.KeyboardVolume = clamp(parsed, 0.05, 1)
+	case "solo.mouseVolume":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		cfg.Solo.MouseVolume = clamp(parsed, 0.05, 1)
 	case "notifications":
 		cfg.Notifications.Enabled = boolValue
 		cfg.Notifications.Configured = true

@@ -7,6 +7,7 @@ func TestSettingCatalogCoversUserFacingKeys(t *testing.T) {
 		"autostart", "keep.running", "nickname", "name", "volume", "density",
 		"hear.muted", "hear.spatial", "hear.fade", "hear.keyboard", "hear.mouse", "hear.self",
 		"share.keyboard", "share.mouse", "spatial.dynamic", "spatial.shuffleMinutes",
+		"solo.keyboardVolume", "solo.mouseVolume",
 		"batch.ms", "audio.device", "api.url", "ws.url",
 	}
 	seen := map[string]bool{}
