@@ -7,7 +7,7 @@ REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.1}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.2}"
 CAPTURE_APP_DIR="${CLIKS_CAPTURE_APP_DIR:-$HOME/Applications/Cliks Capture.app}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
@@ -90,6 +90,7 @@ install_prebuilt() {
     fi
     if [ "$os" = "linux" ] && [ -x "$tmp/cliks-capture-helper" ] && [ -f "$tmp/cliks-capture.service" ] && command -v systemctl >/dev/null 2>&1; then
       if command -v sudo >/dev/null 2>&1; then
+        sudo mkdir -p /usr/local/libexec
         sudo install -m 755 "$tmp/cliks-capture-helper" /usr/local/libexec/cliks-capture-helper
         sudo install -m 644 "$tmp/cliks-capture.service" /etc/systemd/system/cliks-capture.service
         sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
@@ -267,6 +268,7 @@ EOF
   fi
   if [ "$(uname -s)" = "Linux" ] && ! is_termux && command -v systemctl >/dev/null 2>&1; then
     go build -o dist/cliks-capture-helper ./linux-capture-helper
+    sudo mkdir -p /usr/local/libexec
     sudo install -m 755 dist/cliks-capture-helper /usr/local/libexec/cliks-capture-helper
     sudo install -m 644 linux-capture-helper/cliks-capture.service /etc/systemd/system/cliks-capture.service
     sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
