@@ -426,6 +426,30 @@ func TestNormalLaunchUsesResponsiveDeskAndOneSoundPhase(t *testing.T) {
 	}
 }
 
+func TestOnboardingReflowsAcrossTerminalCellSizes(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 7, message: "Room tone stays private."}
+	for _, size := range []struct{ width, height int }{{180, 50}, {92, 30}, {68, 20}} {
+		model.width, model.height = size.width, size.height
+		view := model.View()
+		if got := lipgloss.Width(view); got > size.width {
+			t.Fatalf("%dx%d setup uses %d columns", size.width, size.height, got)
+		}
+		if !strings.Contains(view, "Add a private room tone?") || !strings.Contains(view, "No room tone") {
+			t.Fatalf("%dx%d setup lost its decision:\n%s", size.width, size.height, ansi.Strip(view))
+		}
+	}
+}
+
+func TestSpacedOnboardingCardsKeepMouseRowsAligned(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 7, width: 180, height: 50}
+	x, y := renderedTextPosition(t, model.View(), "Rain window")
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x, Y: y})
+	got := updated.(homeModel)
+	if got.cursor != 1 || !got.mouseOver {
+		t.Fatalf("hovering Rain window selected cursor=%d hover=%v, want 1/true", got.cursor, got.mouseOver)
+	}
+}
+
 func TestReactionAnimationNamesSenderInsideDesk(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

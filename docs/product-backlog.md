@@ -59,6 +59,15 @@ meeting-software clutter.
   mouse focus moves during onboarding; persist only the confirmed choice.
 - [ ] Verify the complete CLI/server/site test suite, then publish a native
   release so curl/PowerShell installers select the corrected artifacts.
+- [x] Reflow onboarding as terminal cell dimensions change: spacious cards on
+  large screens and progressively reduced art/copy at large terminal fonts.
+- [x] Replace Solo's +/- volume clutter with hoverable/clickable slider tracks
+  and responsive two-pane, stacked, and controls-first layouts.
+- [x] Restore `CLIK-E842WU`, which the older relay failed to touch on live join
+  before the 48-hour cleanup ran; the current relay refreshes successful joins.
+- [x] Split Unix and Windows release packaging into clearly named jobs and
+  upgrade workflow actions so expected platform branches do not resemble
+  failed/skipped builds in GitHub's job UI.
 
 ## Platform and security follow-up
 

@@ -22,6 +22,7 @@ type soloModel struct {
 	width        int
 	height       int
 	hoverAction  string
+	sliderCursor int
 	message      string
 	typingBursts map[string]int
 }
@@ -75,23 +76,35 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.MouseMotion:
 			m.hoverAction = m.hit(msg.X, msg.Y)
+			m.rememberHoveredSlider()
 		case tea.MouseLeft:
+			if region, ok := m.hitRegion(msg.X, msg.Y); ok && isSoloSlider(region.action) {
+				m.setSliderFromPointer(region, msg.X)
+				return m, nil
+			}
 			if action := m.hit(msg.X, msg.Y); action != "" {
 				return m.activate(action)
 			}
 		case tea.MouseWheelUp:
-			m.adjustVolume(-.05)
+			m.adjustActiveSlider(-.05)
 		case tea.MouseWheelDown:
-			m.adjustVolume(.05)
+			m.adjustActiveSlider(.05)
 		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "esc", "b", "ctrl+c":
 			return m, tea.Quit
-		case "+", "=", "right":
+		case "+", "=":
 			m.setPeople(m.cfg.Solo.People + 1)
-		case "-", "left":
+		case "-":
 			m.setPeople(m.cfg.Solo.People - 1)
+		case "tab":
+			m.sliderCursor = (m.sliderCursor + 1) % len(soloSliderActions)
+			m.hoverAction = ""
+		case "right", "up":
+			m.adjustActiveSlider(.05)
+		case "left", "down":
+			m.adjustActiveSlider(-.05)
 		case "k":
 			m.cfg.Solo.Keyboard = !m.cfg.Solo.Keyboard
 			m.persist()
@@ -104,10 +117,6 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "m":
 			m.cfg.Listening.Muted = !m.cfg.Listening.Muted
 			m.applyListening()
-		case "up":
-			m.adjustVolume(.05)
-		case "down":
-			m.adjustVolume(-.05)
 		case " ", "enter":
 			m.spark()
 		}
@@ -226,6 +235,65 @@ func (m *soloModel) adjustSoloVolume(kind string, delta float64) {
 	m.persist()
 }
 
+var soloSliderActions = []string{"master-slider", "keyboard-slider", "mouse-slider", "ambient-slider"}
+
+func isSoloSlider(action string) bool {
+	for _, candidate := range soloSliderActions {
+		if action == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *soloModel) rememberHoveredSlider() {
+	for index, action := range soloSliderActions {
+		if m.hoverAction == action {
+			m.sliderCursor = index
+			return
+		}
+	}
+}
+
+func (m soloModel) activeSlider() string {
+	if isSoloSlider(m.hoverAction) {
+		return m.hoverAction
+	}
+	return soloSliderActions[clampInt(m.sliderCursor, 0, len(soloSliderActions)-1)]
+}
+
+func (m *soloModel) adjustActiveSlider(delta float64) {
+	switch m.activeSlider() {
+	case "keyboard-slider":
+		m.adjustSoloVolume("keyboard", delta)
+	case "mouse-slider":
+		m.adjustSoloVolume("mouse", delta)
+	case "ambient-slider":
+		m.adjustSoloVolume("ambient", delta)
+	default:
+		m.adjustVolume(delta)
+	}
+}
+
+func (m *soloModel) setSliderFromPointer(region liveHitRegion, x int) {
+	trackWidth := maxInt(1, region.width-2)
+	value := clamp(float64(x-region.x-1)/float64(trackWidth-1), 0, 1)
+	switch region.action {
+	case "keyboard-slider":
+		m.cfg.Solo.KeyboardVolume = value
+		m.persist()
+	case "mouse-slider":
+		m.cfg.Solo.MouseVolume = value
+		m.persist()
+	case "ambient-slider":
+		m.cfg.Listening.AmbientVolume = clamp(value, .05, 1)
+		m.applyListening()
+	default:
+		m.cfg.Listening.Volume = value
+		m.applyListening()
+	}
+}
+
 func (m *soloModel) applyListening() {
 	m.state.Listening = m.cfg.Listening
 	m.audio.updateListening(m.cfg.Listening)
@@ -281,49 +349,77 @@ func (m soloModel) View() string {
 	bodyHeight := maxInt(12, m.height-7)
 	header := m.header(width)
 	deskModel := sessionModel{state: m.state, now: m.now}
-	footer := styleDim.Render(" Click a control   ·   ↑/↓ master volume   ·   +/- people   ·   Space adds a burst   ·   Esc back")
-	if width < 74 {
-		deskHeight := maxInt(9, bodyHeight-20)
-		controlHeight := maxInt(13, bodyHeight-deskHeight)
+	footerText := " Hover slider + arrows/scroll adjust    Tab next slider    +/- people    Space wakes room    Esc back"
+	if width < 110 {
+		footerText = " Sliders: hover + arrows/scroll    Tab next    +/- people    Esc back"
+	}
+	footer := styleDim.Render(ansi.Truncate(footerText, width, ""))
+	if width < 96 {
+		if m.height < 46 {
+			controls := stylePanel.Width(width).Height(bodyHeight).Render(m.controlView(width-6, true))
+			return lipgloss.JoinVertical(lipgloss.Left, header, controls, footer)
+		}
+		controlHeight := minInt(24, bodyHeight-10)
+		deskHeight := maxInt(10, bodyHeight-controlHeight-1)
 		desk := stylePanel.Width(width).Height(deskHeight).Render(deskModel.renderSpatialDesk(width-6, deskHeight-3))
-		controls := stylePanel.Width(width).Height(controlHeight).Render(m.controlView())
+		controls := stylePanel.Width(width).Height(controlHeight).Render(m.controlView(width-6, false))
 		return lipgloss.JoinVertical(lipgloss.Left, header, desk, controls, footer)
 	}
-	mapWidth := maxInt(48, width-58)
+	mapWidth := maxInt(50, width-52)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(deskModel.renderSpatialDesk(mapWidth-6, bodyHeight-3))
-	controls := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView())
+	controls := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView(infoWidth-6, false))
 	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", controls), footer)
 }
 
 func (m soloModel) header(width int) string {
-	return styleTitle.Width(maxInt(20, width-2)).Render(fmt.Sprintf(" Cliks  /  Solo Desk   ·   %d simulated coworkers   ·   OFFLINE ", m.cfg.Solo.People))
+	return styleTitle.Width(width).MaxWidth(width).Render(fmt.Sprintf("Cliks  /  Solo Desk    %d coworkers    OFFLINE + PRIVATE", m.cfg.Solo.People))
 }
 
-func (m soloModel) controlView() string {
+func (m soloModel) controlView(width int, compact bool) string {
+	width = maxInt(32, width)
 	lines := []string{
-		styleAccent.Render("YOUR PRIVATE SOUNDSCAPE"),
-		m.button("less", "− person") + "   " + m.button("more", "+ person"),
-		m.button("master-quieter", "−") + "  Master  " + percent(m.cfg.Listening.Volume) + "  " + m.button("master-louder", "+"),
+		styleAccent.Render("SOLO DESK"),
+		styleDim.Render("A private room mixed only for you."),
+		"",
+		"Coworkers    " + m.button("less", "−") + "  " + styleSecond.Render(fmt.Sprintf("%2d", m.cfg.Solo.People)) + "  " + m.button("more", "+"),
+		"",
+		styleSecond.Render("SOUND MIX"),
+		m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
 		m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
-		m.button("keyboard-quieter", "−") + "  Keyboard level  " + percent(m.cfg.Solo.KeyboardVolume) + "  " + m.button("keyboard-louder", "+"),
-		m.button("mouse", "Mouse clicks  "+onOff(m.cfg.Solo.Mouse)),
-		m.button("mouse-quieter", "−") + "  Click level     " + percent(m.cfg.Solo.MouseVolume) + "  " + m.button("mouse-louder", "+"),
-		m.button("ambient", "Room tone  "+ambientLabel(m.cfg.Listening.Ambient)),
-		m.button("ambient-quieter", "−") + "  Room tone level " + percent(m.cfg.Listening.AmbientVolume) + "  " + m.button("ambient-louder", "+"),
-		m.button("mute", "Mute  "+onOff(m.cfg.Listening.Muted)),
+		m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
+		m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
+		m.sliderLine("mouse-slider", "Clicks", m.cfg.Solo.MouseVolume, width),
 		"",
-		m.button("spark", "Wake the room"),
+		styleThird.Render("ROOM TONE"),
+		m.button("ambient", ambientLabel(m.cfg.Listening.Ambient)),
+		m.sliderLine("ambient-slider", "Room level", m.cfg.Listening.AmbientVolume, width),
 		"",
-		styleDim.Render("Personal and played locally."),
-		styleDim.Render("No network. Nothing is sent."),
-		"",
-		m.button("back", "Back"),
+		m.button("mute", "Mute  "+onOff(m.cfg.Listening.Muted)) + "    " + m.button("spark", "Wake the room"),
+	}
+	if compact {
+		lines = append([]string{styleDim.Render("○   ○   [ YOU ]   ○   ○"), ""}, lines...)
 	}
 	if m.message != "" {
-		lines = append(lines, "", styleDim.Render(m.message))
+		lines = append(lines, "", styleDim.Render(ansi.Truncate(m.message, width, "…")))
 	}
+	lines = append(lines, "", styleDim.Render("Local only · no capture · no network"), m.button("back", "Back"))
 	return strings.Join(lines, "\n")
+}
+
+func (m soloModel) sliderLine(action string, label string, value float64, width int) string {
+	trackWidth := clampInt(width-20, 10, 24)
+	filled := clampInt(int(value*float64(trackWidth)+.5), 0, trackWidth)
+	track := "[" + styleAccent.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", trackWidth-filled)) + "]"
+	prefix := "  "
+	if action == m.activeSlider() {
+		prefix = styleSecond.Render("› ")
+	}
+	line := prefix + fmt.Sprintf("%-11s", label) + track + fmt.Sprintf(" %3.0f%%", value*100)
+	if m.hoverAction == action {
+		return styleSelected.Render(ansi.Strip(line))
+	}
+	return line
 }
 
 func (m soloModel) button(action, label string) string {
@@ -335,42 +431,28 @@ func (m soloModel) button(action, label string) string {
 }
 
 func (m soloModel) hit(x, y int) string {
-	for _, region := range m.hitRegions() {
-		if y == region.y && x >= region.x && x < region.x+region.width {
-			return region.action
-		}
+	if region, ok := m.hitRegion(x, y); ok {
+		return region.action
 	}
 	return ""
 }
 
-func (m soloModel) hitRegions() []liveHitRegion {
-	width := maxInt(44, panelWidth(m.width))
-	bodyHeight := maxInt(12, m.height-7)
-	baseX := 0
-	baseY := lipgloss.Height(m.header(width))
-	var rail string
-	if width < 74 {
-		deskHeight := maxInt(9, bodyHeight-20)
-		controlHeight := maxInt(13, bodyHeight-deskHeight)
-		desk := stylePanel.Width(width).Height(deskHeight).Render("")
-		rail = stylePanel.Width(width).Height(controlHeight).Render(m.controlView())
-		baseY += lipgloss.Height(desk)
-	} else {
-		mapWidth := int(float64(width) * .68)
-		infoWidth := width - mapWidth - 2
-		desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render("")
-		rail = stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView())
-		baseX = lipgloss.Width(desk) + 2
+func (m soloModel) hitRegion(x, y int) (liveHitRegion, bool) {
+	for _, region := range m.hitRegions() {
+		if y == region.y && x >= region.x && x < region.x+region.width {
+			return region, true
+		}
 	}
+	return liveHitRegion{}, false
+}
+
+func (m soloModel) hitRegions() []liveHitRegion {
+	rendered := m.View()
 	labels := []struct{ action, label string }{
-		{"less", "− person"}, {"more", "+ person"},
-		{"master-quieter", "−"}, {"master-louder", "+"},
+		{"less", "−"}, {"more", "+"},
 		{"keyboard", "Keyboard  " + onOff(m.cfg.Solo.Keyboard)},
-		{"keyboard-quieter", "−"}, {"keyboard-louder", "+"},
-		{"mouse", "Mouse clicks  " + onOff(m.cfg.Solo.Mouse)},
-		{"mouse-quieter", "−"}, {"mouse-louder", "+"},
-		{"ambient", "Room tone  " + ambientLabel(m.cfg.Listening.Ambient)},
-		{"ambient-quieter", "−"}, {"ambient-louder", "+"},
+		{"mouse", "Clicks    " + onOff(m.cfg.Solo.Mouse)},
+		{"ambient", ambientLabel(m.cfg.Listening.Ambient)},
 		{"mute", "Mute  " + onOff(m.cfg.Listening.Muted)},
 		{"spark", "Wake the room"}, {"back", "Back"},
 	}
@@ -381,7 +463,7 @@ func (m soloModel) hitRegions() []liveHitRegion {
 		occurrence := used[needle]
 		used[needle]++
 		found := 0
-		for localY, styledLine := range strings.Split(rail, "\n") {
+		for localY, styledLine := range strings.Split(rendered, "\n") {
 			line := ansi.Strip(styledLine)
 			start := 0
 			for {
@@ -391,7 +473,7 @@ func (m soloModel) hitRegions() []liveHitRegion {
 				}
 				index += start
 				if found == occurrence {
-					regions = append(regions, liveHitRegion{action: item.action, x: baseX + ansi.StringWidth(line[:index]), y: baseY + localY, width: ansi.StringWidth(needle)})
+					regions = append(regions, liveHitRegion{action: item.action, x: ansi.StringWidth(line[:index]), y: localY, width: ansi.StringWidth(needle)})
 					goto nextTarget
 				}
 				found++
@@ -399,6 +481,27 @@ func (m soloModel) hitRegions() []liveHitRegion {
 			}
 		}
 	nextTarget:
+	}
+	for index, label := range []string{"Master", "Keyboard", "Clicks", "Room level"} {
+		action := soloSliderActions[index]
+		for y, styledLine := range strings.Split(rendered, "\n") {
+			line := ansi.Strip(styledLine)
+			labelAt := strings.Index(line, label)
+			if labelAt < 0 {
+				continue
+			}
+			trackAt := strings.Index(line[labelAt+len(label):], "[")
+			if trackAt < 0 {
+				continue
+			}
+			trackAt += labelAt + len(label)
+			trackEnd := strings.Index(line[trackAt:], "]")
+			if trackEnd < 0 {
+				continue
+			}
+			regions = append(regions, liveHitRegion{action: action, x: ansi.StringWidth(line[:trackAt]), y: y, width: ansi.StringWidth(line[trackAt : trackAt+trackEnd+1])})
+			break
+		}
 	}
 	return regions
 }

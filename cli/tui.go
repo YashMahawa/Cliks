@@ -1100,6 +1100,25 @@ func (m homeModel) itemView() string {
 	items := m.items()
 	lines := m.itemPrefixLines()
 	for i, item := range items {
+		if m.setupComfortable() {
+			label := item.label
+			if i == m.cursor {
+				if m.mouseOver {
+					label = styleSelected.Render("  " + label + "  ")
+				} else {
+					label = styleFocused.Render("› " + label)
+				}
+			}
+			contentWidth := maxInt(30, panelWidth(m.width)-8)
+			lines = append(lines,
+				centerTerminalText(label, contentWidth),
+				centerTerminalText(styleDim.Render(item.help), contentWidth),
+			)
+			if i < len(items)-1 {
+				lines = append(lines, "")
+			}
+			continue
+		}
 		line := fmt.Sprintf("%-12s %s", item.label, item.help)
 		if i == m.cursor {
 			if m.mouseOver {
@@ -1115,12 +1134,20 @@ func (m homeModel) itemView() string {
 	}
 	lines = append(lines, "")
 	if m.mode == "first-setup" {
-		lines = append(lines, centerTerminalText(styleDim.Render("↑/↓ choose  •  Enter confirms  •  ← previous  •  Esc exits safely"), maxInt(30, panelWidth(m.width)-8)))
+		contentWidth := maxInt(30, panelWidth(m.width)-8)
+		lines = append(lines, centerTerminalText(styleDim.Render("↑/↓ choose    Enter confirms    ← previous    Esc exits safely"), contentWidth))
+		if m.message != "" {
+			lines = append(lines, "", centerTerminalText(styleDim.Render(m.message), contentWidth))
+		}
 	} else {
 		lines = append(lines, styleDim.Render("? shortcuts"))
+		lines = append(lines, styleDim.Render(m.message))
 	}
-	lines = append(lines, styleDim.Render(m.message))
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
+}
+
+func (m homeModel) setupComfortable() bool {
+	return m.mode == "first-setup" && m.width >= 76 && m.height >= 34
 }
 
 func (m homeModel) itemPrefixLines() []string {
@@ -1198,22 +1225,34 @@ func (m homeModel) firstSetupPrefixLines() []string {
 		"             ·       ○       ·",
 	}
 	lines := make([]string, 0, 20)
-	for index := 0; index < clampInt((m.height-22)/4, 0, 5); index++ {
+	leadSpace := clampInt((m.height-30)/6, 0, 3)
+	if m.setupComfortable() {
+		leadSpace = clampInt((m.height-44)/4, 0, 2)
+	}
+	for index := 0; index < leadSpace; index++ {
 		lines = append(lines, "")
 	}
 	lines = append(lines,
 		centerTerminalText(styleDim.Render(fmt.Sprintf("SETUP  %d/%d   %s", step+1, onboardingStepCount, progress)), width),
-		"",
 	)
-	for _, line := range art {
-		lines = append(lines, centerTerminalText(styleAccent.Render(line), width))
+	compact := m.height > 0 && m.height < 25
+	if !compact {
+		lines = append(lines, "")
+		for _, line := range art {
+			lines = append(lines, centerTerminalText(styleAccent.Render(line), width))
+		}
 	}
 	lines = append(lines, "", centerTerminalText(styleAccent.Render(titles[step]), width))
-	for _, line := range strings.Split(ansi.Wordwrap(details[step], maxInt(28, width-12), ""), "\n") {
-		lines = append(lines, centerTerminalText(line, width))
+	if m.height == 0 || m.height >= 20 {
+		for _, line := range strings.Split(ansi.Wordwrap(details[step], maxInt(28, width-12), ""), "\n") {
+			lines = append(lines, centerTerminalText(line, width))
+		}
 	}
-	quip := quips[(step+m.onboardingQuip)%len(quips)]
-	lines = append(lines, centerTerminalText(styleDim.Render(quip), width), "")
+	if !compact {
+		quip := quips[(step+m.onboardingQuip)%len(quips)]
+		lines = append(lines, centerTerminalText(styleDim.Render(quip), width))
+	}
+	lines = append(lines, "")
 	return lines
 }
 
@@ -1693,6 +1732,9 @@ func (m *homeModel) hover(y int) bool {
 		return false
 	}
 	index := y - m.itemStartY()
+	if m.setupComfortable() {
+		index /= 3
+	}
 	if index >= 0 && index < len(m.items()) {
 		m.cursor = index
 		m.previewOnboardingTheme()

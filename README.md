@@ -125,7 +125,7 @@ For a completely offline room—no team, capture permission, or internet—open 
 cliks solo
 ```
 
-Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Coworkers type in short natural bursts with quiet gaps instead of scattered metronomic clicks. Every sound stays on your device and is never synchronized with a team.
+Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Master, keyboard, click, and room-tone levels use direct slider tracks: hover one and use arrows or natural scrolling, click a track to jump, or press Tab to cycle sliders. The room reflows from two panes to stacked or controls-first layouts as terminal rows and columns change. Coworkers type in short natural bursts with quiet gaps instead of scattered metronomic clicks. Every sound stays on your device and is never synchronized with a team.
 
 To turn self-monitoring back off:
 

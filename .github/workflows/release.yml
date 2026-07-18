@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  native:
+  native-unix:
     name: ${{ matrix.asset }}
     strategy:
       fail-fast: false
@@ -20,12 +20,10 @@ jobs:
             asset: cliks-macos-amd64
           - os: macos-15
             asset: cliks-macos-arm64
-          - os: windows-latest
-            asset: cliks-windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
           cache-dependency-path: cli/go.sum
@@ -41,8 +39,7 @@ jobs:
       - name: Test
         working-directory: cli
         run: go test ./...
-      - name: Build Unix archive
-        if: runner.os != 'Windows'
+      - name: Build native archive
         working-directory: cli
         shell: bash
         run: |
@@ -56,27 +53,48 @@ jobs:
             cp linux-capture-helper/cliks-capture.service .
             tar -czf "../${{ matrix.asset }}.tar.gz" cliks cliks-capture-helper cliks-capture.service
           fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  native-windows:
+    name: cliks-windows-amd64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24"
+          cache-dependency-path: cli/go.sum
+      - name: Verify tag matches CLI version
+        shell: bash
+        run: |
+          cli_version="$(cd cli && go run . version)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          test "$cli_version" = "$tag_version"
+      - name: Test Windows CLI
+        working-directory: cli
+        run: go test ./...
       - name: Build Windows archive
-        if: runner.os == 'Windows'
         working-directory: cli
         shell: pwsh
         run: |
           go build -trimpath -ldflags="-s -w" -o cliks.exe .
-          Compress-Archive -Path cliks.exe -DestinationPath "../${{ matrix.asset }}.zip"
-      - uses: actions/upload-artifact@v4
+          Compress-Archive -Path cliks.exe -DestinationPath "../cliks-windows-amd64.zip"
+      - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: |
-            ${{ matrix.asset }}.tar.gz
-            ${{ matrix.asset }}.zip
+          name: cliks-windows-amd64
+          path: cliks-windows-amd64.zip
           if-no-files-found: error
 
   linux-arm64:
     name: cliks-linux-arm64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
           cache-dependency-path: cli/go.sum
@@ -89,20 +107,20 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o cliks-capture-helper ./linux-capture-helper
           cp linux-capture-helper/cliks-capture.service .
           tar -czf ../cliks-linux-arm64.tar.gz cliks cliks-capture-helper cliks-capture.service
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cliks-linux-arm64
           path: cliks-linux-arm64.tar.gz
 
   publish:
-    needs: [native, linux-arm64]
+    needs: [native-unix, native-windows, linux-arm64]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           make_latest: true
