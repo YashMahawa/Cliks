@@ -21,3 +21,6 @@ end run`
 	}
 	return exec.CommandContext(ctx, "osascript", "-e", script, title, body).Run()
 }
+
+func nativeNotificationPlatformReady() bool           { return true }
+func repairNativeNotificationService() (bool, string) { return false, "" }

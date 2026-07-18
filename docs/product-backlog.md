@@ -77,6 +77,10 @@ meeting-software clutter.
   the relay's self-echo before claiming a signal was shared, and surface a
   missing acknowledgement. Space the live listening rail into room-tone,
   alerts, and playback groups on tall terminals.
+- [x] Verify Linux notification delivery rather than only checking for
+  `notify-send`: require an active D-Bus notification provider, restart an
+  enabled known provider during setup, and include the provider's real error
+  when native delivery fails.
 
 ## Platform and security follow-up
 

@@ -1,6 +1,6 @@
 {
   "name": "@cliks/cli",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "bin": {
     "cliks": "bin/cliks"

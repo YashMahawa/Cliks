@@ -126,7 +126,9 @@ func runSetupChecks(verifySound bool) []setupStep {
 	}
 	steps = append(steps, ensureAudioReady()...)
 	steps = append(steps, ensureCaptureReady()...)
-	if ready, detail := nativeNotificationStatus(); ready {
+	if fixed, detail := repairNativeNotificationService(); fixed {
+		steps = append(steps, setupStep{title: "Native notifications", status: "fixed", detail: detail})
+	} else if ready, detail := nativeNotificationStatus(); ready {
 		steps = append(steps, setupStep{title: "Native notifications", status: "ok", detail: "Quick signals can use " + detail + ". You control banners and their sound separately in Preferences."})
 	} else {
 		steps = append(steps, setupStep{title: "Native notifications", status: "tip", detail: "Optional and currently off: " + detail + "."})

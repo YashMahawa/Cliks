@@ -63,7 +63,10 @@ func nativeNotificationStatus() (bool, string) {
 			return false, "install Termux:API and run: pkg install termux-api"
 		}
 		if _, err := exec.LookPath("notify-send"); err == nil {
-			return true, "desktop notifications (notify-send)"
+			if nativeNotificationPlatformReady() {
+				return true, "desktop notifications (notify-send + active notification service)"
+			}
+			return false, "notify-send is installed, but no desktop notification service is running"
 		}
 		return false, "install libnotify / notify-send"
 	default:

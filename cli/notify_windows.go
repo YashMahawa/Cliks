@@ -118,6 +118,9 @@ func sendNativeNotification(title string, body string, sound bool) error {
 	return nil
 }
 
+func nativeNotificationPlatformReady() bool           { return true }
+func repairNativeNotificationService() (bool, string) { return false, "" }
+
 func copyWindowsUTF16(destination []uint16, value string) {
 	if len(destination) == 0 {
 		return
