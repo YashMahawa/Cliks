@@ -27,11 +27,15 @@ func cmdSetup(args []string) error {
 		}
 	}
 	steps := []setupStep{}
-	if refresh := refreshSessionAfterUpdate(); refresh != nil {
+	refresh := refreshSessionAfterUpdate()
+	if refresh != nil {
 		steps = append(steps, *refresh)
 	}
 	steps = append(steps, runSetupChecks(!quiet)...)
 	if quiet {
+		if refresh != nil && refresh.status == "action" {
+			return fmt.Errorf("%s: %s", refresh.title, refresh.detail)
+		}
 		return nil
 	}
 	printSetupReport(steps)
@@ -63,10 +67,21 @@ func refreshSessionAfterUpdate() *setupStep {
 	if _, err := startBackgroundForTeam(code); err != nil {
 		return &setupStep{title: "Running session", status: "action", detail: "Updated Cliks was installed, but the room could not restart: " + err.Error(), command: "cliks service start"}
 	}
+	for attempt := 0; attempt < 40; attempt++ {
+		if refreshed, ok := activeSession(); ok && !sessionNeedsUpgrade(refreshed) && refreshed.PID != active.PID && refreshed.ConnectionStatus != "stopped" {
+			return &setupStep{
+				title:  "Running session",
+				status: "fixed",
+				detail: "Refreshed the connected room to Cliks " + version + ". Open Live to return to it without reconnecting again.",
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	return &setupStep{
-		title:  "Running session",
-		status: "fixed",
-		detail: "Refreshed the connected room to Cliks " + version + ". Open Live to return to it without reconnecting again.",
+		title:   "Running session",
+		status:  "action",
+		detail:  "The updated background session did not become ready. Your settings are safe; run `cliks service start`.",
+		command: "cliks service start",
 	}
 }
 
