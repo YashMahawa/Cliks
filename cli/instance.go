@@ -325,12 +325,16 @@ func activeSession() (ActiveSessionState, bool) {
 func stopActiveSession() (string, error) {
 	active, ok := activeSession()
 	if !ok {
+		if stopped := cleanupOrphanAmbientPlayers(); stopped > 0 {
+			return fmt.Sprintf("Cliks was already stopped. Cleaned up %d leftover room-tone player(s).", stopped), nil
+		}
 		return "Cliks is not running.", nil
 	}
 	if active.PID == os.Getpid() {
 		return "", fmt.Errorf("this terminal owns the active Cliks session")
 	}
 	stoppedCount := stopSessionPIDs(append([]int{active.PID}, active.DuplicateLocalPIDs...))
+	orphanCount := cleanupOrphanAmbientPlayers()
 	_ = os.Remove(sessionLockPath())
 	_ = os.Remove(backgroundPIDPath())
 	stopped := active
@@ -338,7 +342,14 @@ func stopActiveSession() (string, error) {
 	stopped.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_ = writeActiveSessionState(stopped)
 	if stoppedCount > 1 {
-		return fmt.Sprintf("Stopped Cliks for %s and cleaned up %d duplicate local session(s).", valuePlain(active.TeamCode, "the current team"), stoppedCount-1), nil
+		message := fmt.Sprintf("Stopped Cliks for %s and cleaned up %d duplicate local session(s)", valuePlain(active.TeamCode, "the current team"), stoppedCount-1)
+		if orphanCount > 0 {
+			message += fmt.Sprintf(" and %d room-tone player(s)", orphanCount)
+		}
+		return message + ".", nil
+	}
+	if orphanCount > 0 {
+		return fmt.Sprintf("Stopped Cliks for %s and its %d room-tone player(s).", valuePlain(active.TeamCode, "the current team"), orphanCount), nil
 	}
 	return fmt.Sprintf("Stopped Cliks for %s.", valuePlain(active.TeamCode, "the current team")), nil
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
@@ -140,11 +141,16 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 	}
 	defer controller.stop()
 	fmt.Println("Cliks started. Press Ctrl+C to stop.")
+	signals := append([]os.Signal{os.Interrupt}, tuiExitSignals()...)
+	shutdownCtx, stopSignals := signal.NotifyContext(context.Background(), signals...)
+	defer stopSignals()
 	for {
 		select {
 		case state := <-controller.updates:
 			fmt.Printf("%s | %s | captured=%d sent=%d\n", state.TeamName, state.ConnectionStatus, state.LocalCapturedEvents, state.LocalSentEvents)
 		case <-controller.ctx.Done():
+			return sessionExitStop, nil
+		case <-shutdownCtx.Done():
 			return sessionExitStop, nil
 		}
 	}

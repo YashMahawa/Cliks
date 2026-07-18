@@ -112,6 +112,8 @@ The website mirrors this on the web. `site/components/AcousticProvider.tsx` prel
 
 Personal room tones are separate from teammate activity samples. `off`, `rain`, `fire`, `cafe`, `cloud`, `contemplation`, and `downtempo` select six CC0 tracks embedded as normalized MP3 assets and never synchronized or sent. Their level is adjustable from 5-100%; selecting `off` is the zero-volume state. macOS and Windows decode and loop them through the built-in Oto context. Linux/Termux decode them to a versioned cached WAV, then use the first available mpv, ffplay, PulseAudio, PipeWire, ALSA, or Termux player. Muting Cliks also pauses the room tone. Source and license details live in `cli/assets/ambient/NOTICE.md`.
 
+Detached/non-interactive sessions handle interrupt and platform termination signals by closing the audio engine before exit. Linux ambient players also receive a parent-death signal, and `cliks service stop` removes verified orphan players whose command line points into Cliks's own ambient cache. Never use broad `killall` cleanup that could terminate unrelated user audio.
+
 ## Capture
 
 Current modes:

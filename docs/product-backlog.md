@@ -85,6 +85,9 @@ meeting-software clutter.
   keep only the sender/emoji title and useful fixed reaction phrase.
 - [x] Make team and Solo ownership exclusive: joining another team performs a
   stop-and-wait switch, and entering Solo disconnects the active team first.
+- [x] Prevent private room tones from surviving Stop: gracefully handle
+  background termination, use Linux parent-death signaling, and clean only
+  verified Cliks ambient-cache player orphans left by older releases.
 
 ## Platform and security follow-up
 

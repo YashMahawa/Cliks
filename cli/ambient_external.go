@@ -36,6 +36,7 @@ func playAmbient(ctx context.Context, mode string, volume float64) error {
 	} else {
 		return fmt.Errorf("ambient room tones need mpv, ffplay, PulseAudio, PipeWire, ALSA, or Termux:API")
 	}
+	prepareAmbientCommand(cmd)
 	return cmd.Run()
 }
 
