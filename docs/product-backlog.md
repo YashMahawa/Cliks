@@ -72,6 +72,11 @@ meeting-software clutter.
   art at roomy sizes, primary controls above flexible space, and secondary
   guidance/status anchored to the bottom across setup, home/forms, Solo, live
   controls, diagnostics, and in-session navigation.
+- [x] Make reaction delivery observable and update-safe: refresh stale
+  background owners after binary installs, version session metadata, wait for
+  the relay's self-echo before claiming a signal was shared, and surface a
+  missing acknowledgement. Space the live listening rail into room-tone,
+  alerts, and playback groups on tall terminals.
 
 ## Platform and security follow-up
 

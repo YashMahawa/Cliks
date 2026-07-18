@@ -2665,6 +2665,8 @@ type sessionModel struct {
 	helpOpen           bool
 	welcomeUntil       time.Time
 	hoverAction        string
+	pendingReaction    string
+	pendingReactionAt  time.Time
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
@@ -2696,6 +2698,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionTickMsg:
 		m.now = time.Time(msg)
 		m.state = m.controller.viewState()
+		m.resolvePendingReaction()
 		if m.controller.attached {
 			m.controller.cfg = loadConfig()
 		}
@@ -3092,17 +3095,32 @@ func (m sessionModel) liveActivityView(width int, height int) string {
 		styleSecond.Render("LISTENING"),
 		"Volume  " + compactListeningBar(m.state.Listening),
 		"Density " + compactBar(m.state.Listening.Density),
+	}
+	roomTone := []string{
 		m.liveActionLine("ambient", "Room tone  "+ambientLabel(m.controller.cfg.Listening.Ambient)),
 		m.liveActionLine("ambient-down", "Tone −") + "  " + compactBar(m.controller.cfg.Listening.AmbientVolume) + "  " + m.liveActionLine("ambient-up", "Tone +"),
+	}
+	alerts := []string{
 		m.liveActionLine("notifications", "Notifications  "+onOff(m.controller.cfg.Notifications.Enabled)),
 		m.liveActionLine("notification-sound", "Notify sound   "+onOff(m.controller.cfg.Notifications.Sound)),
-		m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial)),
-		"",
-		styleThird.Render("QUICK SIGNALS · ROOM-WIDE"),
-		m.liveActionLine("reaction-wave", "1  👋 Wave") + "    " + m.liveActionLine("reaction-nice", "2  👍 Nice"),
-		m.liveActionLine("reaction-coffee", "3  ☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "4  🎉 Celebrate"),
-		m.liveActionLine("reaction-break", "5  🧘 Break"),
 	}
+	playback := []string{m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial))}
+	if height >= 32 {
+		lines = append(lines, "", styleDim.Render("ROOM TONE"))
+	}
+	lines = append(lines, roomTone...)
+	if height >= 34 {
+		lines = append(lines, "", styleDim.Render("ALERTS"))
+	}
+	lines = append(lines, alerts...)
+	if height >= 36 {
+		lines = append(lines, "", styleDim.Render("PLAYBACK"))
+	}
+	lines = append(lines, playback...)
+	lines = append(lines, "", styleThird.Render("QUICK SIGNALS · ROOM-WIDE"),
+		m.liveActionLine("reaction-wave", "1  👋 Wave")+"    "+m.liveActionLine("reaction-nice", "2  👍 Nice"),
+		m.liveActionLine("reaction-coffee", "3  ☕ Coffee")+"  "+m.liveActionLine("reaction-celebrate", "4  🎉 Celebrate"),
+		m.liveActionLine("reaction-break", "5  🧘 Break"))
 	footerLines := append([]string(nil), navigationLines...)
 	if m.message != "" {
 		footerLines = append(footerLines, "", styleDim.Render(ansi.Truncate(m.message, width, "…")))
@@ -3122,8 +3140,32 @@ func (m sessionModel) liveActionLine(action string, label string) string {
 }
 
 func (m *sessionModel) sendLiveReaction(reaction string) {
-	m.controller.sendReaction(reaction)
-	m.message = "Shared with the room  " + reactionGlyph(reaction) + "  " + reactionPhrase(reaction)
+	if err := m.controller.sendReaction(reaction); err != nil {
+		m.message = "Signal not sent: " + err.Error()
+		m.pendingReaction = ""
+		return
+	}
+	m.pendingReaction = reaction
+	m.pendingReactionAt = time.Now()
+	m.message = "Sending to the room  " + reactionGlyph(reaction)
+}
+
+func (m *sessionModel) resolvePendingReaction() {
+	if m.pendingReaction == "" {
+		return
+	}
+	for i := len(m.state.RecentReactions) - 1; i >= 0; i-- {
+		reaction := m.state.RecentReactions[i]
+		if reaction.PeerID == m.state.OwnPeerID && reaction.Reaction == m.pendingReaction && !reaction.At.Before(m.pendingReactionAt) {
+			m.message = "Shared with the room  " + reactionGlyph(m.pendingReaction) + "  " + reactionPhrase(m.pendingReaction)
+			m.pendingReaction = ""
+			return
+		}
+	}
+	if m.now.Sub(m.pendingReactionAt) >= 3*time.Second {
+		m.message = "Signal was not acknowledged. Reopen Live to refresh the connection, then try again."
+		m.pendingReaction = ""
+	}
 }
 
 func (m sessionModel) liveHit(x int, y int) string {

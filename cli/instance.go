@@ -18,6 +18,7 @@ const (
 
 type ActiveSessionState struct {
 	PID                 int              `json:"pid"`
+	Version             string           `json:"version,omitempty"`
 	TeamCode            string           `json:"teamCode"`
 	TeamName            string           `json:"teamName,omitempty"`
 	Mode                string           `json:"mode"`
@@ -64,6 +65,7 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	state := ActiveSessionState{
 		PID:              os.Getpid(),
+		Version:          version,
 		TeamCode:         strings.ToUpper(teamCode),
 		Mode:             mode,
 		ConnectionStatus: "starting",
@@ -128,6 +130,18 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	return nil, fmt.Errorf("could not acquire session lock at %s", path)
 }
 
+func sessionNeedsUpgrade(state ActiveSessionState) bool {
+	return strings.TrimSpace(state.Version) == "" || state.Version != version
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for pid > 0 && processLooksAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	return pid <= 0 || !processLooksAlive(pid)
+}
+
 type sessionLockAction int
 
 const (
@@ -159,6 +173,9 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 			// Prefer richer session.json metadata when available.
 			if richer, ok := readSessionFile(sessionStatePath()); ok && richer.PID == state.PID {
 				richer.PID = state.PID
+				if richer.Version == "" {
+					richer.Version = state.Version
+				}
 				if richer.Mode == "" {
 					richer.Mode = state.Mode
 				}
@@ -237,6 +254,9 @@ func activeSession() (ActiveSessionState, bool) {
 				state = lock
 			}
 			state.PID = lock.PID
+			if state.Version == "" {
+				state.Version = lock.Version
+			}
 			if state.Mode == "" {
 				state.Mode = lock.Mode
 			}

@@ -478,6 +478,48 @@ func TestLiveNavigationAnchorsToBottomOfTallRail(t *testing.T) {
 	}
 }
 
+func TestTallLiveRailSpacesListeningGroups(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width, model.height = 180, 50
+	view := ansi.Strip(model.View())
+	for _, heading := range []string{"ROOM TONE", "ALERTS", "PLAYBACK", "QUICK SIGNALS · ROOM-WIDE"} {
+		if !strings.Contains(view, heading) {
+			t.Fatalf("tall live rail omitted %q:\n%s", heading, view)
+		}
+	}
+}
+
+func TestReactionWaitsForRelayAcknowledgement(t *testing.T) {
+	model := newSessionModel(newSessionController(defaultConfig(), StartOptions{}, nil))
+	model.state.OwnPeerID = "peer-self"
+	model.pendingReaction = "wave"
+	model.pendingReactionAt = time.Now()
+	model.message = "Sending to the room  👋"
+	model.state.RecentReactions = []PeerReactionStatus{{PeerID: "peer-self", Reaction: "wave", At: model.pendingReactionAt.Add(time.Millisecond)}}
+	model.resolvePendingReaction()
+	if model.pendingReaction != "" || !strings.Contains(model.message, "Shared with the room") {
+		t.Fatalf("acknowledged reaction stayed pending: %q / %q", model.pendingReaction, model.message)
+	}
+
+	model.pendingReaction = "nice"
+	model.pendingReactionAt = time.Now().Add(-4 * time.Second)
+	model.now = time.Now()
+	model.state.RecentReactions = nil
+	model.resolvePendingReaction()
+	if model.pendingReaction != "" || !strings.Contains(model.message, "not acknowledged") {
+		t.Fatalf("missing acknowledgement was hidden: %q / %q", model.pendingReaction, model.message)
+	}
+}
+
+func TestReactionSendFailsClearlyWhileReconnecting(t *testing.T) {
+	controller := newSessionController(defaultConfig(), StartOptions{}, nil)
+	if err := controller.sendReaction("wave"); err == nil || !strings.Contains(err.Error(), "reconnecting") {
+		t.Fatalf("sendReaction error = %v", err)
+	}
+}
+
 func TestReactionAnimationNamesSenderInsideDesk(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()

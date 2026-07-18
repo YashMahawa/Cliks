@@ -151,6 +151,34 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 }
 
 func runAttachedSession(active ActiveSessionState) error {
+	if sessionNeedsUpgrade(active) {
+		code := strings.ToUpper(strings.TrimSpace(active.TeamCode))
+		mode := active.Mode
+		if _, err := stopActiveSession(); err != nil {
+			return fmt.Errorf("refresh the running Cliks session: %w", err)
+		}
+		if !waitForProcessExit(active.PID, 3*time.Second) {
+			return fmt.Errorf("the older Cliks session did not stop; run `cliks service stop` and try again")
+		}
+		cfg := loadConfig()
+		if code != "" {
+			cfg.CurrentTeamCode = code
+			_ = saveConfig(cfg)
+		}
+		if mode == runModeBackground || mode == runModeBoot {
+			if _, err := startBackgroundForTeam(code); err != nil {
+				return fmt.Errorf("restart Cliks after update: %w", err)
+			}
+			for attempt := 0; attempt < 20; attempt++ {
+				if refreshed, ok := activeSession(); ok && !sessionNeedsUpgrade(refreshed) {
+					return runAttachedSession(refreshed)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			return fmt.Errorf("Cliks updated, but the refreshed background session did not become ready")
+		}
+		return startSession(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
+	}
 	controller := newAttachedSessionController(active)
 	defer controller.stop()
 	tuiCtx, stopSignals := tuiSignalContext(context.Background())
@@ -593,7 +621,9 @@ func (s *sessionController) commandLoop() {
 		case <-ticker.C:
 			consumeSessionCommands(func(command localSessionCommand) {
 				if command.Type == "reaction" {
-					s.sendReaction(command.Reaction)
+					if err := s.sendReaction(command.Reaction); err != nil {
+						s.set(func(state *SessionViewState) { state.Notice = "Signal failed: " + err.Error() })
+					}
 				}
 			})
 		}
@@ -613,17 +643,22 @@ func (s *sessionController) sendProfile(nickname string, status string) {
 	s.wsMu.Unlock()
 }
 
-func (s *sessionController) sendReaction(reaction string) {
+func (s *sessionController) sendReaction(reaction string) error {
 	if s.attached {
-		_ = enqueueSessionCommand(localSessionCommand{Type: "reaction", Reaction: reaction})
-		return
+		if active, ok := activeSession(); !ok || active.PID != s.attachedPID {
+			return fmt.Errorf("the running session changed; reopen Live and try again")
+		}
+		return enqueueSessionCommand(localSessionCommand{Type: "reaction", Reaction: reaction})
 	}
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 	if s.ws == nil {
-		return
+		return fmt.Errorf("the room is reconnecting")
 	}
-	_ = s.ws.WriteJSON(map[string]any{"type": "reaction", "reaction": reaction})
+	if err := s.ws.WriteJSON(map[string]any{"type": "reaction", "reaction": reaction}); err != nil {
+		return fmt.Errorf("send quick signal: %w", err)
+	}
+	return nil
 }
 
 func (s *sessionController) cyclePresence() {

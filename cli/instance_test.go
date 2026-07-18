@@ -80,6 +80,26 @@ func TestSessionInstanceReleaseAllowsNextConnection(t *testing.T) {
 	second.release()
 }
 
+func TestSessionStateRecordsBinaryVersion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	instance, err := acquireSessionInstance("CLIK-VERSN1", runModeForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.release()
+	active, ok := activeSession()
+	if !ok || active.Version != version {
+		t.Fatalf("active version = %q, want %q", active.Version, version)
+	}
+	if sessionNeedsUpgrade(active) {
+		t.Fatal("current session was marked stale")
+	}
+	active.Version = ""
+	if !sessionNeedsUpgrade(active) {
+		t.Fatal("legacy session without a version was not marked stale")
+	}
+}
+
 func TestSessionInstanceIgnoresOwnPendingBackgroundPID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := writeBackgroundPID(processIDForTest()); err != nil {

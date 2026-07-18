@@ -26,7 +26,11 @@ func cmdSetup(args []string) error {
 			quiet = true
 		}
 	}
-	steps := runSetupChecks(!quiet)
+	steps := []setupStep{}
+	if refresh := refreshSessionAfterUpdate(); refresh != nil {
+		steps = append(steps, *refresh)
+	}
+	steps = append(steps, runSetupChecks(!quiet)...)
 	if quiet {
 		return nil
 	}
@@ -42,6 +46,28 @@ func cmdSetup(args []string) error {
 	fmt.Println()
 	fmt.Println("Almost there. Finish any \"action\" steps above, then run: cliks setup")
 	return nil
+}
+
+func refreshSessionAfterUpdate() *setupStep {
+	active, ok := activeSession()
+	if !ok || !sessionNeedsUpgrade(active) {
+		return nil
+	}
+	code := strings.ToUpper(strings.TrimSpace(active.TeamCode))
+	if _, err := stopActiveSession(); err != nil {
+		return &setupStep{title: "Running session", status: "action", detail: "Could not stop the older background version: " + err.Error(), command: "cliks service stop && cliks service start"}
+	}
+	if !waitForProcessExit(active.PID, 3*time.Second) {
+		return &setupStep{title: "Running session", status: "action", detail: "The older background version did not stop in time.", command: "cliks service stop && cliks service start"}
+	}
+	if _, err := startBackgroundForTeam(code); err != nil {
+		return &setupStep{title: "Running session", status: "action", detail: "Updated Cliks was installed, but the room could not restart: " + err.Error(), command: "cliks service start"}
+	}
+	return &setupStep{
+		title:  "Running session",
+		status: "fixed",
+		detail: "Refreshed the connected room to Cliks " + version + ". Open Live to return to it without reconnecting again.",
+	}
 }
 
 func runSetupChecks(verifySound bool) []setupStep {
