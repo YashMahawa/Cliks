@@ -54,35 +54,64 @@ func cmdSetup(args []string) error {
 
 func refreshSessionAfterUpdate() *setupStep {
 	active, ok := activeSession()
-	if !ok || !sessionNeedsUpgrade(active) {
+	wasLive := ok
+	if !ok {
+		stale, staleOK := readSessionFile(sessionStatePath())
+		if !staleOK || !sessionNeedsUpgrade(stale) || stale.ConnectionStatus == "stopped" || strings.TrimSpace(stale.TeamCode) == "" {
+			return nil
+		}
+		active = stale
+	}
+	if !sessionNeedsUpgrade(active) {
 		return nil
 	}
 	code := strings.ToUpper(strings.TrimSpace(active.TeamCode))
-	if _, err := stopActiveSession(); err != nil {
-		return &setupStep{title: "Running session", status: "action", detail: "Could not stop the older background version: " + err.Error(), command: "cliks service stop && cliks service start"}
-	}
-	if !waitForProcessExit(active.PID, 3*time.Second) {
-		return &setupStep{title: "Running session", status: "action", detail: "The older background version did not stop in time.", command: "cliks service stop && cliks service start"}
-	}
-	if _, err := startBackgroundForTeam(code); err != nil {
-		return &setupStep{title: "Running session", status: "action", detail: "Updated Cliks was installed, but the room could not restart: " + err.Error(), command: "cliks service start"}
-	}
-	for attempt := 0; attempt < 40; attempt++ {
-		if refreshed, ok := activeSession(); ok && !sessionNeedsUpgrade(refreshed) && refreshed.PID != active.PID && refreshed.ConnectionStatus != "stopped" {
-			return &setupStep{
-				title:  "Running session",
-				status: "fixed",
-				detail: "Refreshed the connected room to Cliks " + version + ". Open Live to return to it without reconnecting again.",
-			}
+	if wasLive {
+		if _, err := stopActiveSession(); err != nil {
+			return &setupStep{title: "Running session", status: "action", detail: "Could not stop the older background version: " + err.Error(), command: "cliks service stop && cliks service start"}
 		}
-		time.Sleep(50 * time.Millisecond)
+		if !waitForProcessExit(active.PID, 3*time.Second) {
+			return &setupStep{title: "Running session", status: "action", detail: "The older background version did not stop in time.", command: "cliks service stop && cliks service start"}
+		}
+	}
+	if err := startAndVerifyUpdatedSession(code, active.PID); err != nil {
+		return &setupStep{title: "Running session", status: "action", detail: err.Error(), command: "cliks service start"}
 	}
 	return &setupStep{
-		title:   "Running session",
-		status:  "action",
-		detail:  "The updated background session did not become ready. Your settings are safe; run `cliks service start`.",
-		command: "cliks service start",
+		title:  "Running session",
+		status: "fixed",
+		detail: "Refreshed the connected room to Cliks " + version + ". Open Live to return to it without reconnecting again.",
 	}
+}
+
+func startAndVerifyUpdatedSession(code string, oldPID int) error {
+	var lastErr error
+	for cycle := 0; cycle < 2; cycle++ {
+		if _, err := startBackgroundForTeam(code); err != nil {
+			lastErr = err
+		} else {
+			for attempt := 0; attempt < 40; attempt++ {
+				active, activeOK := activeSession()
+				persisted, persistedOK := readSessionFile(sessionStatePath())
+				if activeOK && persistedOK && active.PID != oldPID && persisted.PID == active.PID &&
+					active.Version == version && persisted.Version == version && persisted.ConnectionStatus != "stopped" {
+					time.Sleep(250 * time.Millisecond)
+					stable, stableOK := activeSession()
+					if stableOK && stable.PID == active.PID && stable.Version == version && stable.ConnectionStatus != "stopped" {
+						return nil
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			lastErr = fmt.Errorf("the replacement process did not stay ready")
+		}
+		if current, currentOK := activeSession(); currentOK && current.PID != oldPID {
+			_, _ = stopActiveSession()
+			_ = waitForProcessExit(current.PID, 2*time.Second)
+		}
+		cleanupStaleSession()
+	}
+	return fmt.Errorf("updated Cliks could not restore the room: %v. Your settings are safe", lastErr)
 }
 
 func runSetupChecks(verifySound bool) []setupStep {
