@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.3"
+const version = "0.6.4"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -504,7 +504,7 @@ func cmdSetOne(args []string) error {
 		if err != nil {
 			return err
 		}
-		cfg.Listening.AmbientVolume = clamp(parsed, .05, .6)
+		cfg.Listening.AmbientVolume = clamp(parsed, 0.05, 1)
 	case "solo.people":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
@@ -544,10 +544,10 @@ func cmdSetOne(args []string) error {
 	case "theme":
 		theme := strings.ToLower(strings.TrimSpace(value))
 		switch theme {
-		case "ember", "ocean", "mono":
+		case "ember", "ocean", "forest", "sunset", "aurora", "mono":
 			cfg.Theme = theme
 		default:
-			return fmt.Errorf("theme must be ember, ocean, or mono")
+			return fmt.Errorf("theme must be ember, ocean, forest, sunset, aurora, or mono")
 		}
 	case "capture.mode":
 		mode := strings.ToLower(strings.TrimSpace(value))

@@ -5,9 +5,10 @@ After=systemd-udevd.service
 [Service]
 Type=simple
 ExecStart=/usr/local/libexec/cliks-capture-helper
-# Installer supplies CLIKS_CAPTURE_UID in a drop-in. The helper rejects every
-# other local account with SO_PEERCRED. It remains root only to open hotplugged
-# input devices; systemd removes filesystem/network capabilities around it.
+# Installer supplies CLIKS_CAPTURE_UID and CLIKS_CAPTURE_CLIENT_EXE in a
+# drop-in. The helper accepts only that executable running as that user, owns a
+# 0600 socket for the user, and emits only while the user owns an active local
+# logind seat. It remains root only to open hotplugged input devices.
 User=root
 Group=root
 RuntimeDirectory=cliks

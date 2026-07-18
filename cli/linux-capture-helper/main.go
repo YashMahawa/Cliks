@@ -8,8 +8,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,10 +26,14 @@ const (
 
 type clients struct {
 	sync.Mutex
-	items map[net.Conn]struct{}
+	items    map[net.Conn]struct{}
+	seatGate *activeSeatGate
 }
 
 func (c *clients) send(token string) {
+	if c.seatGate != nil && !c.seatGate.allowed() {
+		return
+	}
 	c.Lock()
 	defer c.Unlock()
 	for conn := range c.items {
@@ -53,10 +59,17 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
-	if err := os.Chmod(socket, 0o666); err != nil {
+	targetUID, err := configuredUID()
+	if err != nil {
 		log.Fatal(err)
 	}
-	peers := &clients{items: map[net.Conn]struct{}{}}
+	if err := os.Chown(socket, targetUID, -1); err != nil {
+		log.Fatal(err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		log.Fatal(err)
+	}
+	peers := &clients{items: map[net.Conn]struct{}{}, seatGate: &activeSeatGate{targetUID: targetUID}}
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -102,7 +115,7 @@ func main() {
 }
 
 func allowedClient(conn net.Conn) bool {
-	want, err := strconv.ParseUint(os.Getenv("CLIKS_CAPTURE_UID"), 10, 32)
+	want, err := configuredUID()
 	if err != nil {
 		return false
 	}
@@ -121,7 +134,66 @@ func allowedClient(conn net.Conn) bool {
 	}); err != nil || socketErr != nil || credential == nil {
 		return false
 	}
-	return uint64(credential.Uid) == want
+	if int(credential.Uid) != want {
+		return false
+	}
+	wantExecutable := strings.TrimSpace(os.Getenv("CLIKS_CAPTURE_CLIENT_EXE"))
+	if wantExecutable == "" || credential.Pid <= 0 {
+		return false
+	}
+	gotExecutable, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(int(credential.Pid)), "exe"))
+	if err != nil {
+		return false
+	}
+	// The installer stores a canonical path. Do not resolve it again here:
+	// ProtectHome=true intentionally prevents this root service from traversing
+	// the user's home, while /proc/PID/exe still exposes the canonical target.
+	return filepath.Clean(gotExecutable) == filepath.Clean(wantExecutable)
+}
+
+func configuredUID() (int, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("CLIKS_CAPTURE_UID")), 10, 32)
+	return int(value), err
+}
+
+type activeSeatGate struct {
+	sync.Mutex
+	targetUID int
+	checkedAt time.Time
+	active    bool
+}
+
+func (g *activeSeatGate) allowed() bool {
+	g.Lock()
+	defer g.Unlock()
+	if time.Since(g.checkedAt) < 1500*time.Millisecond {
+		return g.active
+	}
+	g.checkedAt = time.Now()
+	g.active = targetOwnsActiveSeat(g.targetUID)
+	return g.active
+}
+
+func targetOwnsActiveSeat(targetUID int) bool {
+	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		session, err := exec.Command("loginctl", "show-seat", fields[0], "-p", "ActiveSession", "--value").Output()
+		if err != nil || strings.TrimSpace(string(session)) == "" {
+			continue
+		}
+		uid, err := exec.Command("loginctl", "show-session", strings.TrimSpace(string(session)), "-p", "User", "--value").Output()
+		if err == nil && strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
+			return true
+		}
+	}
+	return false
 }
 
 func readDevice(file *os.File, peers *clients, done func()) {

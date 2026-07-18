@@ -7,7 +7,7 @@ REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.3}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.4}"
 CAPTURE_APP_DIR="${CLIKS_CAPTURE_APP_DIR:-$HOME/Applications/Cliks Capture.app}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
@@ -94,7 +94,7 @@ install_prebuilt() {
         sudo install -m 755 "$tmp/cliks-capture-helper" /usr/local/libexec/cliks-capture-helper
         sudo install -m 644 "$tmp/cliks-capture.service" /etc/systemd/system/cliks-capture.service
         sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
-        printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\n' "$(id -u)" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
+        printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$BIN_DIR/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
         sudo systemctl daemon-reload
         sudo systemctl enable --now cliks-capture.service
         ok "Installed privacy-isolated input helper"
@@ -272,7 +272,7 @@ EOF
     sudo install -m 755 dist/cliks-capture-helper /usr/local/libexec/cliks-capture-helper
     sudo install -m 644 linux-capture-helper/cliks-capture.service /etc/systemd/system/cliks-capture.service
     sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
-    printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\n' "$(id -u)" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
+    printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$INSTALL_DIR/cli/dist/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
     sudo systemctl daemon-reload
     sudo systemctl enable --now cliks-capture.service
   fi

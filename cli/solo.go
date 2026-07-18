@@ -80,9 +80,9 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.activate(action)
 			}
 		case tea.MouseWheelUp:
-			m.adjustVolume(.05)
-		case tea.MouseWheelDown:
 			m.adjustVolume(-.05)
+		case tea.MouseWheelDown:
+			m.adjustVolume(.05)
 		}
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -219,7 +219,7 @@ func (m *soloModel) adjustSoloVolume(kind string, delta float64) {
 	case "mouse":
 		m.cfg.Solo.MouseVolume = clamp(m.cfg.Solo.MouseVolume+delta, 0.05, 1)
 	case "ambient":
-		m.cfg.Listening.AmbientVolume = clamp(m.cfg.Listening.AmbientVolume+delta, 0.05, 0.6)
+		m.cfg.Listening.AmbientVolume = clamp(m.cfg.Listening.AmbientVolume+delta, 0.05, 1)
 		m.applyListening()
 		return
 	}
@@ -289,7 +289,7 @@ func (m soloModel) View() string {
 		controls := stylePanel.Width(width).Height(controlHeight).Render(m.controlView())
 		return lipgloss.JoinVertical(lipgloss.Left, header, desk, controls, footer)
 	}
-	mapWidth := int(float64(width) * .68)
+	mapWidth := maxInt(48, width-58)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(deskModel.renderSpatialDesk(mapWidth-6, bodyHeight-3))
 	controls := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView())
@@ -302,7 +302,7 @@ func (m soloModel) header(width int) string {
 
 func (m soloModel) controlView() string {
 	lines := []string{
-		styleAccent.Render("Your private soundscape"),
+		styleAccent.Render("YOUR PRIVATE SOUNDSCAPE"),
 		m.button("less", "− person") + "   " + m.button("more", "+ person"),
 		m.button("master-quieter", "−") + "  Master  " + percent(m.cfg.Listening.Volume) + "  " + m.button("master-louder", "+"),
 		m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),

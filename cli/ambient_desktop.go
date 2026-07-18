@@ -36,7 +36,7 @@ func playAmbient(ctx context.Context, mode string, volume float64) error {
 		return err
 	}
 	player := audioCtx.NewPlayer(&loopingPCMReader{data: pcm})
-	player.SetVolume(clamp(volume, 0, 0.6))
+	player.SetVolume(clamp(volume, 0, 1))
 	defer player.Close()
 	player.Play()
 	ticker := time.NewTicker(100 * time.Millisecond)

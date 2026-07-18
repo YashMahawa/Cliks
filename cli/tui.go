@@ -26,6 +26,8 @@ var (
 	colorPanel  = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
 	colorSelect = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
 	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
+	colorSecond = lipgloss.AdaptiveColor{Light: "#A23B42", Dark: "#FF7A7A"}
+	colorThird  = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
 
 	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
 	styleAccent   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -35,6 +37,8 @@ var (
 	stylePanel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(1, 2)
 	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
 	styleFocused  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleSecond   = lipgloss.NewStyle().Foreground(colorSecond).Bold(true)
+	styleThird    = lipgloss.NewStyle().Foreground(colorThird).Bold(true)
 )
 
 func applyTheme(theme string) {
@@ -44,16 +48,43 @@ func applyTheme(theme string) {
 		colorPanel = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#159BB5"}
 		colorSelect = lipgloss.AdaptiveColor{Light: "#007487", Dark: "#33D6E8"}
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
+		colorSecond = lipgloss.AdaptiveColor{Light: "#1E5AA8", Dark: "#66A8FF"}
+		colorThird = lipgloss.AdaptiveColor{Light: "#087F6B", Dark: "#64E6C4"}
+	case "forest":
+		colorAccent = lipgloss.AdaptiveColor{Light: "#356B2F", Dark: "#82D173"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#527A3A", Dark: "#76A85A"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#356B2F", Dark: "#82D173"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#10150E"}
+		colorSecond = lipgloss.AdaptiveColor{Light: "#8B6508", Dark: "#E8C15A"}
+		colorThird = lipgloss.AdaptiveColor{Light: "#286C68", Dark: "#63D5CE"}
+	case "sunset":
+		colorAccent = lipgloss.AdaptiveColor{Light: "#B84A32", Dark: "#FF8268"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#C06438", Dark: "#F28C52"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#A93B4D", Dark: "#F46D8A"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#160D0E"}
+		colorSecond = lipgloss.AdaptiveColor{Light: "#9B3973", Dark: "#F087C2"}
+		colorThird = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
+	case "aurora":
+		colorAccent = lipgloss.AdaptiveColor{Light: "#087F75", Dark: "#52E0C4"}
+		colorPanel = lipgloss.AdaptiveColor{Light: "#477B87", Dark: "#5EB6C8"}
+		colorSelect = lipgloss.AdaptiveColor{Light: "#365D9C", Dark: "#6FA0F5"}
+		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#091016"}
+		colorSecond = lipgloss.AdaptiveColor{Light: "#7E4AA3", Dark: "#C58AF0"}
+		colorThird = lipgloss.AdaptiveColor{Light: "#A1456E", Dark: "#F17FAA"}
 	case "mono":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#8A8A8A"}
 		colorSelect = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"}
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#111111"}
+		colorSecond = colorAccent
+		colorThird = colorAccent
 	default:
 		colorAccent = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
 		colorSelect = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#11100F"}
+		colorSecond = lipgloss.AdaptiveColor{Light: "#A23B42", Dark: "#FF7A7A"}
+		colorThird = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
 	}
 	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
 	styleAccent = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -63,6 +94,8 @@ func applyTheme(theme string) {
 	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).Padding(1, 2)
 	styleSelected = lipgloss.NewStyle().Foreground(colorOnPick).Background(colorSelect).Bold(true)
 	styleFocused = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleSecond = lipgloss.NewStyle().Foreground(colorSecond).Bold(true)
+	styleThird = lipgloss.NewStyle().Foreground(colorThird).Bold(true)
 }
 
 type shortcutHelp struct {
@@ -738,6 +771,19 @@ func (m *homeModel) move(delta int) {
 		return
 	}
 	m.cursor = clampInt(m.cursor+delta, 0, len(m.items())-1)
+	m.previewOnboardingTheme()
+}
+
+func (m *homeModel) previewOnboardingTheme() {
+	if m.mode != "first-setup" || m.onboardingStep != 6 {
+		return
+	}
+	items := m.onboardingItems()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return
+	}
+	theme := strings.TrimPrefix(items[m.cursor].key, "onboarding-theme-")
+	applyTheme(theme)
 }
 
 func (m homeModel) activate() (tea.Model, tea.Cmd) {
@@ -880,7 +926,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.cfg.AutostartWanted = item.key == "onboarding-autostart-on"
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Launch-at-login preference saved. It activates after you join a team.")
-	case "onboarding-theme-ember", "onboarding-theme-ocean", "onboarding-theme-mono":
+	case "onboarding-theme-ember", "onboarding-theme-ocean", "onboarding-theme-forest", "onboarding-theme-sunset", "onboarding-theme-aurora", "onboarding-theme-mono":
 		m.cfg.Theme = strings.TrimPrefix(item.key, "onboarding-theme-")
 		applyTheme(m.cfg.Theme)
 		_ = saveConfig(m.cfg)
@@ -1395,8 +1441,11 @@ func (m homeModel) onboardingItems() []homeItem {
 		}
 	case 6:
 		return []homeItem{
-			{key: "onboarding-theme-ember", label: "Ember", help: "warm orange, the Cliks default"},
-			{key: "onboarding-theme-ocean", label: "Ocean", help: "cool cyan and deep blue"},
+			{key: "onboarding-theme-ember", label: "Ember", help: "orange, coral, and warm gold"},
+			{key: "onboarding-theme-ocean", label: "Ocean", help: "cyan, blue, and seafoam"},
+			{key: "onboarding-theme-forest", label: "Forest", help: "leaf green, moss, and amber"},
+			{key: "onboarding-theme-sunset", label: "Sunset", help: "coral, rose, and golden hour"},
+			{key: "onboarding-theme-aurora", label: "Aurora", help: "teal, sky, and soft violet"},
 			{key: "onboarding-theme-mono", label: "Mono", help: "quiet grayscale for minimal terminals"},
 		}
 	default:
@@ -1646,6 +1695,7 @@ func (m *homeModel) hover(y int) bool {
 	index := y - m.itemStartY()
 	if index >= 0 && index < len(m.items()) {
 		m.cursor = index
+		m.previewOnboardingTheme()
 		return true
 	}
 	return false
@@ -1920,8 +1970,8 @@ func settingsRows(cfg CliksConfig) []settingRow {
 		}},
 		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
 		{"Room tone", "private embedded soundscape with six choices", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
-		{"Room tone volume", "private ambient layer loudness", func(c CliksConfig) string { return bar(c.Listening.AmbientVolume) }, func(c *CliksConfig, d int) {
-			c.Listening.AmbientVolume = clamp(c.Listening.AmbientVolume+float64(d)*0.05, 0.05, 0.6)
+		{"Room tone volume", "left/right changes this private layer from 0-100%", func(c CliksConfig) string { return bar(c.Listening.AmbientVolume) }, func(c *CliksConfig, d int) {
+			c.Listening.AmbientVolume = clamp(c.Listening.AmbientVolume+float64(d)*0.05, 0.05, 1)
 		}},
 		{"Muted", "silence local playback", func(c CliksConfig) string { return onOff(c.Listening.Muted) }, func(c *CliksConfig, _ int) { c.Listening.Muted = !c.Listening.Muted }},
 		{"Spatial audio", "pan teammates around your desk", func(c CliksConfig) string { return onOff(c.Listening.Spatial) }, func(c *CliksConfig, _ int) { c.Listening.Spatial = !c.Listening.Spatial }},
@@ -1942,7 +1992,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Notifications.Configured = true
 		}},
 		{"Presence", "available, focus, break, or dnd", func(c CliksConfig) string { return presenceLabel(c.PresenceStatus) }, func(c *CliksConfig, d int) { c.PresenceStatus = nextPresence(c.PresenceStatus, d) }},
-		{"Theme", "ember, ocean, or mono", func(c CliksConfig) string { return c.Theme }, func(c *CliksConfig, d int) { c.Theme = nextTheme(c.Theme, d) }},
+		{"Theme", "ember, ocean, forest, sunset, aurora, or mono", func(c CliksConfig) string { return c.Theme }, func(c *CliksConfig, d int) { c.Theme = nextTheme(c.Theme, d) }},
 		{"Capture safety", "isolated recommended; direct grants this launcher broad access", func(c CliksConfig) string { return c.Capture.Mode }, func(c *CliksConfig, d int) {
 			modes := []string{"isolated", "terminal", "direct"}
 			index := 0
@@ -2634,10 +2684,10 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hoverAction = m.liveHit(msg.X, msg.Y)
 			m.codeHover = m.hoverAction == "copy-code"
 		case tea.MouseWheelUp:
-			m.controller.adjustVolume(0.05)
+			m.controller.adjustVolume(-0.05)
 			m.hoverAction = ""
 		case tea.MouseWheelDown:
-			m.controller.adjustVolume(-0.05)
+			m.controller.adjustVolume(0.05)
 			m.hoverAction = ""
 		case tea.MouseLeft:
 			if action := m.liveHit(msg.X, msg.Y); action != "" {
@@ -2758,12 +2808,12 @@ func (m sessionModel) View() string {
 	width := maxInt(44, panelWidth(m.width))
 	bodyHeight := maxInt(12, m.height-7)
 	header := m.liveHeader(width)
-	footer := styleDim.Render(" ? Help   ↑/↓ Volume   ←/→ Density   Tab Preferences   Esc Menu   Ctrl+C Stop")
+	footer := styleDim.Render(" ? Help   1-5 Signals   ↑/↓ Volume   ←/→ Density   Tab Preferences   Esc Menu   Ctrl+C Stop")
 	if width < 74 {
 		desk := stylePanel.Width(width).Height(bodyHeight).Render(m.renderSpatialDesk(width-6, bodyHeight-3))
 		return lipgloss.JoinVertical(lipgloss.Left, header, desk, footer)
 	}
-	mapWidth := int(float64(width) * 0.68)
+	mapWidth := maxInt(48, width-58)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(m.renderSpatialDesk(mapWidth-6, bodyHeight-3))
 	activity := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
@@ -2948,23 +2998,26 @@ func (m sessionModel) liveActivityView(width int) string {
 		}
 	}
 	lines := []string{
-		styleAccent.Render(valuePlain(team, "Your room")),
+		styleAccent.Render(strings.ToUpper(valuePlain(team, "Your room"))),
 		m.liveActionLine("copy-code", code+"  COPY"),
 		connectionStyle(m.state.ConnectionStatus) + "  ·  " + roomPeopleSummary(m.state),
 		typingSummary(m.state, m.now),
 		"Flow: " + flowBadge(m.state, m.now),
 		"Health: " + styleDim.Render(healthSummary(m.state, m.now)),
 		"",
+		styleSecond.Render("LISTENING"),
 		"Volume  " + compactListeningBar(m.state.Listening),
 		"Density " + compactBar(m.state.Listening.Density),
+		m.liveActionLine("ambient", "Room tone  "+ambientLabel(m.controller.cfg.Listening.Ambient)),
+		m.liveActionLine("ambient-down", "Tone −") + "  " + compactBar(m.controller.cfg.Listening.AmbientVolume) + "  " + m.liveActionLine("ambient-up", "Tone +"),
 		m.liveActionLine("notifications", "Notifications  "+onOff(m.controller.cfg.Notifications.Enabled)),
 		m.liveActionLine("notification-sound", "Notify sound   "+onOff(m.controller.cfg.Notifications.Sound)),
 		m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial)),
 		"",
-		styleAccent.Render("Quick signals"),
-		m.liveActionLine("reaction-wave", "👋 Wave") + "    " + m.liveActionLine("reaction-nice", "👍 Nice"),
-		m.liveActionLine("reaction-coffee", "☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "🎉 Celebrate"),
-		m.liveActionLine("reaction-break", "🧘 Break"),
+		styleThird.Render("QUICK SIGNALS · ROOM-WIDE"),
+		m.liveActionLine("reaction-wave", "1  👋 Wave") + "    " + m.liveActionLine("reaction-nice", "2  👍 Nice"),
+		m.liveActionLine("reaction-coffee", "3  ☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "4  🎉 Celebrate"),
+		m.liveActionLine("reaction-break", "5  🧘 Break"),
 		"",
 	}
 	lines = append(lines, navigationLines...)
@@ -3059,11 +3112,14 @@ func (m sessionModel) liveHitRegions() []liveHitRegion {
 		{"notification-sound", "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound)},
 		{"mute", "Mute " + onOff(m.state.Listening.Muted)},
 		{"spatial", "Spatial " + onOff(m.state.Listening.Spatial)},
-		{"reaction-wave", "👋 Wave"},
-		{"reaction-nice", "👍 Nice"},
-		{"reaction-coffee", "☕ Coffee"},
-		{"reaction-celebrate", "🎉 Celebrate"},
-		{"reaction-break", "🧘 Break"},
+		{"ambient", "Room tone  " + ambientLabel(m.controller.cfg.Listening.Ambient)},
+		{"ambient-down", "Tone −"},
+		{"ambient-up", "Tone +"},
+		{"reaction-wave", "1  👋 Wave"},
+		{"reaction-nice", "2  👍 Nice"},
+		{"reaction-coffee", "3  ☕ Coffee"},
+		{"reaction-celebrate", "4  🎉 Celebrate"},
+		{"reaction-break", "5  🧘 Break"},
 		{"prefs", "Preferences"},
 		{"back", "Back"},
 		{"stop", "Stop"},
@@ -3100,6 +3156,12 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		m.controller.toggle("muted")
 	case "spatial":
 		m.controller.toggle("spatial")
+	case "ambient":
+		m.changeLiveAmbient(1, 0)
+	case "ambient-down":
+		m.changeLiveAmbient(0, -0.05)
+	case "ambient-up":
+		m.changeLiveAmbient(0, 0.05)
 	case "reaction-wave":
 		m.sendLiveReaction("wave")
 	case "reaction-nice":
@@ -3168,6 +3230,22 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 		}
 	}
 	m.state = m.controller.viewState()
+}
+
+func (m *sessionModel) changeLiveAmbient(modeDelta int, volumeDelta float64) {
+	if modeDelta != 0 {
+		m.controller.cfg.Listening.Ambient = nextAmbient(m.controller.cfg.Listening.Ambient, modeDelta)
+	}
+	if volumeDelta != 0 {
+		m.controller.cfg.Listening.AmbientVolume = clamp(m.controller.cfg.Listening.AmbientVolume+volumeDelta, 0.05, 1)
+	}
+	_ = saveConfig(m.controller.cfg)
+	if m.controller.audio != nil {
+		m.controller.audio.updateListening(m.controller.cfg.Listening)
+	}
+	m.controller.set(func(state *SessionViewState) { state.Listening = m.controller.cfg.Listening })
+	m.state = m.controller.viewState()
+	m.message = "Private room tone: " + ambientLabel(m.controller.cfg.Listening.Ambient) + " · " + percent(m.controller.cfg.Listening.AmbientVolume)
 }
 
 type sessionControlItem struct {
@@ -3414,7 +3492,7 @@ func nextPresence(current string, delta int) string {
 }
 
 func nextTheme(current string, delta int) string {
-	values := []string{"ember", "ocean", "mono"}
+	values := []string{"ember", "ocean", "forest", "sunset", "aurora", "mono"}
 	index := 0
 	for i, value := range values {
 		if value == current {

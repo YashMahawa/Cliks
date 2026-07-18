@@ -15,8 +15,9 @@
     "dev:cli": "npm --workspace @cliks/cli run dev",
     "build": "npm --workspace @cliks/server run build && npm --workspace @cliks/site run build && npm --workspace @cliks/cli run build",
     "check": "npm --workspace @cliks/server run check && npm --workspace @cliks/site run check && npm --workspace @cliks/cli run check && npm run check:tools",
-    "check:tools": "node --check scripts/load-test.mjs && node --check scripts/smoke-server.mjs",
-    "smoke:server": "node scripts/smoke-server.mjs",
+    "check:tools": "node --check scripts/load-test.mjs && node --check scripts/smoke-server.mjs && node --check scripts/smoke-reactions.mjs",
+		"smoke:server": "node scripts/smoke-server.mjs",
+		"smoke:reactions": "node scripts/smoke-reactions.mjs",
     "load:server": "node scripts/load-test.mjs"
   },
   "engines": {

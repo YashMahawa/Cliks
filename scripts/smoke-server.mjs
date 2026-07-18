@@ -134,12 +134,14 @@ async function websocketRelaySmoke(url, teamCode) {
   const batches = [];
   const compactBatches = [];
   const presences = [];
+  const reactions = [];
 
   await Promise.all([once(a, "open"), once(b, "open"), once(c, "open")]);
   b.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
     if (message.type === "presence") presences.push(message);
     if (message.type === "peer_activity_batch") batches.push(message);
+    if (message.type === "peer_reaction") reactions.push(message);
   });
   c.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
@@ -164,6 +166,8 @@ async function websocketRelaySmoke(url, teamCode) {
     })
   );
 
+  a.send(JSON.stringify({ type: "reaction", reaction: "wave" }));
+
   await sleep(300);
   a.close();
   b.close();
@@ -178,6 +182,9 @@ async function websocketRelaySmoke(url, teamCode) {
   }
   if (batches[0].nickname !== "Alice Long") {
     throw new Error(`Expected relayed activity nickname "Alice Long", got ${JSON.stringify(batches[0].nickname)}`);
+  }
+  if (reactions.length !== 1 || reactions[0].reaction !== "wave" || reactions[0].nickname !== "Alice Long") {
+    throw new Error(`Expected one named room-wide wave, got ${JSON.stringify(reactions)}`);
   }
   const sawNamedPresence = presences.some((message) => {
     const names = new Set((message.peers ?? []).map((peer) => peer.nickname));

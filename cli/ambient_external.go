@@ -18,16 +18,16 @@ func playAmbient(ctx context.Context, mode string, volume float64) error {
 	}
 	var cmd *exec.Cmd
 	if player, err := exec.LookPath("mpv"); err == nil {
-		cmd = exec.CommandContext(ctx, player, "--no-video", "--really-quiet", "--no-terminal", "--loop-file=inf", fmt.Sprintf("--volume=%d", int(clamp(volume, 0, 0.6)*100)), path)
+		cmd = exec.CommandContext(ctx, player, "--no-video", "--really-quiet", "--no-terminal", "--loop-file=inf", fmt.Sprintf("--volume=%d", int(clamp(volume, 0, 1)*100)), path)
 	} else if player, err := exec.LookPath("ffplay"); err == nil {
-		cmd = exec.CommandContext(ctx, player, "-nodisp", "-loglevel", "quiet", "-stream_loop", "-1", "-volume", fmt.Sprintf("%d", int(clamp(volume, 0, 0.6)*100)), path)
+		cmd = exec.CommandContext(ctx, player, "-nodisp", "-loglevel", "quiet", "-stream_loop", "-1", "-volume", fmt.Sprintf("%d", int(clamp(volume, 0, 1)*100)), path)
 	} else if player, err := exec.LookPath("paplay"); err == nil {
 		return loopAmbientCommand(ctx, 0, func() *exec.Cmd {
-			return exec.CommandContext(ctx, player, fmt.Sprintf("--volume=%d", int(clamp(volume, 0, .6)*65536)), path)
+			return exec.CommandContext(ctx, player, fmt.Sprintf("--volume=%d", int(clamp(volume, 0, 1)*65536)), path)
 		})
 	} else if player, err := exec.LookPath("pw-play"); err == nil {
 		return loopAmbientCommand(ctx, 0, func() *exec.Cmd {
-			return exec.CommandContext(ctx, player, fmt.Sprintf("--volume=%.2f", clamp(volume, 0, .6)), path)
+			return exec.CommandContext(ctx, player, fmt.Sprintf("--volume=%.2f", clamp(volume, 0, 1)), path)
 		})
 	} else if player, err := exec.LookPath("aplay"); err == nil {
 		return loopAmbientCommand(ctx, 0, func() *exec.Cmd { return exec.CommandContext(ctx, player, "-q", path) })

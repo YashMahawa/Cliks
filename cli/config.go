@@ -364,7 +364,7 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.PresenceStatus = def.PresenceStatus
 	}
 	switch cfg.Theme {
-	case "ember", "ocean", "mono":
+	case "ember", "ocean", "forest", "sunset", "aurora", "mono":
 	default:
 		cfg.Theme = def.Theme
 	}
@@ -430,7 +430,7 @@ func normalizeConfig(cfg *CliksConfig) {
 	if cfg.Listening.AmbientVolume == 0 {
 		cfg.Listening.AmbientVolume = def.Listening.AmbientVolume
 	}
-	cfg.Listening.AmbientVolume = clamp(cfg.Listening.AmbientVolume, 0.05, 0.6)
+	cfg.Listening.AmbientVolume = clamp(cfg.Listening.AmbientVolume, 0.05, 1)
 	if cfg.Solo.People == 0 {
 		cfg.Solo = def.Solo
 	}

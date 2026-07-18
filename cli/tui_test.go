@@ -216,9 +216,9 @@ func TestLiveReactionButtonsUseExactRenderedHitboxes(t *testing.T) {
 	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
 	model.width = 120
 	model.height = 32
-	niceX, niceY := renderedTextPosition(t, model.View(), "[ 👍 Nice ]")
-	breakX, breakY := renderedTextPosition(t, model.View(), "[ 🧘 Break ]")
-	waveX, _ := renderedTextPosition(t, model.View(), "[ 👋 Wave ]")
+	niceX, niceY := renderedTextPosition(t, model.View(), "[ 2  👍 Nice ]")
+	breakX, breakY := renderedTextPosition(t, model.View(), "[ 5  🧘 Break ]")
+	waveX, _ := renderedTextPosition(t, model.View(), "[ 1  👋 Wave ]")
 
 	if got := model.liveHit(niceX+2, niceY); got != "reaction-nice" {
 		t.Fatalf("nice hit = %q, want reaction-nice", got)
@@ -226,7 +226,7 @@ func TestLiveReactionButtonsUseExactRenderedHitboxes(t *testing.T) {
 	if got := model.liveHit(breakX+2, breakY); got != "reaction-break" {
 		t.Fatalf("break hit = %q, want reaction-break", got)
 	}
-	if got := model.liveHit(waveX+ansi.StringWidth("[ 👋 Wave ]")+1, niceY); got != "" {
+	if got := model.liveHit(waveX+ansi.StringWidth("[ 1  👋 Wave ]")+1, niceY); got != "" {
 		t.Fatalf("gap between reaction buttons hit %q", got)
 	}
 }
@@ -245,11 +245,14 @@ func TestLiveActionHitboxesFollowRenderedRowsAtWideTerminalSizes(t *testing.T) {
 		{"[ Notify sound", "notification-sound"},
 		{"[ Mute", "mute"},
 		{"[ Spatial", "spatial"},
-		{"[ 👋 Wave ]", "reaction-wave"},
-		{"[ 👍 Nice ]", "reaction-nice"},
-		{"[ ☕ Coffee ]", "reaction-coffee"},
-		{"[ 🎉 Celebrate ]", "reaction-celebrate"},
-		{"[ 🧘 Break ]", "reaction-break"},
+		{"[ Room tone", "ambient"},
+		{"[ Tone − ]", "ambient-down"},
+		{"[ Tone + ]", "ambient-up"},
+		{"[ 1  👋 Wave ]", "reaction-wave"},
+		{"[ 2  👍 Nice ]", "reaction-nice"},
+		{"[ 3  ☕ Coffee ]", "reaction-coffee"},
+		{"[ 4  🎉 Celebrate ]", "reaction-celebrate"},
+		{"[ 5  🧘 Break ]", "reaction-break"},
 		{"[ Preferences ]", "prefs"},
 		{"[ Back ]", "back"},
 		{"[ Stop ]", "stop"},

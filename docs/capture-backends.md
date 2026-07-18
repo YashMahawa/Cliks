@@ -37,7 +37,13 @@ cliks setup                 # grant access / check readiness
 - Movement, scroll, multi-finger gestures ignored
 - Device read errors use exponential backoff + jitter (no busy loop)
 
-The installer creates a dedicated `cliks-capture` system user in the `input` group and runs a hardened helper. The desktop user receives only `k`, `l`, or `r` tokens over `/run/cliks/capture.sock`. Cliks no longer automatically grants per-user ACLs or adds the desktop user to `input`.
+The installer runs a small root-owned hardened helper. Its socket is owned by
+the configured desktop user with mode `0600`; connections must also come from
+the installed Cliks executable as that UID. The helper emits only while that
+user owns an active local logind seat, preventing activity from another signed-
+in desktop session from entering the room. The client receives only `k`, `l`,
+or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically grants
+the desktop user raw input ACLs or adds that user to `input`.
 
 Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop session or terminal mode.
 
