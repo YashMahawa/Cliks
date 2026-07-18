@@ -276,7 +276,7 @@ func runHomeTUI(cfg CliksConfig) error {
 	case actionSoundTest:
 		return runSoundTest()
 	case actionSolo:
-		return runSoloTUI(result.cfg)
+		return runSoloExclusive(result.cfg)
 	case actionBackgroundStart:
 		return cmdBackground([]string{"start", result.cfg.CurrentTeamCode})
 	case actionBackgroundStop:

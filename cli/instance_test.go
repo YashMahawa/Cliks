@@ -25,6 +25,36 @@ func TestSessionInstancePreventsDuplicateLocalConnection(t *testing.T) {
 	}
 }
 
+func TestSessionInstancePreventsConnectionToSecondTeam(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	first, err := acquireSessionInstance("CLIK-FIRST1", runModeForeground)
+	if err != nil {
+		t.Fatalf("first acquire failed: %v", err)
+	}
+	defer first.release()
+
+	_, err = acquireSessionInstance("CLIK-SECOND", runModeBackground)
+	var already alreadyRunningError
+	if !errors.As(err, &already) {
+		t.Fatalf("second-team acquire err = %v, want alreadyRunningError", err)
+	}
+	if already.state.TeamCode != "CLIK-FIRST1" {
+		t.Fatalf("active team = %q, want first team to retain ownership", already.state.TeamCode)
+	}
+}
+
+func TestModeTransitionsKeepOnlyOneOwner(t *testing.T) {
+	if transitionRequiresDisconnect("CLIK-FIRST1", "clik-first1") {
+		t.Fatal("same-team background request should attach to the existing owner")
+	}
+	if !transitionRequiresDisconnect("CLIK-FIRST1", "CLIK-SECOND") {
+		t.Fatal("switching teams must disconnect the old owner")
+	}
+	if !transitionRequiresDisconnect("CLIK-FIRST1", "") {
+		t.Fatal("entering offline Solo must disconnect the team owner")
+	}
+}
+
 func TestClassifySessionLockTreatsYoungEmptyLockAsWait(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if err := os.MkdirAll(stateDir(), 0o755); err != nil {

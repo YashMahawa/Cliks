@@ -44,8 +44,13 @@ func cmdBackground(args []string) error {
 }
 
 func startBackgroundForTeam(code string) (string, error) {
-	if active, ok := activeSession(); ok {
-		return fmt.Sprintf("Cliks is already running for %s (%s, pid %d).", valuePlain(active.TeamCode, code), modeLabel(active.Mode), active.PID), nil
+	code = strings.ToUpper(strings.TrimSpace(code))
+	active, switched, err := disconnectActiveSessionForTransition(code)
+	if err != nil {
+		return "", fmt.Errorf("switch active team: %w", err)
+	}
+	if current, ok := activeSession(); ok {
+		return fmt.Sprintf("Cliks is already running for %s (%s, pid %d).", valuePlain(current.TeamCode, code), modeLabel(current.Mode), current.PID), nil
 	}
 	dir := stateDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -68,7 +73,11 @@ func startBackgroundForTeam(code string) (string, error) {
 	_ = writeBackgroundPID(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
-	return fmt.Sprintf("Cliks is running in the background for %s.\nStatus: cliks service status\nStop:   cliks service stop\n(Aliases: cliks background status|stop)", code), nil
+	prefix := ""
+	if switched {
+		prefix = fmt.Sprintf("Switched from %s.\n", valuePlain(active.TeamCode, "the previous team"))
+	}
+	return prefix + fmt.Sprintf("Cliks is running in the background for %s.\nStatus: cliks service status\nStop:   cliks service stop\n(Aliases: cliks background status|stop)", code), nil
 }
 
 func stopBackground() (string, error) {

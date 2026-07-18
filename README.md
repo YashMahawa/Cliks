@@ -119,7 +119,7 @@ cliks sound-test
 cliks start --terminal --self
 ```
 
-For a completely offline room—no team, capture permission, or internet—open Solo Desk:
+For a completely offline room—no team, capture permission, or internet—open Solo Desk. Cliks disconnects any active team first so only one mode can own the device:
 
 ```bash
 cliks solo
@@ -172,7 +172,7 @@ cliks doctor
 
 Bare `cliks` opens a full-terminal control screen with Open Live, Solo Desk, Keep Running, Stop, More, and Quit. The selected team name and a one-click copyable code stay visible. Normal launches use a three-second desk animation with bundled sound. The first launch and post-reset launch use a ten-second spatial welcome with sound bursts, then a one-card-at-a-time setup that uses the full terminal. More contains Preferences, Advanced, Team, Connection, and Diagnostics. Preferences includes direct row toggles for notifications, notification sound, room tone, sharing, listening, presence, server, and six themes: Ember, Ocean, Forest, Sunset, Aurora, and Mono. Theme choices preview as you move through onboarding. The live room itself has direct private room-tone and volume controls plus clearly numbered `1`-`5` room-wide signals. Advanced includes a confirmed Factory Reset that clears only this device, stops its session, and replays first-run onboarding without deleting the server room. Mouse hover/click and keyboard navigation operate the same actions; press `?` anywhere for the current shortcuts.
 
-Cliks allows only one active local connection per config/device. If a foreground, background, launch-at-login, or older untracked session is already connected, `cliks start` refuses to create a second peer and tells you to use `cliks background status` or `cliks background stop`. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
+Cliks allows only one active local connection per config/device. Joining a different team stops the old room before the new room starts, and entering Solo Desk disconnects the team before opening its offline simulation. If a foreground, background, launch-at-login, or older untracked session is already connected, a raw second `cliks start` still refuses to create another peer. The control screen also cleans up extra same-device copies left behind by older installs so you do not hear your own actions through a duplicate local client.
 
 While `cliks start` is open, Cliks uses the terminal as a full spatial desk: you sit in the center, teammates occupy adaptive rings, active typers light up, and large rooms collapse overflow into calm semantic dots. Wave, nice, coffee, celebrate, and break signals are fixed low-cost room-wide events—no teammate selection required. Each signal animates at its sender's place in the circle and can produce an OS-native notification with a sender title and fixed message body. Local mute suppresses remote signal animation and notifications. The action rail makes code copy, notifications, notification sound, mute, spatial audio, all five signals, Preferences, Back, and Stop directly clickable. Keyboard equivalents remain visible in the footer and under `?`.
 

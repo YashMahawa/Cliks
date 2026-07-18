@@ -31,7 +31,7 @@ func TestReactionNotificationTitleContainsSenderAndMessage(t *testing.T) {
 	if title != "Mira sent 🧘" {
 		t.Fatalf("title = %q", title)
 	}
-	if body != "Let’s take a break. · Cliks quick signal" {
+	if body != "Let’s take a break." {
 		t.Fatalf("body = %q", body)
 	}
 	title, _ = reactionNotificationContent("", "wave")

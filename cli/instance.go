@@ -142,6 +142,31 @@ func waitForProcessExit(pid int, timeout time.Duration) bool {
 	return pid <= 0 || !processLooksAlive(pid)
 }
 
+// disconnectActiveSessionForTransition gives mode/team switches one ownership
+// boundary: the old process must be gone before a new room or Solo Desk opens.
+// A matching non-empty team is already the desired owner and is left alone.
+func disconnectActiveSessionForTransition(targetTeam string) (ActiveSessionState, bool, error) {
+	active, ok := activeSession()
+	if !ok {
+		return ActiveSessionState{}, false, nil
+	}
+	if !transitionRequiresDisconnect(active.TeamCode, targetTeam) {
+		return active, false, nil
+	}
+	if _, err := stopActiveSession(); err != nil {
+		return active, false, err
+	}
+	if !waitForProcessExit(active.PID, 3*time.Second) {
+		return active, false, fmt.Errorf("Cliks for %s did not stop; run `cliks service stop` and try again", valuePlain(active.TeamCode, "the current team"))
+	}
+	return active, true, nil
+}
+
+func transitionRequiresDisconnect(activeTeam string, targetTeam string) bool {
+	targetTeam = strings.ToUpper(strings.TrimSpace(targetTeam))
+	return targetTeam == "" || !strings.EqualFold(strings.TrimSpace(activeTeam), targetTeam)
+}
+
 type sessionLockAction int
 
 const (

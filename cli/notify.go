@@ -20,7 +20,7 @@ func reactionNotificationContent(sender string, reaction string) (string, string
 	if sender == "" {
 		sender = "A teammate"
 	}
-	return sender + " sent " + reactionGlyph(reaction), reactionPhrase(reaction) + " · Cliks quick signal"
+	return sender + " sent " + reactionGlyph(reaction), reactionPhrase(reaction)
 }
 
 func notifyWave(cfg CliksConfig, sender string) error {

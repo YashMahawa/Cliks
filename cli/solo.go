@@ -40,6 +40,17 @@ func runSoloTUI(cfg CliksConfig) error {
 	return err
 }
 
+func runSoloExclusive(cfg CliksConfig) error {
+	// Do not tear down a useful team session when Solo cannot open anyway.
+	if !term.IsTerminal(int(stdinFD())) || !term.IsTerminal(int(stdoutFD())) {
+		return fmt.Errorf("Solo Desk needs an interactive terminal; run cliks in a terminal and choose Solo Desk")
+	}
+	if _, _, err := disconnectActiveSessionForTransition(""); err != nil {
+		return fmt.Errorf("open Solo Desk: %w", err)
+	}
+	return runSoloTUI(cfg)
+}
+
 // Kept as tiny seams so tests can exercise the model without replacing os.Stdin.
 var stdinFD = func() uintptr { return 0 }
 var stdoutFD = func() uintptr { return 1 }

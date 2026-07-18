@@ -81,6 +81,10 @@ meeting-software clutter.
   `notify-send`: require an active D-Bus notification provider, restart an
   enabled known provider during setup, and include the provider's real error
   when native delivery fails.
+- [x] Remove redundant product-label text from reaction notification bodies;
+  keep only the sender/emoji title and useful fixed reaction phrase.
+- [x] Make team and Solo ownership exclusive: joining another team performs a
+  stop-and-wait switch, and entering Solo disconnects the active team first.
 
 ## Platform and security follow-up
 
