@@ -434,6 +434,9 @@ func TestOnboardingReflowsAcrossTerminalCellSizes(t *testing.T) {
 		if got := lipgloss.Width(view); got > size.width {
 			t.Fatalf("%dx%d setup uses %d columns", size.width, size.height, got)
 		}
+		if got := lipgloss.Height(view); got > size.height {
+			t.Fatalf("%dx%d setup uses %d rows", size.width, size.height, got)
+		}
 		if !strings.Contains(view, "Add a private room tone?") || !strings.Contains(view, "No room tone") {
 			t.Fatalf("%dx%d setup lost its decision:\n%s", size.width, size.height, ansi.Strip(view))
 		}
@@ -447,6 +450,31 @@ func TestSpacedOnboardingCardsKeepMouseRowsAligned(t *testing.T) {
 	got := updated.(homeModel)
 	if got.cursor != 1 || !got.mouseOver {
 		t.Fatalf("hovering Rain window selected cursor=%d hover=%v, want 1/true", got.cursor, got.mouseOver)
+	}
+}
+
+func TestLargeOnboardingUsesVerticalSpaceIntentionally(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 0, width: 180, height: 50, message: "One choice at a time."}
+	view := model.View()
+	plain := ansi.Strip(view)
+	if !strings.Contains(plain, "·       ○    [ YOU ]    ○       ·") {
+		t.Fatalf("large setup is missing expanded spatial art:\n%s", plain)
+	}
+	_, footerY := renderedTextPosition(t, view, "↑/↓ choose")
+	if footerY < 42 {
+		t.Fatalf("setup footer stayed at row %d instead of using the bottom of a 50-row terminal", footerY)
+	}
+}
+
+func TestLiveNavigationAnchorsToBottomOfTallRail(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := newSessionModel(newSessionController(cfg, StartOptions{}, nil))
+	model.width, model.height = 180, 44
+	_, y := renderedTextPosition(t, model.View(), "[ Preferences ]")
+	if y < 35 {
+		t.Fatalf("live navigation stayed at row %d instead of anchoring near the rail bottom", y)
 	}
 }
 

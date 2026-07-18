@@ -68,6 +68,10 @@ meeting-software clutter.
 - [x] Split Unix and Windows release packaging into clearly named jobs and
   upgrade workflow actions so expected platform branches do not resemble
   failed/skipped builds in GitHub's job UI.
+- [x] Give full-height panels intentional vertical rhythm: expanded onboarding
+  art at roomy sizes, primary controls above flexible space, and secondary
+  guidance/status anchored to the bottom across setup, home/forms, Solo, live
+  controls, diagnostics, and in-session navigation.
 
 ## Platform and security follow-up
 

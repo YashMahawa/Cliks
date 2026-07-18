@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $repo = if ($env:CLIKS_REPO) { $env:CLIKS_REPO } else { "YashMahawa/Cliks" }
 $binDir = if ($env:CLIKS_BIN_DIR) { $env:CLIKS_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "Cliks\bin" }
 $asset = "cliks-windows-amd64.zip"
-$requiredVersion = [version]"0.6.5"
+$requiredVersion = [version]"0.6.6"
 $url = "https://github.com/$repo/releases/latest/download/$asset"
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("cliks-" + [Guid]::NewGuid())
 

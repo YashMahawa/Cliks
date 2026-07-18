@@ -356,19 +356,19 @@ func (m soloModel) View() string {
 	footer := styleDim.Render(ansi.Truncate(footerText, width, ""))
 	if width < 96 {
 		if m.height < 46 {
-			controls := stylePanel.Width(width).Height(bodyHeight).Render(m.controlView(width-6, true))
+			controls := stylePanel.Width(width).Height(bodyHeight).Render(m.controlView(width-6, bodyHeight, true))
 			return lipgloss.JoinVertical(lipgloss.Left, header, controls, footer)
 		}
 		controlHeight := minInt(24, bodyHeight-10)
 		deskHeight := maxInt(10, bodyHeight-controlHeight-1)
 		desk := stylePanel.Width(width).Height(deskHeight).Render(deskModel.renderSpatialDesk(width-6, deskHeight-3))
-		controls := stylePanel.Width(width).Height(controlHeight).Render(m.controlView(width-6, false))
+		controls := stylePanel.Width(width).Height(controlHeight).Render(m.controlView(width-6, controlHeight, false))
 		return lipgloss.JoinVertical(lipgloss.Left, header, desk, controls, footer)
 	}
 	mapWidth := maxInt(50, width-52)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(deskModel.renderSpatialDesk(mapWidth-6, bodyHeight-3))
-	controls := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView(infoWidth-6, false))
+	controls := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.controlView(infoWidth-6, bodyHeight, false))
 	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", controls), footer)
 }
 
@@ -376,34 +376,53 @@ func (m soloModel) header(width int) string {
 	return styleTitle.Width(width).MaxWidth(width).Render(fmt.Sprintf("Cliks  /  Solo Desk    %d coworkers    OFFLINE + PRIVATE", m.cfg.Solo.People))
 }
 
-func (m soloModel) controlView(width int, compact bool) string {
+func (m soloModel) controlView(width int, height int, compact bool) string {
 	width = maxInt(32, width)
-	lines := []string{
-		styleAccent.Render("SOLO DESK"),
-		styleDim.Render("A private room mixed only for you."),
-		"",
-		"Coworkers    " + m.button("less", "−") + "  " + styleSecond.Render(fmt.Sprintf("%2d", m.cfg.Solo.People)) + "  " + m.button("more", "+"),
-		"",
-		styleSecond.Render("SOUND MIX"),
-		m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
-		m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
-		m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
-		m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
-		m.sliderLine("mouse-slider", "Clicks", m.cfg.Solo.MouseVolume, width),
-		"",
-		styleThird.Render("ROOM TONE"),
-		m.button("ambient", ambientLabel(m.cfg.Listening.Ambient)),
-		m.sliderLine("ambient-slider", "Room level", m.cfg.Listening.AmbientVolume, width),
-		"",
-		m.button("mute", "Mute  "+onOff(m.cfg.Listening.Muted)) + "    " + m.button("spark", "Wake the room"),
-	}
+	lines := []string{}
 	if compact {
-		lines = append([]string{styleDim.Render("○   ○   [ YOU ]   ○   ○"), ""}, lines...)
+		lines = []string{
+			styleDim.Render("○   ○   [ YOU ]   ○   ○"),
+			styleAccent.Render("SOLO MIX"),
+			"Coworkers    " + m.button("less", "−") + "  " + styleSecond.Render(fmt.Sprintf("%2d", m.cfg.Solo.People)) + "  " + m.button("more", "+"),
+			m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
+			m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
+			m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
+			m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
+			m.sliderLine("mouse-slider", "Clicks", m.cfg.Solo.MouseVolume, width),
+			m.button("ambient", ambientLabel(m.cfg.Listening.Ambient)),
+			m.sliderLine("ambient-slider", "Room level", m.cfg.Listening.AmbientVolume, width),
+			m.button("mute", "Mute  "+onOff(m.cfg.Listening.Muted)) + "    " + m.button("spark", "Wake the room"),
+		}
+	} else {
+		lines = []string{
+			styleAccent.Render("SOLO DESK"),
+			styleDim.Render("A private room mixed only for you."),
+			"",
+			"Coworkers    " + m.button("less", "−") + "  " + styleSecond.Render(fmt.Sprintf("%2d", m.cfg.Solo.People)) + "  " + m.button("more", "+"),
+			"",
+			styleSecond.Render("SOUND MIX"),
+			m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
+			m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
+			m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
+			m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
+			m.sliderLine("mouse-slider", "Clicks", m.cfg.Solo.MouseVolume, width),
+			"",
+			styleThird.Render("ROOM TONE"),
+			m.button("ambient", ambientLabel(m.cfg.Listening.Ambient)),
+			m.sliderLine("ambient-slider", "Room level", m.cfg.Listening.AmbientVolume, width),
+			"",
+			m.button("mute", "Mute  "+onOff(m.cfg.Listening.Muted)) + "    " + m.button("spark", "Wake the room"),
+		}
 	}
-	if m.message != "" {
-		lines = append(lines, "", styleDim.Render(ansi.Truncate(m.message, width, "…")))
+	footerLines := []string{}
+	if m.message != "" && (!compact || height >= 18) {
+		footerLines = append(footerLines, styleDim.Render(ansi.Truncate(m.message, width, "…")))
 	}
-	lines = append(lines, "", styleDim.Render("Local only · no capture · no network"), m.button("back", "Back"))
+	if !compact || height >= 16 {
+		footerLines = append(footerLines, styleDim.Render("Local only · no capture · no network"))
+	}
+	footerLines = append(footerLines, m.button("back", "Back"))
+	lines = verticalSections(lines, footerLines, height, 1)
 	return strings.Join(lines, "\n")
 }
 

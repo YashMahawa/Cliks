@@ -762,7 +762,18 @@ func launchGridString(grid [][]rune) string {
 }
 
 func (m homeModel) fullPanel() lipgloss.Style {
-	return stylePanel.Width(panelWidth(m.width)).Height(maxInt(10, m.height-8))
+	return stylePanel.Width(panelWidth(m.width)).Height(m.fullPanelContentHeight())
+}
+
+func (m homeModel) fullPanelContentHeight() int { return maxInt(10, m.height-8) }
+
+func verticalSections(top []string, bottom []string, targetHeight int, minimumGap int) []string {
+	gap := maxInt(minimumGap, targetHeight-len(top)-len(bottom))
+	result := make([]string, 0, len(top)+gap+len(bottom))
+	result = append(result, top...)
+	result = append(result, make([]string, gap)...)
+	result = append(result, bottom...)
+	return result
 }
 
 func (m *homeModel) move(delta int) {
@@ -1132,17 +1143,22 @@ func (m homeModel) itemView() string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "")
+	footerLines := []string{}
 	if m.mode == "first-setup" {
 		contentWidth := maxInt(30, panelWidth(m.width)-8)
-		lines = append(lines, centerTerminalText(styleDim.Render("↑/↓ choose    Enter confirms    ← previous    Esc exits safely"), contentWidth))
-		if m.message != "" {
-			lines = append(lines, "", centerTerminalText(styleDim.Render(m.message), contentWidth))
+		if m.height == 0 || m.height >= 20 {
+			footerLines = append(footerLines, centerTerminalText(styleDim.Render("↑/↓ choose    Enter confirms    ← previous    Esc exits safely"), contentWidth))
+		}
+		if m.message != "" && (m.height == 0 || m.height >= 24) {
+			footerLines = append(footerLines, "", centerTerminalText(styleDim.Render(m.message), contentWidth))
 		}
 	} else {
-		lines = append(lines, styleDim.Render("? shortcuts"))
-		lines = append(lines, styleDim.Render(m.message))
+		footerLines = append(footerLines, styleDim.Render("? shortcuts"))
+		if m.message != "" {
+			footerLines = append(footerLines, styleDim.Render(m.message))
+		}
 	}
+	lines = verticalSections(lines, footerLines, m.fullPanelContentHeight(), 1)
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
@@ -1220,9 +1236,20 @@ func (m homeModel) firstSetupPrefixLines() []string {
 	filled := step + 1
 	progress := strings.Repeat("━", filled) + strings.Repeat("─", onboardingStepCount-filled)
 	art := []string{
-		"             ·       ○       ·",
-		"         ·       [ YOU ]       ·",
-		"             ·       ○       ·",
+		styleDim.Render("             ·       ○       ·"),
+		styleAccent.Render("         ·       [ YOU ]       ·"),
+		styleDim.Render("             ·       ○       ·"),
+	}
+	if m.setupComfortable() {
+		art = []string{
+			styleDim.Render("                 ·  ·  ·  ·  ·"),
+			styleDim.Render("            ·                   ·"),
+			styleSecond.Render("        ·          ○   ○          ·"),
+			styleAccent.Render("      ·       ○    [ YOU ]    ○       ·"),
+			styleSecond.Render("        ·          ○   ○          ·"),
+			styleDim.Render("            ·                   ·"),
+			styleDim.Render("                 ·  ·  ·  ·  ·"),
+		}
 	}
 	lines := make([]string, 0, 20)
 	leadSpace := clampInt((m.height-30)/6, 0, 3)
@@ -1239,11 +1266,15 @@ func (m homeModel) firstSetupPrefixLines() []string {
 	if !compact {
 		lines = append(lines, "")
 		for _, line := range art {
-			lines = append(lines, centerTerminalText(styleAccent.Render(line), width))
+			lines = append(lines, centerTerminalText(line, width))
 		}
 	}
-	lines = append(lines, "", centerTerminalText(styleAccent.Render(titles[step]), width))
-	if m.height == 0 || m.height >= 20 {
+	if compact {
+		lines = append(lines, centerTerminalText(styleAccent.Render(titles[step]), width))
+	} else {
+		lines = append(lines, "", centerTerminalText(styleAccent.Render(titles[step]), width))
+	}
+	if m.height == 0 || m.height >= 24 {
 		for _, line := range strings.Split(ansi.Wordwrap(details[step], maxInt(28, width-12), ""), "\n") {
 			lines = append(lines, centerTerminalText(line, width))
 		}
@@ -1252,7 +1283,9 @@ func (m homeModel) firstSetupPrefixLines() []string {
 		quip := quips[(step+m.onboardingQuip)%len(quips)]
 		lines = append(lines, centerTerminalText(styleDim.Render(quip), width))
 	}
-	lines = append(lines, "")
+	if !compact {
+		lines = append(lines, "")
+	}
 	return lines
 }
 
@@ -1308,13 +1341,15 @@ func (m homeModel) preferencesView() string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "")
 	footer := "Left/right adjusts. Enter toggles. s saves. q returns."
 	if start > 0 || end < len(rows) {
 		footer = fmt.Sprintf("Showing %d-%d of %d. Up/down reveals more. q returns.", start+1, end, len(rows))
 	}
-	lines = append(lines, styleDim.Render(footer))
-	lines = append(lines, styleDim.Render(m.message))
+	footerLines := []string{styleDim.Render(footer)}
+	if m.message != "" {
+		footerLines = append(footerLines, styleDim.Render(m.message))
+	}
+	lines = verticalSections(lines, footerLines, m.fullPanelContentHeight(), 1)
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
@@ -1337,12 +1372,16 @@ func (m homeModel) doctorReportView() string {
 	if m.doctorHover == "refresh" {
 		refresh = styleSelected.Render(" Refresh ")
 	}
-	lines = append(lines, "", back+"  "+refresh)
+	footerLines := []string{back + "  " + refresh}
 	position := fmt.Sprintf("Lines %d-%d of %d", start+1, end, len(displayLines))
 	if len(displayLines) == 0 {
 		position = "No report data"
 	}
-	lines = append(lines, styleDim.Render(position+". Wheel or up/down scrolls; r refreshes; q returns."), styleDim.Render(m.message))
+	footerLines = append(footerLines, styleDim.Render(position+". Wheel or up/down scrolls; r refreshes; q returns."))
+	if m.message != "" {
+		footerLines = append(footerLines, styleDim.Render(m.message))
+	}
+	lines = verticalSections(lines, footerLines, m.fullPanelContentHeight(), 1)
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
@@ -2398,13 +2437,16 @@ func (m homeModel) formView() string {
 	}
 	lines := []string{styleAccent.Render(title), ""}
 	lines = append(lines, rows...)
-	lines = append(lines, "")
+	footerLines := []string{}
 	if m.busy {
-		lines = append(lines, styleAccent.Render(m.message))
+		footerLines = append(footerLines, styleAccent.Render(m.message))
 	} else {
-		lines = append(lines, styleDim.Render("Left/right edits at the cursor. Enter submits. Tab changes fields. Esc cancels."))
-		lines = append(lines, styleDim.Render(m.message))
+		footerLines = append(footerLines, styleDim.Render("Left/right edits at the cursor. Enter submits. Tab changes fields. Esc cancels."))
+		if m.message != "" {
+			footerLines = append(footerLines, styleDim.Render(m.message))
+		}
 	}
+	lines = verticalSections(lines, footerLines, m.fullPanelContentHeight(), 1)
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
 }
 
@@ -2858,7 +2900,7 @@ func (m sessionModel) View() string {
 	mapWidth := maxInt(48, width-58)
 	infoWidth := width - mapWidth - 2
 	desk := stylePanel.Width(mapWidth).Height(bodyHeight).Render(m.renderSpatialDesk(mapWidth-6, bodyHeight-3))
-	activity := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth - 5))
+	activity := stylePanel.Width(infoWidth).Height(bodyHeight).Render(m.liveActivityView(infoWidth-5, bodyHeight))
 	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, desk, "  ", activity), footer)
 }
 
@@ -3028,7 +3070,7 @@ func reactionGlyph(value string) string {
 	return "•"
 }
 
-func (m sessionModel) liveActivityView(width int) string {
+func (m sessionModel) liveActivityView(width int, height int) string {
 	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
 	navigation := m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop")
@@ -3060,12 +3102,12 @@ func (m sessionModel) liveActivityView(width int) string {
 		m.liveActionLine("reaction-wave", "1  👋 Wave") + "    " + m.liveActionLine("reaction-nice", "2  👍 Nice"),
 		m.liveActionLine("reaction-coffee", "3  ☕ Coffee") + "  " + m.liveActionLine("reaction-celebrate", "4  🎉 Celebrate"),
 		m.liveActionLine("reaction-break", "5  🧘 Break"),
-		"",
 	}
-	lines = append(lines, navigationLines...)
+	footerLines := append([]string(nil), navigationLines...)
 	if m.message != "" {
-		lines = append(lines, "", styleDim.Render(m.message))
+		footerLines = append(footerLines, "", styleDim.Render(ansi.Truncate(m.message, width, "…")))
 	}
+	lines = verticalSections(lines, footerLines, height, 1)
 	return strings.Join(lines, "\n")
 }
 
@@ -3388,13 +3430,15 @@ func (m sessionModel) sessionControlView() string {
 	if end < len(items) {
 		lines = append(lines, styleDim.Render("↓ more options"))
 	}
-	lines = append(lines, "", styleDim.Render("Esc stays here  ·  Enter chooses  ·  Stop is the only immediate disconnect"))
+	footerLines := []string{styleDim.Render("Esc stays here  ·  Enter chooses  ·  Stop is the only immediate disconnect")}
 	if m.message != "" {
-		lines = append(lines, styleDim.Render(m.message))
+		footerLines = append(footerLines, styleDim.Render(m.message))
 	}
+	contentHeight := maxInt(12, m.height-7)
+	lines = verticalSections(lines, footerLines, contentHeight, 1)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		styleTitle.Width(width).Render("Cliks  /  Control"),
-		stylePanel.Width(width).Height(maxInt(12, m.height-7)).Render(strings.Join(lines, "\n")),
+		stylePanel.Width(width).Height(contentHeight).Render(strings.Join(lines, "\n")),
 	)
 }
 

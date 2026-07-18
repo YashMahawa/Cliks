@@ -16,6 +16,7 @@ func TestSoloDeskUsesLocalSimulationConfig(t *testing.T) {
 	cfg.Solo = SoloConfig{People: 6, Keyboard: true, Mouse: false}
 	model := newSoloModel(cfg)
 	defer model.audio.Close()
+	model.width, model.height = 120, 36
 	if got := len(model.state.Peers); got != 6 {
 		t.Fatalf("peers = %d, want 6", got)
 	}
@@ -152,8 +153,21 @@ func TestSoloReflowsWhenTerminalFontChangesCellCount(t *testing.T) {
 		if got := lipgloss.Width(view); got > size.width {
 			t.Fatalf("%dx%d Solo view uses %d columns", size.width, size.height, got)
 		}
+		if got := lipgloss.Height(view); got > size.height {
+			t.Fatalf("%dx%d Solo view uses %d rows", size.width, size.height, got)
+		}
 		if !strings.Contains(view, "Master") || !strings.Contains(view, "Room level") {
 			t.Fatalf("%dx%d reflow hid sliders:\n%s", size.width, size.height, ansi.Strip(view))
 		}
+	}
+}
+
+func TestSoloSecondaryControlsAnchorToPanelBottom(t *testing.T) {
+	model := newSoloModel(defaultConfig())
+	defer model.audio.Close()
+	model.width, model.height = 180, 50
+	_, backY := renderedTextPosition(t, model.View(), "[ Back ]")
+	if backY < 42 {
+		t.Fatalf("Solo Back/status group stayed at row %d instead of using the panel bottom", backY)
 	}
 }
