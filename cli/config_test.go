@@ -209,6 +209,12 @@ func TestConfigPathUsesAppDataOnWindows(t *testing.T) {
 	}
 }
 
+func TestDefaultRoomToneVolumeIsFiftyPercent(t *testing.T) {
+	if got := defaultConfig().Listening.AmbientVolume; got != 0.50 {
+		t.Fatalf("default room tone volume = %v, want 0.50", got)
+	}
+}
+
 func TestSystemdQuoteHandlesSpaces(t *testing.T) {
 	got, err := systemdQuote(`/home/user/My Apps/cliks`)
 	if err != nil {

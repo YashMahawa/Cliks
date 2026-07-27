@@ -167,7 +167,7 @@ func defaultConfig() CliksConfig {
 			DynamicPlacement:  true,
 			ShuffleMinutes:    10,
 			Ambient:           "off",
-			AmbientVolume:     0.22,
+			AmbientVolume:     0.50,
 		},
 		Solo:          SoloConfig{People: 4, Keyboard: true, Mouse: true, KeyboardVolume: 0.7, MouseVolume: 0.8},
 		BatchWindowMs: 500,
