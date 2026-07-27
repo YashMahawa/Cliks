@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -84,6 +83,7 @@ type ListeningConfig struct {
 	Mouse             bool    `json:"mouse"`
 	Self              bool    `json:"self"`
 	Volume            float64 `json:"volume"`
+	VolumeConfigured  bool    `json:"volumeConfigured,omitempty"`
 	Muted             bool    `json:"muted"`
 	Spatial           bool    `json:"spatial"`
 	FatigueProtection bool    `json:"fatigueProtection"`
@@ -159,6 +159,7 @@ func defaultConfig() CliksConfig {
 			Mouse:             true,
 			Self:              false,
 			Volume:            0.7,
+			VolumeConfigured:  true,
 			Muted:             false,
 			Spatial:           true,
 			FatigueProtection: true,
@@ -280,9 +281,10 @@ func saveConfig(cfg CliksConfig) error {
 
 func rememberTeam(code string, name string) (CliksConfig, error) {
 	cfg := loadConfig()
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if code == "" {
-		return cfg, errors.New("team code cannot be empty")
+	var err error
+	code, err = normalizeTeamCode(code)
+	if err != nil {
+		return cfg, err
 	}
 	if name == "" {
 		name = teamNameForCode(cfg, code)
@@ -391,8 +393,9 @@ func normalizeConfig(cfg *CliksConfig) {
 	if !cfg.Sharing.Keyboard && !cfg.Sharing.Mouse {
 		cfg.Sharing = def.Sharing
 	}
-	if cfg.Listening.Volume == 0 {
+	if !cfg.Listening.VolumeConfigured {
 		cfg.Listening.Volume = def.Listening.Volume
+		cfg.Listening.VolumeConfigured = true
 	}
 	if cfg.Listening.Density == 0 {
 		cfg.Listening.Density = def.Listening.Density

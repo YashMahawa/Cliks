@@ -30,9 +30,19 @@ func playAmbient(ctx context.Context, mode string, volume float64) error {
 			return exec.CommandContext(ctx, player, fmt.Sprintf("--volume=%.2f", clamp(volume, 0, 1)), path)
 		})
 	} else if player, err := exec.LookPath("aplay"); err == nil {
-		return loopAmbientCommand(ctx, 0, func() *exec.Cmd { return exec.CommandContext(ctx, player, "-q", path) })
+		scaled, cleanup, err := scaleWavFileGain(path, clamp(volume, 0, 1))
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		return loopAmbientCommand(ctx, 0, func() *exec.Cmd { return exec.CommandContext(ctx, player, "-q", scaled) })
 	} else if player, err := exec.LookPath("termux-media-player"); err == nil {
-		return loopAmbientCommand(ctx, 20*time.Second, func() *exec.Cmd { return exec.CommandContext(ctx, player, "play", path) })
+		scaled, cleanup, err := scaleWavFileGain(path, clamp(volume, 0, 1))
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		return loopAmbientCommand(ctx, 20*time.Second, func() *exec.Cmd { return exec.CommandContext(ctx, player, "play", scaled) })
 	} else {
 		return fmt.Errorf("ambient room tones need mpv, ffplay, PulseAudio, PipeWire, ALSA, or Termux:API")
 	}

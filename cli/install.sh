@@ -7,7 +7,7 @@ REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
 DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.12}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.13}"
 CAPTURE_APP_DIR="${CLIKS_CAPTURE_APP_DIR:-$HOME/Applications/Cliks Capture.app}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
@@ -39,6 +39,24 @@ case "$(uname -s)" in
     BIN_DIR="${CLIKS_BIN_DIR:-$HOME/bin}"
     ;;
 esac
+
+validate_install_path() {
+  local label="$1" value="$2"
+  case "$value" in
+    ""|*$'\n'*|*$'\r'*)
+      say "Unsafe $label path. Use a non-empty path without control characters, quotes, backslashes, or %."
+      exit 1
+      ;;
+  esac
+  if LC_ALL=C printf '%s' "$value" | grep -q '[[:cntrl:]"\\%]'; then
+      say "Unsafe $label path. Use a non-empty path without control characters, quotes, backslashes, or %."
+      exit 1
+  fi
+}
+
+validate_install_path "binary" "$BIN_DIR"
+validate_install_path "source" "$INSTALL_DIR"
+validate_install_path "capture app" "$CAPTURE_APP_DIR"
 
 say "Installing Cliks..."
 say ""

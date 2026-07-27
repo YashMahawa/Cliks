@@ -210,9 +210,43 @@ func TestConfigPathUsesAppDataOnWindows(t *testing.T) {
 }
 
 func TestSystemdQuoteHandlesSpaces(t *testing.T) {
-	got := systemdQuote(`/home/user/My Apps/cliks`)
+	got, err := systemdQuote(`/home/user/My Apps/cliks`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != `"/home/user/My Apps/cliks"` {
 		t.Fatalf("systemdQuote = %q", got)
+	}
+}
+
+func TestSystemdQuoteRejectsControlCharactersAndEscapesSpecifiers(t *testing.T) {
+	if _, err := systemdQuote("/tmp/cliks\nEnvironment=BAD"); err == nil {
+		t.Fatal("expected newline to be rejected")
+	}
+	got, err := systemdQuote("/opt/100%/cliks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `"/opt/100%%/cliks"` {
+		t.Fatalf("systemdQuote = %q", got)
+	}
+}
+
+func TestNormalizeTeamCodeRejectsScriptContent(t *testing.T) {
+	if _, err := normalizeTeamCode("CLIK-ABC123\"\r\nMsgBox 1"); err == nil {
+		t.Fatal("expected script content to be rejected")
+	}
+	if got, err := normalizeTeamCode("clik-abc123"); err != nil || got != "CLIK-ABC123" {
+		t.Fatalf("normalizeTeamCode = %q, %v", got, err)
+	}
+}
+
+func TestLauncherValuesRejectControlsAndEscapeXML(t *testing.T) {
+	if err := validateLauncherValue("path", "C:\\Cliks\r\nbad"); err == nil {
+		t.Fatal("expected control characters to be rejected")
+	}
+	if got := xmlText(`/Users/A&B/<Cliks>`); got != `/Users/A&amp;B/&lt;Cliks&gt;` {
+		t.Fatalf("xmlText = %q", got)
 	}
 }
 

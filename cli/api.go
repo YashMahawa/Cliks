@@ -33,29 +33,47 @@ func createTeamViaAPI(cfg CliksConfig, name string, deletePassword string) (apiT
 	if out.Error != "" {
 		return apiTeam{}, errors.New(out.Error)
 	}
+	code, err := normalizeTeamCode(out.Team.Code)
+	if err != nil {
+		return apiTeam{}, fmt.Errorf("server returned an invalid team code: %w", err)
+	}
+	out.Team.Code = code
 	return out.Team, nil
 }
 
 func getTeamViaAPI(cfg CliksConfig, code string) (apiTeam, error) {
+	normalizedCode, err := normalizeTeamCode(code)
+	if err != nil {
+		return apiTeam{}, err
+	}
 	var out struct {
 		Team  apiTeam `json:"team"`
 		Error string  `json:"error"`
 	}
-	err := apiJSON("GET", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+strings.ToUpper(code), nil, &out)
+	err = apiJSON("GET", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+normalizedCode, nil, &out)
 	if err != nil {
 		return apiTeam{}, err
 	}
 	if out.Error != "" {
 		return apiTeam{}, errors.New(out.Error)
 	}
+	normalized, err := normalizeTeamCode(out.Team.Code)
+	if err != nil {
+		return apiTeam{}, fmt.Errorf("server returned an invalid team code: %w", err)
+	}
+	out.Team.Code = normalized
 	return out.Team, nil
 }
 
 func deleteTeamViaAPI(cfg CliksConfig, code string, deletePassword string) error {
+	normalizedCode, err := normalizeTeamCode(code)
+	if err != nil {
+		return err
+	}
 	var out struct {
 		Error string `json:"error"`
 	}
-	err := apiJSON("DELETE", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+strings.ToUpper(code), map[string]string{
+	err = apiJSON("DELETE", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+normalizedCode, map[string]string{
 		"deletePassword": deletePassword,
 	}, &out)
 	if err != nil {

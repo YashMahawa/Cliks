@@ -626,7 +626,17 @@ func (s *sessionController) commandLoop() {
 			return
 		case <-ticker.C:
 			consumeSessionCommands(func(command localSessionCommand) {
-				if command.Type == "reaction" {
+				if command.Type == "reload_connection" {
+					cfg := loadConfig()
+					s.cfg.APIURL = cfg.APIURL
+					s.cfg.WSURL = cfg.WSURL
+					s.cfg.BatchWindowMs = cfg.BatchWindowMs
+					s.wsMu.Lock()
+					if s.ws != nil {
+						_ = s.ws.Close()
+					}
+					s.wsMu.Unlock()
+				} else if command.Type == "reaction" {
 					if err := s.sendReaction(command.Reaction); err != nil {
 						s.set(func(state *SessionViewState) { state.Notice = "Signal failed: " + err.Error() })
 					}

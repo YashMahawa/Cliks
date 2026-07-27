@@ -43,7 +43,10 @@ func autostartAction(args []string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("cannot enable launch-at-login until %s is verified with %s: %w", code, cfg.APIURL, err)
 		}
-		code = strings.ToUpper(team.Code)
+		code, err = normalizeTeamCode(team.Code)
+		if err != nil {
+			return "", err
+		}
 	}
 	switch runtime.GOOS {
 	case "linux":
@@ -75,11 +78,32 @@ func stableServiceExecutable() string {
 	return currentExecutable()
 }
 
-func systemdQuote(path string) string {
+func systemdQuote(path string) (string, error) {
+	if err := validateLauncherValue("executable path", path); err != nil {
+		return "", err
+	}
 	// systemd unit values: wrap in double quotes and escape \ and ".
 	escaped := strings.ReplaceAll(path, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
+	escaped = strings.ReplaceAll(escaped, `%`, `%%`)
+	return `"` + escaped + `"`, nil
+}
+
+func validateLauncherValue(label, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s is empty", label)
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s contains a control character", label)
+		}
+	}
+	return nil
+}
+
+func xmlText(value string) string {
+	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
+	return replacer.Replace(value)
 }
 
 func linuxAutostart(action, code string) (string, error) {
@@ -107,6 +131,14 @@ func linuxAutostart(action, code string) (string, error) {
 			return "", err
 		}
 		exe := stableServiceExecutable()
+		quotedExe, err := systemdQuote(exe)
+		if err != nil {
+			return "", err
+		}
+		code, err = normalizeTeamCode(code)
+		if err != nil {
+			return "", err
+		}
 		body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
 After=network-online.target
@@ -121,7 +153,7 @@ Environment=CLIKS_RUN_MODE=%s
 
 [Install]
 WantedBy=default.target
-`, systemdQuote(exe), code, runModeBoot)
+`, quotedExe, code, runModeBoot)
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
@@ -156,6 +188,14 @@ func macAutostart(action, code string) (string, error) {
 			return "", err
 		}
 		exe := stableServiceExecutable()
+		var err error
+		if err := validateLauncherValue("executable path", exe); err != nil {
+			return "", err
+		}
+		code, err = normalizeTeamCode(code)
+		if err != nil {
+			return "", err
+		}
 		// Reloading by label first makes upgrades idempotent when an older
 		// LaunchAgent is already registered with launchd.
 		domain := fmt.Sprintf("gui/%d", os.Getuid())
@@ -191,11 +231,11 @@ func macAutostart(action, code string) (string, error) {
   <string>%s</string>
 </dict>
 </plist>
-`, launchAgentID, exe, code, runModeBoot, filepath.Join(home, "Library", "Logs", "cliks.log"), filepath.Join(home, "Library", "Logs", "cliks.err.log"))
+`, launchAgentID, xmlText(exe), code, runModeBoot, xmlText(filepath.Join(home, "Library", "Logs", "cliks.log")), xmlText(filepath.Join(home, "Library", "Logs", "cliks.err.log")))
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
-		err := exec.Command("launchctl", "bootstrap", domain, path).Run()
+		err = exec.Command("launchctl", "bootstrap", domain, path).Run()
 		if err != nil {
 			return fmt.Sprintf("LaunchAgent written for %s. Run: launchctl bootstrap gui/$(id -u) %q", code, path), nil
 		}
@@ -244,6 +284,14 @@ func windowsAutostart(action, code string) (string, error) {
 			return "", err
 		}
 		exe := stableServiceExecutable()
+		var err error
+		if err := validateLauncherValue("executable path", exe); err != nil {
+			return "", err
+		}
+		code, err = normalizeTeamCode(code)
+		if err != nil {
+			return "", err
+		}
 		// WindowStyle 0 = hidden. No console flash at login.
 		body := fmt.Sprintf(
 			"Set sh = CreateObject(\"Wscript.Shell\")\r\n"+

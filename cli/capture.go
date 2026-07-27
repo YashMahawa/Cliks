@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muesli/cancelreader"
 	"golang.org/x/term"
 )
 
@@ -53,6 +54,7 @@ type ActivityCapture struct {
 	cancel           context.CancelFunc
 	mu               sync.Mutex
 	terminalOldState *term.State
+	terminalReader   cancelreader.CancelReader
 }
 
 func newActivityCapture() *ActivityCapture {
@@ -105,10 +107,33 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 	c.mu.Lock()
 	c.terminalOldState = oldState
 	c.mu.Unlock()
+	reader, err := cancelreader.NewReader(os.Stdin)
+	if err != nil {
+		c.restoreTerminal()
+		return fmt.Errorf("prepare cancellable terminal input: %w", err)
+	}
+	c.mu.Lock()
+	c.terminalReader = reader
+	c.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		reader.Cancel()
+	}()
 	if sharing.Mouse {
 		fmt.Print("\x1b[?1000h\x1b[?1006h")
 	}
 	go func() {
+		defer func() {
+			c.mu.Lock()
+			owned := c.terminalReader == reader
+			if c.terminalReader == reader {
+				c.terminalReader = nil
+			}
+			c.mu.Unlock()
+			if owned {
+				_ = reader.Close()
+			}
+		}()
 		defer c.restoreTerminal()
 		buf := make([]byte, 256)
 		for {
@@ -117,7 +142,7 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 				return
 			default:
 			}
-			n, err := os.Stdin.Read(buf)
+			n, err := reader.Read(buf)
 			if err != nil {
 				return
 			}

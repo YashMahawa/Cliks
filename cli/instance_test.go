@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestSessionInstancePreventsDuplicateLocalConnection(t *testing.T) {
@@ -140,6 +141,31 @@ func TestSessionInstanceIgnoresOwnPendingBackgroundPID(t *testing.T) {
 		t.Fatalf("acquire with own pending pid failed: %v", err)
 	}
 	instance.release()
+}
+
+func TestBackgroundReadinessRequiresMatchingSessionLock(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-READY1", Mode: runModeBackground}
+	data, _ := json.MarshalIndent(state, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForBackgroundReady(os.Getpid(), "CLIK-READY1", 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForBackgroundReady(os.Getpid(), "CLIK-WRONG1", 100*time.Millisecond); err == nil {
+		t.Fatal("expected mismatched team to fail readiness")
+	}
+}
+
+func TestBackgroundReadinessTimesOutWithoutLock(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := waitForBackgroundReady(os.Getpid(), "CLIK-READY1", 25*time.Millisecond); err == nil {
+		t.Fatal("expected missing lock to time out")
+	}
 }
 
 func TestActiveSessionReportsDuplicateLocalProcess(t *testing.T) {

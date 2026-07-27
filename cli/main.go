@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.12"
+const version = "0.6.13"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -429,24 +430,51 @@ func cmdSet(args []string) error {
 		printSettingCatalog()
 		return nil
 	}
-	if len(args) >= 4 && len(args)%2 == 0 {
-		batch := true
+	if len(args) < 2 || len(args)%2 != 0 {
+		return errors.New("usage: cliks set <key> <value> [<key> <value> ...]\nQuote values containing spaces, for example: cliks set nickname \"Cosmic Otter\"")
+	}
+	if len(args) > 2 {
 		for index := 0; index < len(args); index += 2 {
-			if !isConfigSettingKey(args[index]) {
-				batch = false
-				break
+			if args[index] == "autostart" {
+				return errors.New("autostart changes must be run separately: cliks set autostart on|off")
 			}
-		}
-		if batch {
-			for index := 0; index < len(args); index += 2 {
-				if err := cmdSetOne(args[index : index+2]); err != nil {
-					return fmt.Errorf("%s: %w", args[index], err)
-				}
-			}
-			return nil
 		}
 	}
-	return cmdSetOne(args)
+	cfg := loadConfig()
+	reconnect := false
+	for index := 0; index < len(args); index += 2 {
+		key, value := args[index], args[index+1]
+		if !isConfigSettingKey(key) {
+			return fmt.Errorf("unknown setting: %s", key)
+		}
+		if key == "autostart" {
+			enabled, err := parseOnOff(value)
+			if err != nil {
+				return err
+			}
+			if enabled {
+				return cmdAutostart([]string{"enable", cfg.CurrentTeamCode})
+			}
+			return cmdAutostart([]string{"disable"})
+		}
+		changedEndpoint, err := applyConfigSetting(&cfg, key, value)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		reconnect = reconnect || changedEndpoint
+	}
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+	if reconnect {
+		if _, ok := activeSession(); ok {
+			if err := enqueueSessionCommand(localSessionCommand{Type: "reload_connection"}); err != nil {
+				return fmt.Errorf("saved, but could not refresh the running connection: %w", err)
+			}
+		}
+	}
+	fmt.Println("Saved.")
+	return nil
 }
 
 func isConfigSettingKey(key string) bool {
@@ -458,80 +486,114 @@ func isConfigSettingKey(key string) bool {
 	return false
 }
 
-func cmdSetOne(args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: cliks set <key> <value> [<key> <value> ...]\n       cliks set --list")
-	}
-	cfg := loadConfig()
-	key, value := args[0], args[1]
-	boolValue := parseBool(value)
+func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
+	parseSwitch := func() (bool, error) { return parseOnOff(value) }
 	switch key {
-	case "autostart":
-		enabled, err := parseOnOff(value)
-		if err != nil {
-			return err
-		}
-		if enabled {
-			return cmdAutostart([]string{"enable", cfg.CurrentTeamCode})
-		}
-		return cmdAutostart([]string{"disable"})
 	case "share.keyboard":
-		cfg.Sharing.Keyboard = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Sharing.Keyboard = v
 	case "share.mouse":
-		cfg.Sharing.Mouse = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Sharing.Mouse = v
 	case "hear.keyboard":
-		cfg.Listening.Keyboard = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Keyboard = v
 	case "hear.mouse":
-		cfg.Listening.Mouse = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Mouse = v
 	case "hear.self":
-		cfg.Listening.Self = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Self = v
 	case "hear.muted":
-		cfg.Listening.Muted = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Muted = v
 	case "hear.spatial":
-		cfg.Listening.Spatial = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Spatial = v
 	case "hear.fade":
-		cfg.Listening.FatigueProtection = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.FatigueProtection = v
 	case "ambient":
 		mode := strings.ToLower(strings.TrimSpace(value))
 		switch mode {
 		case "off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
 			cfg.Listening.Ambient = mode
 		default:
-			return fmt.Errorf("ambient must be off, rain, fire, cafe, cloud, contemplation, or downtempo")
+			return false, fmt.Errorf("ambient must be off, rain, fire, cafe, cloud, contemplation, or downtempo")
 		}
 	case "ambient.volume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Listening.AmbientVolume = clamp(parsed, 0.05, 1)
 	case "solo.people":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Solo.People = clampInt(parsed, 1, 12)
 	case "solo.keyboard":
-		cfg.Solo.Keyboard = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Solo.Keyboard = v
 	case "solo.mouse":
-		cfg.Solo.Mouse = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Solo.Mouse = v
 	case "solo.keyboardVolume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Solo.KeyboardVolume = clamp(parsed, 0.05, 1)
 	case "solo.mouseVolume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Solo.MouseVolume = clamp(parsed, 0.05, 1)
 	case "notifications":
-		cfg.Notifications.Enabled = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Notifications.Enabled = v
 		cfg.Notifications.Configured = true
 	case "notifications.sound":
-		cfg.Notifications.Sound = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Notifications.Sound = v
 		cfg.Notifications.Configured = true
 	case "presence":
 		status := strings.ToLower(strings.TrimSpace(value))
@@ -539,7 +601,7 @@ func cmdSetOne(args []string) error {
 		case "available", "focus", "break", "dnd":
 			cfg.PresenceStatus = status
 		default:
-			return fmt.Errorf("presence must be available, focus, break, or dnd")
+			return false, fmt.Errorf("presence must be available, focus, break, or dnd")
 		}
 	case "theme":
 		theme := strings.ToLower(strings.TrimSpace(value))
@@ -547,7 +609,7 @@ func cmdSetOne(args []string) error {
 		case "ember", "ocean", "forest", "sunset", "aurora", "mono":
 			cfg.Theme = theme
 		default:
-			return fmt.Errorf("theme must be ember, ocean, forest, sunset, aurora, or mono")
+			return false, fmt.Errorf("theme must be ember, ocean, forest, sunset, aurora, or mono")
 		}
 	case "capture.mode":
 		mode := strings.ToLower(strings.TrimSpace(value))
@@ -555,31 +617,40 @@ func cmdSetOne(args []string) error {
 		case "isolated", "direct", "terminal":
 			cfg.Capture.Mode = mode
 		default:
-			return fmt.Errorf("capture.mode must be isolated, direct, or terminal")
+			return false, fmt.Errorf("capture.mode must be isolated, direct, or terminal")
 		}
 	case "spatial.dynamic":
-		cfg.Listening.DynamicPlacement = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.DynamicPlacement = v
 	case "keep.running":
-		cfg.KeepRunning = boolValue
+		v, err := parseSwitch()
+		if err != nil {
+			return false, err
+		}
+		cfg.KeepRunning = v
 	case "volume":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Listening.Volume = clamp(parsed, 0, 1)
+		cfg.Listening.VolumeConfigured = true
 	case "density":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Listening.Density = clamp(parsed, 0.15, 1)
 	case "batch.ms":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if usesPublicBackend(cfg) && parsed != 500 {
-			return fmt.Errorf("the public Cliks relay is fixed at 500 ms to protect shared capacity; choose a self-hosted Server in the TUI or run cliks set api.url https://your-server before using 100-2000 ms")
+		if usesPublicBackend(*cfg) && parsed != 500 {
+			return false, fmt.Errorf("the public Cliks relay is fixed at 500 ms to protect shared capacity; choose a self-hosted Server in the TUI or run cliks set api.url https://your-server before using 100-2000 ms")
 		}
 		if parsed < 100 {
 			parsed = 100
@@ -591,37 +662,48 @@ func cmdSetOne(args []string) error {
 	case "spatial.shuffleMinutes":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.Listening.ShuffleMinutes = parsed
 	case "audio.device":
-		device := strings.TrimSpace(strings.Join(args[1:], " "))
+		device := strings.TrimSpace(value)
 		if strings.EqualFold(device, "default") {
 			device = ""
+		}
+		if device != "" {
+			player, _, hint, _ := getAudioPlayerStatus(device)
+			if player == "" {
+				return false, fmt.Errorf("no audio player can route to %q; run cliks setup or use audio.device default", device)
+			}
+			if hint != "" {
+				return false, errors.New(hint)
+			}
 		}
 		cfg.Listening.AudioDevice = device
 	case "api.url":
 		backend, err := normalizeBackendURL(value)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cfg.APIURL = backend
 		cfg.WSURL = toWSURL(cfg.APIURL)
-		if usesPublicBackend(cfg) {
+		if usesPublicBackend(*cfg) {
 			cfg.BatchWindowMs = 500
 		}
+		return true, nil
 	case "ws.url":
-		cfg.WSURL = value
+		parsed, err := url.Parse(strings.TrimSpace(value))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
+			return false, fmt.Errorf("WebSocket URL must start with ws:// or wss://")
+		}
+		cfg.WSURL = strings.TrimRight(strings.TrimSpace(value), "/")
+		return true, nil
 	case "nickname", "name":
-		cfg.Nickname = sanitizeNickname(strings.Join(args[1:], " "))
+		cfg.Nickname = sanitizeNickname(value)
 	default:
-		return fmt.Errorf("unknown setting: %s", key)
+		return false, fmt.Errorf("unknown setting: %s", key)
 	}
-	if err := saveConfig(cfg); err != nil {
-		return err
-	}
-	fmt.Println("Saved.")
-	return nil
+	return false, nil
 }
 
 func printTeams(cfg CliksConfig) {
@@ -686,15 +768,6 @@ func readSecret(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
-}
-
-func parseBool(value string) bool {
-	switch strings.ToLower(value) {
-	case "1", "true", "yes", "on", "y":
-		return true
-	default:
-		return false
-	}
 }
 
 func parseOnOff(value string) (bool, error) {
