@@ -127,6 +127,7 @@ type CliksConfig struct {
 	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
 	LaunchSeen      bool               `json:"launchSeen,omitempty"`
 	OnboardingSeen  bool               `json:"onboardingSeen,omitempty"`
+	OnboardingStep  int                `json:"onboardingStep,omitempty"`
 	Theme           string             `json:"theme,omitempty"`
 	KeepRunning     bool               `json:"keepRunning"`
 	AutostartWanted bool               `json:"autostartWanted,omitempty"`
@@ -359,6 +360,9 @@ func normalizeConfig(cfg *CliksConfig) {
 	}
 	if !cfg.Notifications.Configured {
 		cfg.Notifications = def.Notifications
+	}
+	if cfg.OnboardingSeen || cfg.OnboardingStep < 0 || cfg.OnboardingStep >= onboardingStepCount {
+		cfg.OnboardingStep = 0
 	}
 	switch cfg.PresenceStatus {
 	case "available", "focus", "break", "dnd":

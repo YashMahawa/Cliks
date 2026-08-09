@@ -7,12 +7,16 @@ import (
 	"strings"
 )
 
+var reactionNotificationSender = sendNativeNotification
+
 func notifyReaction(cfg CliksConfig, sender string, reaction string) error {
 	if !cfg.Notifications.Enabled || cfg.Listening.Muted || cfg.PresenceStatus == "focus" || cfg.PresenceStatus == "dnd" {
 		return nil
 	}
 	title, body := reactionNotificationContent(sender, reaction)
-	return sendNativeNotification(title, body, cfg.Notifications.Sound)
+	// Cliks plays the optional signal cue through its own spatial audio engine.
+	// Keep the native banner visual so the OS cannot add a second, jarring chime.
+	return reactionNotificationSender(title, body, false)
 }
 
 func reactionNotificationContent(sender string, reaction string) (string, string) {
@@ -79,9 +83,8 @@ func runNotificationTest() error {
 	if !ready {
 		return errors.New(detail)
 	}
-	cfg := loadConfig()
 	title, body := reactionNotificationContent("Mira", "wave")
-	if err := sendNativeNotification(title, "Example: "+body, cfg.Notifications.Sound); err != nil {
+	if err := sendNativeNotification(title, "Example: "+body, false); err != nil {
 		return err
 	}
 	return nil

@@ -172,7 +172,7 @@ func TestLiveToggleHoverKeepsSelectedStyleAcrossColoredValues(t *testing.T) {
 		case "notifications":
 			label = "Notifications  " + onOff(model.controller.cfg.Notifications.Enabled)
 		case "notification-sound":
-			label = "Notify sound   " + onOff(model.controller.cfg.Notifications.Sound)
+			label = "Signal sound   " + onOff(model.controller.cfg.Notifications.Sound)
 		case "mute":
 			label = "Mute " + onOff(model.state.Listening.Muted)
 		case "spatial":
@@ -193,7 +193,7 @@ func TestLiveToggleMouseMotionHighlightsExactRenderedButtons(t *testing.T) {
 	model.width, model.height = 180, 40
 	for _, target := range []struct{ needle, action string }{
 		{"[ Notifications", "notifications"},
-		{"[ Notify sound", "notification-sound"},
+		{"[ Signal sound", "notification-sound"},
 		{"[ Mute", "mute"},
 		{"[ Spatial", "spatial"},
 	} {
@@ -242,7 +242,7 @@ func TestLiveActionHitboxesFollowRenderedRowsAtWideTerminalSizes(t *testing.T) {
 		action string
 	}{
 		{"[ Notifications", "notifications"},
-		{"[ Notify sound", "notification-sound"},
+		{"[ Signal sound", "notification-sound"},
 		{"[ Mute", "mute"},
 		{"[ Spatial", "spatial"},
 		{"[ Room tone", "ambient"},
@@ -392,6 +392,31 @@ func TestFirstSetupNicknameReturnsToOnboarding(t *testing.T) {
 	got := updated.(homeModel)
 	if got.mode != "first-setup" || got.cfg.Nickname != "Mira" || got.onboardingStep != 1 {
 		t.Fatalf("after nickname mode=%q nickname=%q step=%d", got.mode, got.cfg.Nickname, got.onboardingStep)
+	}
+	if saved := loadConfig(); saved.OnboardingStep != 1 || saved.Nickname != "Mira" {
+		t.Fatalf("saved onboarding progress = step %d nickname %q", saved.OnboardingStep, saved.Nickname)
+	}
+}
+
+func TestOnboardingEscapeNavigatesBackAndPersistsStep(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 3}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(homeModel)
+	if cmd != nil || got.mode != "first-setup" || got.onboardingStep != 2 {
+		t.Fatalf("escape result mode=%q step=%d cmd=%v", got.mode, got.onboardingStep, cmd)
+	}
+	if saved := loadConfig(); saved.OnboardingStep != 2 || saved.OnboardingSeen {
+		t.Fatalf("saved onboarding state = step %d seen=%v", saved.OnboardingStep, saved.OnboardingSeen)
+	}
+}
+
+func TestOnboardingEscapeAtFirstStepDoesNotQuit(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup"}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(homeModel)
+	if cmd != nil || got.mode != "first-setup" || got.onboardingStep != 0 {
+		t.Fatalf("escape result mode=%q step=%d cmd=%v", got.mode, got.onboardingStep, cmd)
 	}
 }
 

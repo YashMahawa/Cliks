@@ -26,8 +26,60 @@ const (
 
 type clients struct {
 	sync.Mutex
-	items    map[net.Conn]struct{}
+	items    map[*verifiedClient]struct{}
 	seatGate *activeSeatGate
+}
+
+type verifiedClient struct {
+	conn      net.Conn
+	pidfd     int
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func (c *verifiedClient) close() {
+	c.closeOnce.Do(func() {
+		close(c.done)
+		_ = c.conn.Close()
+		if c.pidfd >= 0 {
+			_ = unix.Close(c.pidfd)
+		}
+	})
+}
+
+func (c *clients) remove(client *verifiedClient) {
+	c.Lock()
+	if _, ok := c.items[client]; ok {
+		delete(c.items, client)
+		client.close()
+	}
+	c.Unlock()
+}
+
+func (c *clients) add(client *verifiedClient) {
+	c.Lock()
+	c.items[client] = struct{}{}
+	c.Unlock()
+	go func() {
+		for {
+			poll := []unix.PollFd{{Fd: int32(client.pidfd), Events: unix.POLLIN}}
+			count, _ := unix.Poll(poll, 1000)
+			select {
+			case <-client.done:
+				return
+			default:
+			}
+			if count > 0 {
+				c.remove(client)
+				return
+			}
+		}
+	}()
+	go func() {
+		var unexpected [1]byte
+		_, _ = client.conn.Read(unexpected[:])
+		c.remove(client)
+	}()
 }
 
 func (c *clients) send(token string) {
@@ -36,11 +88,11 @@ func (c *clients) send(token string) {
 	}
 	c.Lock()
 	defer c.Unlock()
-	for conn := range c.items {
-		_ = conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
-		if _, err := io.WriteString(conn, token+"\n"); err != nil {
-			_ = conn.Close()
-			delete(c.items, conn)
+	for client := range c.items {
+		_ = client.conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+		if _, err := io.WriteString(client.conn, token+"\n"); err != nil {
+			delete(c.items, client)
+			client.close()
 		}
 	}
 }
@@ -69,14 +121,15 @@ func main() {
 	if err := os.Chmod(socket, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	peers := &clients{items: map[net.Conn]struct{}{}, seatGate: &activeSeatGate{targetUID: targetUID}}
+	peers := &clients{items: map[*verifiedClient]struct{}{}, seatGate: &activeSeatGate{targetUID: targetUID}}
 	go func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			if !allowedClient(conn) {
+			client, ok := verifyClient(conn)
+			if !ok {
 				_ = conn.Close()
 				continue
 			}
@@ -85,9 +138,7 @@ func main() {
 				_ = conn.Close()
 				continue
 			}
-			peers.Lock()
-			peers.items[conn] = struct{}{}
-			peers.Unlock()
+			peers.add(client)
 		}
 	}()
 	opened := map[string]bool{}
@@ -114,41 +165,73 @@ func main() {
 	}
 }
 
-func allowedClient(conn net.Conn) bool {
+func verifyClient(conn net.Conn) (*verifiedClient, bool) {
 	want, err := configuredUID()
 	if err != nil {
-		return false
+		return nil, false
 	}
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
-		return false
+		return nil, false
 	}
 	raw, err := unixConn.SyscallConn()
 	if err != nil {
-		return false
+		return nil, false
 	}
 	var credential *unix.Ucred
+	pidfd := -1
 	var socketErr error
 	if err := raw.Control(func(fd uintptr) {
 		credential, socketErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		if socketErr == nil {
+			// Linux 6.5+ returns a race-free reference to the exact process that
+			// connected. Older kernels fall back to pidfd_open below.
+			pidfd, _ = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PEERPIDFD)
+		}
 	}); err != nil || socketErr != nil || credential == nil {
-		return false
+		return nil, false
 	}
 	if int(credential.Uid) != want {
-		return false
+		if pidfd >= 0 {
+			_ = unix.Close(pidfd)
+		}
+		return nil, false
 	}
 	wantExecutable := strings.TrimSpace(os.Getenv("CLIKS_CAPTURE_CLIENT_EXE"))
 	if wantExecutable == "" || credential.Pid <= 0 {
-		return false
+		if pidfd >= 0 {
+			_ = unix.Close(pidfd)
+		}
+		return nil, false
+	}
+	if pidfd < 0 {
+		pidfd, err = unix.PidfdOpen(int(credential.Pid), 0)
+		if err != nil {
+			return nil, false
+		}
+	}
+	unix.CloseOnExec(pidfd)
+	if !pidfdAlive(pidfd) {
+		_ = unix.Close(pidfd)
+		return nil, false
 	}
 	gotExecutable, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(int(credential.Pid)), "exe"))
 	if err != nil {
-		return false
+		_ = unix.Close(pidfd)
+		return nil, false
 	}
 	// The installer stores a canonical path. Do not resolve it again here:
 	// ProtectHome=true intentionally prevents this root service from traversing
 	// the user's home, while /proc/PID/exe still exposes the canonical target.
-	return filepath.Clean(gotExecutable) == filepath.Clean(wantExecutable)
+	if filepath.Clean(gotExecutable) != filepath.Clean(wantExecutable) || !pidfdAlive(pidfd) {
+		_ = unix.Close(pidfd)
+		return nil, false
+	}
+	return &verifiedClient{conn: conn, pidfd: pidfd, done: make(chan struct{})}, true
+}
+
+func pidfdAlive(pidfd int) bool {
+	return pidfd >= 0 && unix.PidfdSendSignal(pidfd, 0, nil, 0) == nil
 }
 
 func configuredUID() (int, error) {

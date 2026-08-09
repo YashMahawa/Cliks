@@ -45,6 +45,12 @@ in desktop session from entering the room. The client receives only `k`, `l`,
 or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically grants
 the desktop user raw input ACLs or adds that user to `input`.
 
+Authorization is tied to the exact connecting process, not only its numeric
+PID. The helper obtains and retains a Linux pidfd, checks that identity around
+the `/proc/PID/exe` verification, and closes the socket when either the process
+or connection exits. Kernels with `SO_PEERPIDFD` use its race-free peer handle;
+older supported kernels use `pidfd_open` as the compatibility path.
+
 Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop session or terminal mode.
 
 ### macOS

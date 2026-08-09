@@ -245,7 +245,7 @@ func runHomeTUI(cfg CliksConfig) error {
 	if firstLaunch {
 		launchDuration = 10 * time.Second
 	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
+	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingStep: cfg.OnboardingStep, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -521,14 +521,18 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == "first-setup" {
 			switch msg.String() {
-			case "ctrl+c", "q", "esc":
+			case "ctrl+c", "q":
 				return m, tea.Quit
-			case "left", "h", "backspace":
+			case "esc", "left", "h", "backspace":
 				if m.onboardingStep > 0 {
 					m.onboardingStep--
+					m.cfg.OnboardingStep = m.onboardingStep
+					_ = saveConfig(m.cfg)
 					m.cursor = 0
 					m.mouseOver = false
 					m.message = "Previous choice. Change anything you like."
+				} else {
+					m.message = "This is the first step. Press q only when you want to leave setup."
 				}
 				return m, nil
 			}
@@ -924,9 +928,8 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Notification preference saved.")
 		if m.cfg.Notifications.Enabled {
-			cfg := m.cfg
 			return m, func() tea.Msg {
-				return notificationTestMsg{err: sendNativeNotification("Mira 👋 Welcome to Cliks", "A quick signal looks like this.", cfg.Notifications.Sound)}
+				return notificationTestMsg{err: sendNativeNotification("Mira 👋 Welcome to Cliks", "A quick signal looks like this.", false)}
 			}
 		}
 	case "onboarding-background-on", "onboarding-background-off":
@@ -1542,6 +1545,7 @@ func (m homeModel) onboardingItems() []homeItem {
 func (m *homeModel) advanceOnboarding(message string) {
 	if m.onboardingStep >= onboardingStepCount-1 {
 		m.cfg.OnboardingSeen = true
+		m.cfg.OnboardingStep = 0
 		_ = saveConfig(m.cfg)
 		m.onboardingPending = false
 		m.mode = "home"
@@ -1551,6 +1555,8 @@ func (m *homeModel) advanceOnboarding(message string) {
 		return
 	}
 	m.onboardingStep++
+	m.cfg.OnboardingStep = m.onboardingStep
+	_ = saveConfig(m.cfg)
 	m.cursor = 0
 	m.mouseOver = false
 	m.message = message
@@ -2068,7 +2074,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Notifications.Enabled = !c.Notifications.Enabled
 			c.Notifications.Configured = true
 		}},
-		{"Notify sound", "sound with native wave alerts", func(c CliksConfig) string { return onOff(c.Notifications.Sound) }, func(c *CliksConfig, _ int) {
+		{"Signal sound", "subtle spatial cue from the sender's seat", func(c CliksConfig) string { return onOff(c.Notifications.Sound) }, func(c *CliksConfig, _ int) {
 			c.Notifications.Sound = !c.Notifications.Sound
 			c.Notifications.Configured = true
 		}},
@@ -3102,7 +3108,7 @@ func (m sessionModel) liveActivityView(width int, height int) string {
 	}
 	alerts := []string{
 		m.liveActionLine("notifications", "Notifications  "+onOff(m.controller.cfg.Notifications.Enabled)),
-		m.liveActionLine("notification-sound", "Notify sound   "+onOff(m.controller.cfg.Notifications.Sound)),
+		m.liveActionLine("notification-sound", "Signal sound   "+onOff(m.controller.cfg.Notifications.Sound)),
 	}
 	playback := []string{m.liveActionLine("mute", "Mute "+onOff(m.state.Listening.Muted)) + "   " + m.liveActionLine("spatial", "Spatial "+onOff(m.state.Listening.Spatial))}
 	if height >= 32 {
@@ -3235,7 +3241,7 @@ func (m sessionModel) liveHitRegions() []liveHitRegion {
 	}{
 		{"copy-code", code + "  COPY"},
 		{"notifications", "Notifications  " + onOff(m.controller.cfg.Notifications.Enabled)},
-		{"notification-sound", "Notify sound   " + onOff(m.controller.cfg.Notifications.Sound)},
+		{"notification-sound", "Signal sound   " + onOff(m.controller.cfg.Notifications.Sound)},
 		{"mute", "Mute " + onOff(m.state.Listening.Muted)},
 		{"spatial", "Spatial " + onOff(m.state.Listening.Spatial)},
 		{"ambient", "Room tone  " + ambientLabel(m.controller.cfg.Listening.Ambient)},
@@ -3268,16 +3274,15 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		_ = saveConfig(m.controller.cfg)
 		m.message = "Notifications " + onOff(m.controller.cfg.Notifications.Enabled)
 		if m.controller.cfg.Notifications.Enabled {
-			cfg := m.controller.cfg
 			return m, func() tea.Msg {
-				return notificationTestMsg{err: sendNativeNotification("Cliks test 👋 Notifications are on", "Quick signals will appear here.", cfg.Notifications.Sound)}
+				return notificationTestMsg{err: sendNativeNotification("Cliks test 👋 Notifications are on", "Quick signals will appear here.", false)}
 			}
 		}
 	case "notification-sound":
 		m.controller.cfg.Notifications.Sound = !m.controller.cfg.Notifications.Sound
 		m.controller.cfg.Notifications.Configured = true
 		_ = saveConfig(m.controller.cfg)
-		m.message = "Notification sound " + onOff(m.controller.cfg.Notifications.Sound)
+		m.message = "Signal sound " + onOff(m.controller.cfg.Notifications.Sound)
 	case "mute":
 		m.controller.toggle("muted")
 	case "spatial":

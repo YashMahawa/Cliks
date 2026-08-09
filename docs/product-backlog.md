@@ -27,8 +27,8 @@ meeting-software clutter.
 - [x] Offline Solo Desk with simulated coworkers, keyboard/click controls, room
   tone, and no backend or capture dependency.
 - [x] Room-wide allowlisted reactions, sender/message native notification
-  content, reaction rate limiting, mute/focus/DND behavior, and no arbitrary
-  message payloads.
+  content, distinct listener-relative spatial signal rhythms, reaction rate
+  limiting, mute/focus/DND behavior, and no arbitrary message payloads.
 - [x] Native/isolated capture architecture: dedicated macOS Capture.app,
   hardened Linux helper, native Windows hooks, and explicitly warned direct
   compatibility mode.
@@ -96,6 +96,8 @@ meeting-software clutter.
 - [x] Linux isolated helper: replace the world-writable socket with a
   target-user-owned `0600` socket and validate the connecting Cliks executable
   in addition to `SO_PEERCRED` UID.
+- [x] Bind Linux helper authorization to a retained peer pidfd and revoke the
+  socket when the verified Cliks process or connection exits.
 - [ ] Keep direct Linux input-group/ACL and direct macOS Terminal Input
   Monitoring as opt-in compatibility paths only. Never fall back to them
   automatically; explain how to revoke permission afterward.

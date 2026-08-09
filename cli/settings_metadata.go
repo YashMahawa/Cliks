@@ -33,7 +33,7 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "solo.keyboardVolume", Label: "Solo keyboard level", Description: "offline simulated keyboard level from 0.05 to 1"},
 	{Key: "solo.mouseVolume", Label: "Solo click level", Description: "offline simulated mouse-click level from 0.05 to 1"},
 	{Key: "notifications", Label: "Notifications", Description: "show native alerts for quick signals (on/off)"},
-	{Key: "notifications.sound", Label: "Notification sound", Description: "play sound with native wave notifications (on/off)"},
+	{Key: "notifications.sound", Label: "Signal sound", Description: "play subtle spatial cues for teammate signals (on/off)"},
 	{Key: "presence", Label: "Presence", Description: "available, focus, break, or dnd"},
 	{Key: "theme", Label: "Theme", Description: "ember, ocean, or mono terminal palette"},
 	{Key: "capture.mode", Label: "Capture safety", Description: "isolated (recommended), terminal-only, or direct compatibility fallback"},

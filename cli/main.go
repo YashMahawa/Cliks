@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.14"
+const version = "0.6.15"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -54,6 +54,8 @@ func run(args []string) error {
 		return cmdNickname(rest[1:])
 	case "start":
 		return cmdStart(rest[1:])
+	case "live":
+		return cmdLive()
 	case "solo":
 		return runSoloExclusive(loadConfig())
 	case "settings", "ui":
@@ -312,6 +314,9 @@ func cmdStart(args []string) error {
 		if err != nil {
 			return err
 		}
+		if active, ok := activeSession(); ok && !strings.EqualFold(active.TeamCode, team.Code) {
+			return fmt.Errorf("Cliks is already connected to %s; stop it with `cliks service stop` before starting %s", active.TeamCode, team.Code)
+		}
 		cfg, err = rememberTeam(team.Code, team.Name)
 		if err != nil {
 			return err
@@ -321,7 +326,27 @@ func cmdStart(args []string) error {
 		printFirstRunHelp()
 		return nil
 	}
+	if active, ok := activeSession(); ok {
+		if !strings.EqualFold(active.TeamCode, cfg.CurrentTeamCode) {
+			return fmt.Errorf("Cliks is already connected to %s; stop it with `cliks service stop` before starting %s", active.TeamCode, cfg.CurrentTeamCode)
+		}
+		if isInteractiveTerminal() {
+			return runAttachedSession(active)
+		}
+		return fmt.Errorf("Cliks is already running for %s (pid %d); open `cliks live` in a terminal to attach", active.TeamCode, active.PID)
+	}
 	return startSession(cfg, opts)
+}
+
+func cmdLive() error {
+	if !isInteractiveTerminal() {
+		return errors.New("cliks live needs an interactive terminal")
+	}
+	active, ok := activeSession()
+	if !ok {
+		return errors.New("Cliks is not connected yet; run `cliks start`")
+	}
+	return runAttachedSession(active)
 }
 
 func cmdCaptureTest(args []string) error {
@@ -814,13 +839,14 @@ Usage:
   %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience
   %[1]s start CODE       Join/select a code and start immediately
+  %[1]s live             Attach to the running session without reconnecting
   %[1]s solo             Open an offline simulated coworking room
   %[1]s settings         Open the control screen
   %[1]s setup            One-time easy setup (sound + capture)
   %[1]s doctor           Print the full setup and permission report
   %[1]s sound-test       Play local sample sounds
   %[1]s notification-test
-                         Send one native notification using your sound preference
+                         Send one native notification test
   %[1]s capture-test     Verify local activity capture
 	                     Use --unsafe-direct only as a compatibility fallback
   %[1]s service ...      Canonical service control (background + login)

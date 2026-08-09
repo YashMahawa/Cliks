@@ -112,7 +112,7 @@ cliks start --terminal --self
 |---------|---------|
 | `cliks setup` | One-time readiness: sound + capture, auto-fix what it can |
 | `cliks sound-test` | Hear sample keyboard/mouse clicks |
-| `cliks notification-test` | Send one OS-native test notification using your sound preference |
+| `cliks notification-test` | Send one silent OS-native banner test; teammate signal cues use Cliks spatial audio |
 | `cliks doctor` | Detailed report (also under More → Diagnostics in the TUI) |
 | `cliks capture-test` | Confirm activity is detected while you type/click |
 | `cliks` | Friendly on-screen control panel |

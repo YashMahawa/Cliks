@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,6 +24,25 @@ func TestSessionInstancePreventsDuplicateLocalConnection(t *testing.T) {
 	}
 	if already.state.PID == 0 || already.state.TeamCode != "CLIK-LOCAL" {
 		t.Fatalf("already running state = %+v", already.state)
+	}
+}
+
+func TestStartReportsHowToAttachToMatchingActiveSessionWhenNonInteractive(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	instance, err := acquireSessionInstance("CLIK-LOCAL", runModeBackground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.release()
+	err = cmdStart(nil)
+	if err == nil || !strings.Contains(err.Error(), "cliks live") {
+		t.Fatalf("cmdStart error = %v, want attach guidance", err)
 	}
 }
 

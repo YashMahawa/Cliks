@@ -48,3 +48,25 @@ func TestMutedListeningSuppressesReactionNotification(t *testing.T) {
 		t.Fatalf("muted notification should be a no-op: %v", err)
 	}
 }
+
+func TestReactionNotificationKeepsNativeBannerSilent(t *testing.T) {
+	original := reactionNotificationSender
+	t.Cleanup(func() { reactionNotificationSender = original })
+	called := false
+	reactionNotificationSender = func(title string, body string, sound bool) error {
+		called = true
+		if sound {
+			t.Fatal("native notification sound must stay off when Cliks owns the cue")
+		}
+		return nil
+	}
+	cfg := defaultConfig()
+	cfg.Notifications.Enabled = true
+	cfg.Notifications.Sound = true
+	if err := notifyReaction(cfg, "Mira", "wave"); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("native banner was not sent")
+	}
+}

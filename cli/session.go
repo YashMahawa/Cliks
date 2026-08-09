@@ -946,6 +946,9 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 				})
 			}
 			if !isOwn && !cfg.Listening.Muted {
+				if cfg.Notifications.Sound && cfg.PresenceStatus != "focus" && cfg.PresenceStatus != "dnd" {
+					s.audio.scheduleReaction(envelope.PeerID, envelope.Reaction)
+				}
 				go func(cfg CliksConfig, nickname string, reaction string) {
 					if err := notifyReaction(cfg, nickname, reaction); err != nil {
 						s.set(func(state *SessionViewState) {

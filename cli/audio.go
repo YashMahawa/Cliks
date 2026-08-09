@@ -197,6 +197,60 @@ func (a *AudioEngine) scheduleBatch(peerID string, events []RemoteActivityEvent)
 	a.scheduleBatchScaled(peerID, events, 1)
 }
 
+type reactionBeat struct {
+	delay  time.Duration
+	kind   string
+	button string
+}
+
+func reactionPattern(reaction string) []reactionBeat {
+	switch reaction {
+	case "wave":
+		return []reactionBeat{{0, "mouse", "left"}, {90 * time.Millisecond, "keyboard", ""}, {180 * time.Millisecond, "mouse", "left"}}
+	case "nice":
+		return []reactionBeat{{0, "keyboard", ""}, {110 * time.Millisecond, "keyboard", ""}}
+	case "coffee":
+		return []reactionBeat{{0, "mouse", "left"}, {160 * time.Millisecond, "keyboard", ""}}
+	case "focus":
+		return []reactionBeat{{0, "keyboard", ""}}
+	case "celebrate":
+		return []reactionBeat{{0, "keyboard", ""}, {70 * time.Millisecond, "mouse", "left"}, {140 * time.Millisecond, "keyboard", ""}, {210 * time.Millisecond, "mouse", "left"}}
+	case "break":
+		return []reactionBeat{{0, "mouse", "left"}, {220 * time.Millisecond, "mouse", "left"}}
+	default:
+		return nil
+	}
+}
+
+func (a *AudioEngine) scheduleReaction(peerID string, reaction string) {
+	pattern := reactionPattern(reaction)
+	if len(pattern) == 0 {
+		return
+	}
+	a.mu.Lock()
+	placement, ok := a.placements[peerID]
+	if !ok {
+		placement = placementForIndex(len(a.placements), peerID)
+		a.placements[peerID] = placement
+	}
+	muted := a.listening.Muted
+	a.mu.Unlock()
+	if muted {
+		return
+	}
+	for _, beat := range pattern {
+		beat := beat
+		time.AfterFunc(beat.delay, func() {
+			select {
+			case <-a.ctx.Done():
+				return
+			default:
+				a.enqueueScaled(RemoteActivityEvent{Kind: beat.kind, Button: beat.button}, placement, 0.58)
+			}
+		})
+	}
+}
+
 func (a *AudioEngine) scheduleBatchScaled(peerID string, events []RemoteActivityEvent, sourceGain float64) {
 	a.mu.Lock()
 	a.activityScores[peerID] += len(events)

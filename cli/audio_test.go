@@ -19,6 +19,30 @@ func TestFFmpegSpatialFilterUsesMonoSampleForStereoPan(t *testing.T) {
 	}
 }
 
+func TestReactionPatternsAreDistinctAndBrief(t *testing.T) {
+	seen := map[string]bool{}
+	for _, reaction := range []string{"wave", "nice", "coffee", "focus", "celebrate", "break"} {
+		pattern := reactionPattern(reaction)
+		if len(pattern) == 0 {
+			t.Fatalf("%s has no audio pattern", reaction)
+		}
+		if pattern[len(pattern)-1].delay > 600*time.Millisecond {
+			t.Fatalf("%s pattern lasts %s", reaction, pattern[len(pattern)-1].delay)
+		}
+		key := ""
+		for _, beat := range pattern {
+			key += beat.kind + ":" + beat.button + ":" + beat.delay.String() + ";"
+		}
+		if seen[key] {
+			t.Fatalf("%s duplicates another reaction pattern", reaction)
+		}
+		seen[key] = true
+	}
+	if got := reactionPattern("unknown"); got != nil {
+		t.Fatalf("unknown reaction pattern = %#v, want nil", got)
+	}
+}
+
 func TestMpvArgsUseLavfiPanNotBrokenFlag(t *testing.T) {
 	player := mpvAudioPlayer()
 	args := player.ArgsFor(playbackJob{File: "/tmp/sample.wav", Gain: 0.5, Pan: 0.5})
