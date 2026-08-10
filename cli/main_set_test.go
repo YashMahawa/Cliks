@@ -1,9 +1,19 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func isolateSetConfig(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+}
 
 func TestSetSupportsMultiplePairsAndSoloLevels(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateSetConfig(t)
 	if err := cmdSet([]string{
 		"theme", "ocean",
 		"solo.keyboardVolume", "0.35",
@@ -18,7 +28,7 @@ func TestSetSupportsMultiplePairsAndSoloLevels(t *testing.T) {
 }
 
 func TestSetRequiresQuotedMultiwordValues(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateSetConfig(t)
 	if err := cmdSet([]string{"nickname", "Cosmic", "Otter"}); err == nil {
 		t.Fatal("expected odd argument list to fail")
 	}
@@ -34,7 +44,7 @@ func TestSetRequiresQuotedMultiwordValues(t *testing.T) {
 }
 
 func TestSetRejectsInvalidBooleanWithoutPartialSave(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateSetConfig(t)
 	if err := cmdSet([]string{"theme", "ocean", "notifications", "perhaps"}); err == nil {
 		t.Fatal("expected invalid boolean to fail")
 	}
@@ -45,7 +55,7 @@ func TestSetRejectsInvalidBooleanWithoutPartialSave(t *testing.T) {
 }
 
 func TestSetPersistsZeroMasterVolume(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateSetConfig(t)
 	if err := cmdSet([]string{"volume", "0"}); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +65,7 @@ func TestSetPersistsZeroMasterVolume(t *testing.T) {
 }
 
 func TestSetEndpointQueuesRunningSessionReconnect(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateSetConfig(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	instance, err := acquireSessionInstance("CLIK-LOCAL", runModeForeground)
 	if err != nil {

@@ -21,6 +21,7 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 - installs the native `cliks` command (with its real sound pack embedded)
 - includes stereo spatial audio directly on macOS and Windows; installs **mpv** on Linux when possible
 - installs privacy-isolated background capture on Linux
+- continues installing Cliks if optional audio, clipboard, or notification packages are temporarily blocked by another package-manager process; rerun `cliks setup` later to add them
 - installs Cliks Capture.app and opens Input Monitoring for that app only
 - runs `cliks setup` for a plain-language readiness check
 

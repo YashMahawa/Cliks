@@ -94,7 +94,7 @@ install_prebuilt() {
      tar -xzf "$tmp/$asset" -C "$tmp" && [ -x "$tmp/cliks" ]; then
     downloaded_version="$($tmp/cliks version 2>/dev/null || true)"
     if ! version_at_least "$downloaded_version" "$REQUIRED_VERSION"; then
-      tip "Latest release is Cliks ${downloaded_version:-unknown}; ${REQUIRED_VERSION}+ is required for embedded sounds — using source fallback"
+      tip "Latest release is Cliks ${downloaded_version:-unknown}; ${REQUIRED_VERSION}+ is required by this installer — using source fallback"
       rm -rf "$tmp"
       return 1
     fi
@@ -222,6 +222,11 @@ if [ "$PREBUILT" = "0" ]; then
 fi
 
 # --- platform helpers (Linux audio/notifications; desktop builds include audio) ---
+optional_deps_failed() {
+  tip "Optional audio/clipboard/notification helpers were not installed (the package manager may be busy)"
+  tip "Continuing with Cliks; rerun 'cliks setup' after the package manager is available"
+}
+
 install_system_deps() {
   case "$(uname -s)" in
     Darwin)
@@ -230,23 +235,24 @@ install_system_deps() {
     Linux)
       if is_termux; then
         if command -v pkg >/dev/null 2>&1; then
-          pkg install -y mpv termux-api
+          pkg install -y mpv termux-api || optional_deps_failed
         else
-          apt-get update
-          apt-get install -y mpv termux-api
+          (apt-get update && apt-get install -y mpv termux-api) || optional_deps_failed
         fi
       elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard libnotify
+        sudo pacman -S --needed --noconfirm mpv xclip wl-clipboard libnotify || optional_deps_failed
       elif command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update
-        sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-bin || \
-          sudo apt-get install -y mpv
+        (sudo apt-get update && \
+          (sudo apt-get install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-bin || \
+           sudo apt-get install -y mpv)) || optional_deps_failed
       elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils libnotify || sudo dnf install -y mpv
+        (sudo dnf install -y mpv xclip wl-clipboard pulseaudio-utils libnotify || \
+          sudo dnf install -y mpv) || optional_deps_failed
       elif command -v zypper >/dev/null 2>&1; then
-        sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-tools || sudo zypper install -y mpv
+        (sudo zypper install -y mpv xclip wl-clipboard pulseaudio-utils libnotify-tools || \
+          sudo zypper install -y mpv) || optional_deps_failed
       elif command -v apk >/dev/null 2>&1; then
-        sudo apk add mpv xclip wl-clipboard libnotify
+        sudo apk add mpv xclip wl-clipboard libnotify || optional_deps_failed
       fi
       if command -v mpv >/dev/null 2>&1; then
         ok "Spatial audio (mpv)"
@@ -327,7 +333,7 @@ ok "Command: $BIN_DIR/cliks"
 installed_version="$($BIN_DIR/cliks version 2>/dev/null || true)"
 if ! version_at_least "$installed_version" "$REQUIRED_VERSION"; then
   say "Install stopped: Cliks ${REQUIRED_VERSION}+ is required, but ${installed_version:-an unknown version} was installed."
-  say "The updater will not silently leave the broken non-embedded sound build in place."
+  say "The updater will not silently leave an incompatible older build in place."
   exit 1
 fi
 ok "Version $installed_version (bundled sounds included)"
