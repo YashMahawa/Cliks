@@ -138,7 +138,7 @@ func TestSessionStateRecordsBinaryVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer instance.release()
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok || active.Version != version {
 		t.Fatalf("active version = %q, want %q", active.Version, version)
 	}
@@ -199,7 +199,7 @@ func TestActiveSessionReportsDuplicateLocalProcess(t *testing.T) {
 	restore := stubSiblingProcesses([]localStartProcess{{PID: 99999, Command: "cliks start"}})
 	defer restore()
 
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		t.Fatal("activeSession returned false")
 	}
@@ -213,7 +213,7 @@ func TestActiveSessionFindsLegacyProcessWithoutLock(t *testing.T) {
 	restore := stubSiblingProcesses([]localStartProcess{{PID: 54321, Command: "cliks start"}})
 	defer restore()
 
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		t.Fatal("activeSession returned false")
 	}

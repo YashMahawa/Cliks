@@ -82,7 +82,7 @@ func TestWriteSessionStateForcesLifecycleTransitions(t *testing.T) {
 	controller.set(func(state *SessionViewState) {
 		state.ConnectionStatus = "connected"
 	})
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		t.Fatal("expected active session")
 	}
