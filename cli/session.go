@@ -176,7 +176,7 @@ func runAttachedSession(active ActiveSessionState) error {
 				return fmt.Errorf("restart Cliks after update: %w", err)
 			}
 			for attempt := 0; attempt < 20; attempt++ {
-				if refreshed, ok := activeSession(); ok && !sessionNeedsUpgrade(refreshed) {
+				if refreshed, ok := activeSession(false); ok && !sessionNeedsUpgrade(refreshed) {
 					return runAttachedSession(refreshed)
 				}
 				time.Sleep(50 * time.Millisecond)
@@ -376,7 +376,7 @@ func (s *sessionController) stop() {
 
 func (s *sessionController) viewState() SessionViewState {
 	if s.attached {
-		if active, ok := activeSession(); ok && active.PID == s.attachedPID {
+		if active, ok := activeSession(false); ok && active.PID == s.attachedPID {
 			if active.View.TeamCode != "" {
 				s.mu.Lock()
 				s.state = active.View
@@ -661,7 +661,7 @@ func (s *sessionController) sendProfile(nickname string, status string) {
 
 func (s *sessionController) sendReaction(reaction string) error {
 	if s.attached {
-		if active, ok := activeSession(); !ok || active.PID != s.attachedPID {
+		if active, ok := activeSession(false); !ok || active.PID != s.attachedPID {
 			return fmt.Errorf("the running session changed; reopen Live and try again")
 		}
 		return enqueueSessionCommand(localSessionCommand{Type: "reaction", Reaction: reaction})

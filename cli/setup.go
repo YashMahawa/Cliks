@@ -53,7 +53,7 @@ func cmdSetup(args []string) error {
 }
 
 func refreshSessionAfterUpdate() *setupStep {
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	wasLive := ok
 	if !ok {
 		stale, staleOK := readSessionFile(sessionStatePath())
@@ -91,12 +91,12 @@ func startAndVerifyUpdatedSession(code string, oldPID int) error {
 			lastErr = err
 		} else {
 			for attempt := 0; attempt < 40; attempt++ {
-				active, activeOK := activeSession()
+				active, activeOK := activeSession(false)
 				persisted, persistedOK := readSessionFile(sessionStatePath())
 				if activeOK && persistedOK && active.PID != oldPID && persisted.PID == active.PID &&
 					active.Version == version && persisted.Version == version && persisted.ConnectionStatus != "stopped" {
 					time.Sleep(250 * time.Millisecond)
-					stable, stableOK := activeSession()
+					stable, stableOK := activeSession(false)
 					if stableOK && stable.PID == active.PID && stable.Version == version && stable.ConnectionStatus != "stopped" {
 						return nil
 					}
@@ -105,7 +105,7 @@ func startAndVerifyUpdatedSession(code string, oldPID int) error {
 			}
 			lastErr = fmt.Errorf("the replacement process did not stay ready")
 		}
-		if current, currentOK := activeSession(); currentOK && current.PID != oldPID {
+		if current, currentOK := activeSession(false); currentOK && current.PID != oldPID {
 			_, _ = stopActiveSession()
 			_ = waitForProcessExit(current.PID, 2*time.Second)
 		}
