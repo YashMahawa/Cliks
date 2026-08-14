@@ -50,9 +50,20 @@ func startBackgroundForTeam(code string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("switch active team: %w", err)
 	}
-	if current, ok := activeSession(); ok {
+	if current, ok := activeSession(false); ok {
 		return fmt.Sprintf("Cliks is already running for %s (%s, pid %d).", valuePlain(current.TeamCode, code), modeLabel(current.Mode), current.PID), nil
 	}
+
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(sessionLockPath())
+			_ = os.Remove(sessionStatePath())
+			_ = os.Remove(backgroundPIDPath())
+			_ = os.RemoveAll(sessionCommandDir())
+		}
+	}()
+
 	dir := stateDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -93,6 +104,7 @@ func startBackgroundForTeam(code string) (string, error) {
 		}
 		return "", fmt.Errorf("%w\nLog: %s", err, logPath)
 	}
+	success = true
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
 	prefix := ""
@@ -146,7 +158,7 @@ func stopBackground() (string, error) {
 }
 
 func backgroundStatusText() string {
-	if active, ok := activeSession(); ok {
+	if active, ok := activeSession(false); ok {
 		return fmt.Sprintf("Cliks: running for %s (%s, pid %d)\nConnection: %s\nActive users: %d\nCaptured: %d\nSent: %d\nLog: %s\n",
 			valuePlain(active.TeamCode, "current team"),
 			modeLabel(active.Mode),

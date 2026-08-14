@@ -35,6 +35,17 @@ func main() {
 func run(args []string) error {
 	commandName := filepath.Base(args[0])
 	rest := args[1:]
+
+	var cleanRest []string
+	for _, arg := range rest {
+		if arg == "--cleanup" || arg == "-c" {
+			sessionCleanupAllowed = true
+		} else {
+			cleanRest = append(cleanRest, arg)
+		}
+	}
+	rest = cleanRest
+
 	if len(rest) == 0 {
 		return runHomeTUI(loadConfig())
 	}
@@ -314,7 +325,7 @@ func cmdStart(args []string) error {
 		if err != nil {
 			return err
 		}
-		if active, ok := activeSession(); ok && !strings.EqualFold(active.TeamCode, team.Code) {
+		if active, ok := activeSession(false); ok && !strings.EqualFold(active.TeamCode, team.Code) {
 			return fmt.Errorf("Cliks is already connected to %s; stop it with `cliks service stop` before starting %s", active.TeamCode, team.Code)
 		}
 		cfg, err = rememberTeam(team.Code, team.Name)
@@ -326,7 +337,7 @@ func cmdStart(args []string) error {
 		printFirstRunHelp()
 		return nil
 	}
-	if active, ok := activeSession(); ok {
+	if active, ok := activeSession(false); ok {
 		if !strings.EqualFold(active.TeamCode, cfg.CurrentTeamCode) {
 			return fmt.Errorf("Cliks is already connected to %s; stop it with `cliks service stop` before starting %s", active.TeamCode, cfg.CurrentTeamCode)
 		}
@@ -342,7 +353,7 @@ func cmdLive() error {
 	if !isInteractiveTerminal() {
 		return errors.New("cliks live needs an interactive terminal")
 	}
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		return errors.New("Cliks is not connected yet; run `cliks start`")
 	}
@@ -492,7 +503,7 @@ func cmdSet(args []string) error {
 		return err
 	}
 	if reconnect {
-		if _, ok := activeSession(); ok {
+		if _, ok := activeSession(false); ok {
 			if err := enqueueSessionCommand(localSessionCommand{Type: "reload_connection"}); err != nil {
 				return fmt.Errorf("saved, but could not refresh the running connection: %w", err)
 			}
@@ -761,7 +772,7 @@ func filterTeams(teams []TeamConfig, code string) []TeamConfig {
 }
 
 func stopDeletedTeamSession(code string) {
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok || !strings.EqualFold(active.TeamCode, code) {
 		return
 	}
