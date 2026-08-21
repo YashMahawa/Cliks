@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type doctorIssue struct {
@@ -47,7 +49,19 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 		report.checks = append(report.checks, doctorCheck{"Audio player", "ok (" + player + ")"})
 		if cfg.Listening.AudioDevice != "" {
 			if hint == "" {
-				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice})
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				err := validateAudioEndpoint(ctx, detectAudioPlayerForDevice(cfg.Listening.AudioDevice), cfg.Listening.AudioDevice)
+				cancel()
+				if err != nil {
+					report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice + " (unreachable)"})
+					report.issues = append(report.issues, doctorIssue{
+						title:    "Configured audio output endpoint is unreachable",
+						detail:   fmt.Sprintf("Audio device %q is unreachable or invalid.", cfg.Listening.AudioDevice),
+						commands: []string{"cliks set audio.device default"},
+					})
+				} else {
+					report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice})
+				}
 			} else {
 				report.issues = append(report.issues, doctorIssue{"Choose a supported audio output", hint, []string{"cliks set audio.device default"}})
 			}
