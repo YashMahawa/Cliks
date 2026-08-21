@@ -372,7 +372,7 @@ func TestFirstSetupShowsOneDecisionAtATime(t *testing.T) {
 		t.Fatalf("nickname step items = %#v", items)
 	}
 	view := model.View()
-	for _, want := range []string{"SETUP  1/8", "What should the room call you?", "CozyOtter"} {
+	for _, want := range []string{"SETUP  1/9", "What should the room call you?", "CozyOtter"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("first setup view is missing %q:\n%s", want, view)
 		}
@@ -452,7 +452,7 @@ func TestNormalLaunchUsesResponsiveDeskAndOneSoundPhase(t *testing.T) {
 }
 
 func TestOnboardingReflowsAcrossTerminalCellSizes(t *testing.T) {
-	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 7, message: "Room tone stays private."}
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 8, message: "Room tone stays private."}
 	for _, size := range []struct{ width, height int }{{180, 50}, {92, 30}, {68, 20}} {
 		model.width, model.height = size.width, size.height
 		view := model.View()
@@ -469,7 +469,7 @@ func TestOnboardingReflowsAcrossTerminalCellSizes(t *testing.T) {
 }
 
 func TestSpacedOnboardingCardsKeepMouseRowsAligned(t *testing.T) {
-	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 7, width: 180, height: 50}
+	model := homeModel{cfg: defaultConfig(), mode: "first-setup", onboardingStep: 8, width: 180, height: 50}
 	x, y := renderedTextPosition(t, model.View(), "Rain window")
 	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x, Y: y})
 	got := updated.(homeModel)

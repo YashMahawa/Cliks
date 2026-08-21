@@ -952,6 +952,16 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		if m.cfg.Listening.Ambient != "off" {
 			return m, ambientPreviewCmd(m.cfg.Listening)
 		}
+	default:
+		if strings.HasPrefix(item.key, "onboarding-audio-device:") {
+			devID := strings.TrimPrefix(item.key, "onboarding-audio-device:")
+			if devID == "default" {
+				devID = ""
+			}
+			m.cfg.Listening.AudioDevice = devID
+			_ = saveConfig(m.cfg)
+			m.advanceOnboarding("Audio output set to " + valuePlain(devID, "default") + ".")
+		}
 	case "advanced":
 		m.mode = "advanced"
 		m.cursor = 0
@@ -1214,10 +1224,11 @@ func (m homeModel) itemPrefixLines() []string {
 
 func (m homeModel) firstSetupPrefixLines() []string {
 	step := clampInt(m.onboardingStep, 0, onboardingStepCount-1)
-	titles := []string{"What should the room call you?", "How present should the room feel?", "Let Cliks notice activity—not keys", "How should quick signals arrive?", "Should your chair stay warm?", "Wake Cliks after sign-in?", "Pick the desk lighting", "Add a private room tone?"}
+	titles := []string{"What should the room call you?", "How present should the room feel?", "Select system audio output", "Let Cliks notice activity—not keys", "How should quick signals arrive?", "Should your chair stay warm?", "Wake Cliks after sign-in?", "Pick the desk lighting", "Add a private room tone?"}
 	details := []string{
 		"Your name is shared as plain presence text. It never comes from your OS account.",
 		"This changes only what you hear. Your teammates keep their own mix.",
+		"Choose which speaker or headphones Cliks uses for ambient sound.",
 		"The OS permission exposes local events; Cliks immediately reduces them to keyboard or left/right click.",
 		"Every signal includes who sent it and the fixed message. Mute silences them locally.",
 		"Background mode keeps one small session alive after this terminal closes.",
@@ -1228,6 +1239,7 @@ func (m homeModel) firstSetupPrefixLines() []string {
 	quips := []string{
 		"No stand-up meeting was scheduled to configure this.",
 		"A volume slider should not become a personality test.",
+		"Your ears, your rules.",
 		"Your password manager may relax; we are not collecting letters.",
 		"The notification has one job, then it leaves.",
 		"Tiny daemon. Normal chair. Absolutely no blockchain.",
@@ -1483,7 +1495,7 @@ type homeItem struct {
 	help  string
 }
 
-const onboardingStepCount = 8
+const onboardingStepCount = 9
 
 func (m homeModel) onboardingItems() []homeItem {
 	switch clampInt(m.onboardingStep, 0, onboardingStepCount-1) {
@@ -1500,27 +1512,42 @@ func (m homeModel) onboardingItems() []homeItem {
 			{key: "onboarding-sound-lively", label: "Lively", help: "more of the room, still fatigue-protected"},
 		}
 	case 2:
+		devices := DiscoverAudioDevices()
+		items := make([]homeItem, 0, len(devices))
+		for _, dev := range devices {
+			help := dev.ID
+			if dev.IsDefault || dev.ID == "default" {
+				help = "system default output"
+			}
+			items = append(items, homeItem{
+				key:   "onboarding-audio-device:" + dev.ID,
+				label: dev.Name,
+				help:  help,
+			})
+		}
+		return items
+	case 3:
 		return []homeItem{
 			{key: "onboarding-permission", label: "Open permission", help: "Cliks guides the exact OS step"},
 			{key: "onboarding-permission-later", label: "Do it later", help: "the room can wait without judging"},
 		}
-	case 3:
+	case 4:
 		return []homeItem{
 			{key: "onboarding-notify-sound", label: "Banners + sound", help: "signals may make one small sound"},
 			{key: "onboarding-notify-quiet", label: "Quiet banners", help: "sender and message, no alert sound"},
 			{key: "onboarding-notify-off", label: "No banners", help: "signals stay inside the room"},
 		}
-	case 4:
+	case 5:
 		return []homeItem{
 			{key: "onboarding-background-on", label: "Keep it running", help: "closing this screen will not empty your chair"},
 			{key: "onboarding-background-off", label: "Only while open", help: "terminal closes, Cliks stops"},
 		}
-	case 5:
+	case 6:
 		return []homeItem{
 			{key: "onboarding-autostart-on", label: "Start after sign-in", help: "activates after your first team join"},
 			{key: "onboarding-autostart-off", label: "I will start it", help: "no login launcher"},
 		}
-	case 6:
+	case 7:
 		return []homeItem{
 			{key: "onboarding-theme-ember", label: "Ember", help: "orange, coral, and warm gold"},
 			{key: "onboarding-theme-ocean", label: "Ocean", help: "cyan, blue, and seafoam"},
@@ -2051,6 +2078,33 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			}
 			return "self-hosted"
 		}, func(_ *CliksConfig, _ int) {}},
+		{"Audio Output", "select system audio output device", func(c CliksConfig) string {
+			devices := DiscoverAudioDevices()
+			for _, d := range devices {
+				if strings.EqualFold(d.ID, c.Listening.AudioDevice) || (c.Listening.AudioDevice == "" && d.IsDefault) {
+					return d.Name
+				}
+			}
+			return valuePlain(c.Listening.AudioDevice, "default")
+		}, func(c *CliksConfig, d int) {
+			devices := DiscoverAudioDevices()
+			if len(devices) == 0 {
+				return
+			}
+			index := 0
+			for i, dev := range devices {
+				if strings.EqualFold(dev.ID, c.Listening.AudioDevice) || (c.Listening.AudioDevice == "" && dev.IsDefault) {
+					index = i
+					break
+				}
+			}
+			nextIndex := (index + d + len(devices)) % len(devices)
+			if devices[nextIndex].IsDefault || devices[nextIndex].ID == "default" {
+				c.Listening.AudioDevice = ""
+			} else {
+				c.Listening.AudioDevice = devices[nextIndex].ID
+			}
+		}},
 		{"Volume", "overall loudness", func(c CliksConfig) string { return bar(c.Listening.Volume) }, func(c *CliksConfig, d int) {
 			c.Listening.Volume = clamp(c.Listening.Volume+float64(d)*0.05, 0, 1)
 			c.Listening.Muted = false
@@ -2114,10 +2168,42 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.message = "Cancelled."
 		return m, nil
 	case "up", "shift+tab":
+		if m.mode == "audio-device" {
+			devices := DiscoverAudioDevices()
+			if len(devices) > 0 {
+				index := 0
+				for i, dev := range devices {
+					if strings.EqualFold(dev.ID, m.audioDeviceValue) || (m.audioDeviceValue == "" && dev.IsDefault) {
+						index = i
+						break
+					}
+				}
+				prev := (index - 1 + len(devices)) % len(devices)
+				m.audioDeviceValue = devices[prev].ID
+				m.moveFormTextCursorToEnd()
+				return m, nil
+			}
+		}
 		m.formCursor = clampInt(m.formCursor-1, 0, m.formFieldCount()-1)
 		m.moveFormTextCursorToEnd()
 		return m, nil
 	case "down", "tab":
+		if m.mode == "audio-device" {
+			devices := DiscoverAudioDevices()
+			if len(devices) > 0 {
+				index := 0
+				for i, dev := range devices {
+					if strings.EqualFold(dev.ID, m.audioDeviceValue) || (m.audioDeviceValue == "" && dev.IsDefault) {
+						index = i
+						break
+					}
+				}
+				next := (index + 1) % len(devices)
+				m.audioDeviceValue = devices[next].ID
+				m.moveFormTextCursorToEnd()
+				return m, nil
+			}
+		}
 		m.formCursor = clampInt(m.formCursor+1, 0, m.formFieldCount()-1)
 		m.moveFormTextCursorToEnd()
 		return m, nil
@@ -2422,7 +2508,24 @@ func (m homeModel) formView() string {
 	} else if m.mode == "audio-device" {
 		title = "Audio Output"
 		rows = []string{
-			formLine("Device", m.audioDeviceValue, "default", true, m.formTextCursor, false),
+			formLine("Device ID", m.audioDeviceValue, "default", true, m.formTextCursor, false),
+			"",
+			styleDim.Render("Discovered system audio outputs (press Up/Down to select):"),
+		}
+		for _, d := range DiscoverAudioDevices() {
+			marker := "○"
+			if strings.EqualFold(d.ID, m.audioDeviceValue) || (m.audioDeviceValue == "" && d.IsDefault) {
+				marker = "●"
+			}
+			label := fmt.Sprintf("%s %s", marker, d.Name)
+			if d.ID != "default" && d.ID != d.Name {
+				label += fmt.Sprintf(" (%s)", d.ID)
+			}
+			if marker == "●" {
+				rows = append(rows, styleAccent.Render(label))
+			} else {
+				rows = append(rows, styleDim.Render(label))
+			}
 		}
 	} else if m.mode == "batch-window" {
 		title = "Batch Window"

@@ -703,6 +703,9 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 			if hint != "" {
 				return false, errors.New(hint)
 			}
+			if !IsAudioDeviceAvailable(device) {
+				fmt.Fprintf(os.Stderr, "Warning: audio output %q was not found among active system devices; falling back to default if unavailable at runtime\n", device)
+			}
 		}
 		cfg.Listening.AudioDevice = device
 	case "api.url":
