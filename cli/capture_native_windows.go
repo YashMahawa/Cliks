@@ -46,6 +46,7 @@ var (
 type windowsCaptureSession struct {
 	dispatch *nativeCaptureDispatcher
 	sharing  SharingConfig
+	capture  *ActivityCapture
 }
 
 type windowsPoint struct {
@@ -100,22 +101,11 @@ func (c *ActivityCapture) runWindowsHooks(ctx context.Context, sharing SharingCo
 	module, _, _ := procGetModuleHandleW.Call(0)
 	keyboardHook := uintptr(0)
 	mouseHook := uintptr(0)
-	if sharing.Keyboard {
-		keyboardHook, _, _ = procSetWindowsHookExW.Call(whKeyboardLL, windowsKeyboardCallback, module, 0)
-		if keyboardHook == 0 {
-			ready <- windowsHookStart{err: fmt.Errorf("SetWindowsHookExW keyboard hook failed")}
-			return
-		}
-	}
-	if sharing.Mouse {
-		mouseHook, _, _ = procSetWindowsHookExW.Call(whMouseLL, windowsMouseCallback, module, 0)
-		if mouseHook == 0 {
-			if keyboardHook != 0 {
-				procUnhookWindowsHookEx.Call(keyboardHook)
-			}
-			ready <- windowsHookStart{err: fmt.Errorf("SetWindowsHookExW mouse hook failed")}
-			return
-		}
+	keyboardHook, _, _ = procSetWindowsHookExW.Call(whKeyboardLL, windowsKeyboardCallback, module, 0)
+	mouseHook, _, _ = procSetWindowsHookExW.Call(whMouseLL, windowsMouseCallback, module, 0)
+	if keyboardHook == 0 && mouseHook == 0 {
+		ready <- windowsHookStart{err: fmt.Errorf("SetWindowsHookExW hook failed")}
+		return
 	}
 	defer func() {
 		if keyboardHook != 0 {
@@ -134,7 +124,7 @@ func (c *ActivityCapture) runWindowsHooks(ctx context.Context, sharing SharingCo
 	}()
 
 	windowsNativeCaptureLock.Lock()
-	windowsNativeCapture = &windowsCaptureSession{dispatch: newNativeCaptureDispatcher(c), sharing: sharing}
+	windowsNativeCapture = &windowsCaptureSession{dispatch: newNativeCaptureDispatcher(c), sharing: sharing, capture: c}
 	windowsNativeCaptureLock.Unlock()
 	ready <- windowsHookStart{threadID: uint32(threadID)}
 
@@ -179,7 +169,14 @@ func emitWindowsNativeEvent(kind string, button string) {
 	windowsNativeCaptureLock.RLock()
 	session := windowsNativeCapture
 	windowsNativeCaptureLock.RUnlock()
-	if session == nil || (kind == "keyboard" && !session.sharing.Keyboard) || (kind == "mouse" && !session.sharing.Mouse) {
+	if session == nil {
+		return
+	}
+	sharing := session.sharing
+	if session.capture != nil {
+		sharing = session.capture.getSharing()
+	}
+	if (kind == "keyboard" && !sharing.Keyboard) || (kind == "mouse" && !sharing.Mouse) {
 		return
 	}
 	session.dispatch.push(LocalActivityEvent{Kind: kind, Button: button, At: time.Now()})
