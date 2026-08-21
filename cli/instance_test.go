@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -219,6 +220,105 @@ func TestActiveSessionFindsLegacyProcessWithoutLock(t *testing.T) {
 	}
 	if active.PID != 54321 || active.Mode != runModeExisting {
 		t.Fatalf("active = %+v, want legacy pid 54321", active)
+	}
+	if active.Version != version {
+		t.Fatalf("active.Version = %q, want %q", active.Version, version)
+	}
+	if sessionNeedsUpgrade(active) {
+		t.Fatal("recovered legacy session was marked as needing upgrade")
+	}
+}
+
+func TestActiveSessionPopulatesMissingVersionInMemoryDuringLockRecovery(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", temp)
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockState := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-NOVER", Mode: runModeForeground}
+	data, _ := json.MarshalIndent(lockState, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("expected active session")
+	}
+	if active.Version != version {
+		t.Fatalf("active.Version = %q, want %q", active.Version, version)
+	}
+	if sessionNeedsUpgrade(active) {
+		t.Fatal("recovered session with missing version in lock file was marked as needing upgrade")
+	}
+
+	// Verify that lock file on disk was NOT modified (must operate strictly in memory)
+	diskState, _ := readSessionFile(sessionLockPath())
+	if diskState.Version != "" {
+		t.Fatalf("disk lock version = %q, want empty string (must not repair disk file)", diskState.Version)
+	}
+}
+
+func TestActiveSessionPopulatesMissingVersionInMemoryDuringBackgroundPIDRecovery(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", temp)
+
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	if err := writeBackgroundPID(cmd.Process.Pid); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("expected active session via background.pid fallback")
+	}
+	if active.PID != cmd.Process.Pid {
+		t.Fatalf("active.PID = %d, want %d", active.PID, cmd.Process.Pid)
+	}
+	if active.Version != version {
+		t.Fatalf("active.Version = %q, want %q", active.Version, version)
+	}
+	if sessionNeedsUpgrade(active) {
+		t.Fatal("recovered background session was marked as needing upgrade")
+	}
+
+	// Verify session state file on disk was NOT written/modified
+	stale, _ := readSessionFile(sessionStatePath())
+	if stale.Version != "" {
+		t.Fatalf("disk session state version = %q, want empty string", stale.Version)
+	}
+}
+
+func TestActiveSessionPreservesMismatchedVersion(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", temp)
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lockState := ActiveSessionState{PID: os.Getpid(), Version: "0.5.0", TeamCode: "CLIK-OLD", Mode: runModeBackground}
+	data, _ := json.MarshalIndent(lockState, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("expected active session")
+	}
+	if active.Version != "0.5.0" {
+		t.Fatalf("active.Version = %q, want %q", active.Version, "0.5.0")
+	}
+	if !sessionNeedsUpgrade(active) {
+		t.Fatal("mismatched session version was not marked as needing upgrade")
 	}
 }
 

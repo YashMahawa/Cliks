@@ -201,6 +201,9 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 				if richer.Version == "" {
 					richer.Version = state.Version
 				}
+				if richer.Version == "" {
+					richer.Version = version
+				}
 				if richer.Mode == "" {
 					richer.Mode = state.Mode
 				}
@@ -208,6 +211,9 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 					richer.TeamCode = state.TeamCode
 				}
 				return lockLive, richer
+			}
+			if state.Version == "" {
+				state.Version = version
 			}
 			return lockLive, state
 		}
@@ -282,6 +288,9 @@ func activeSession() (ActiveSessionState, bool) {
 			if state.Version == "" {
 				state.Version = lock.Version
 			}
+			if state.Version == "" {
+				state.Version = version
+			}
 			if state.Mode == "" {
 				state.Mode = lock.Mode
 			}
@@ -296,6 +305,9 @@ func activeSession() (ActiveSessionState, bool) {
 	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
 		state.PID = pid
+		if state.Version == "" {
+			state.Version = version
+		}
 		if state.Mode == "" {
 			state.Mode = runModeBackground
 		}
@@ -309,6 +321,7 @@ func activeSession() (ActiveSessionState, bool) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		state := ActiveSessionState{
 			PID:              siblings[0].PID,
+			Version:          version,
 			Mode:             runModeExisting,
 			ConnectionStatus: "running",
 			StartedAt:        now,
