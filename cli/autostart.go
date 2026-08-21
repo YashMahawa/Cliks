@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -106,6 +107,48 @@ func xmlText(value string) string {
 	return replacer.Replace(value)
 }
 
+func syncLauncherIfAutostartEnabled(cfg CliksConfig) string {
+	if cfg.CurrentTeamCode == "" || !autostartEnabled() {
+		return ""
+	}
+	var msg string
+	var err error
+	switch runtime.GOOS {
+	case "linux":
+		msg, err = linuxAutostart("enable", cfg.CurrentTeamCode)
+	case "darwin":
+		msg, err = macAutostart("enable", cfg.CurrentTeamCode)
+	case "windows":
+		msg, err = windowsAutostart("enable", cfg.CurrentTeamCode)
+	}
+	if err != nil {
+		return ""
+	}
+	return msg
+}
+
+type bootEnvParams struct {
+	DelaySec    int
+	CaptureMode string
+	AudioDevice string
+	VolumeStr   string
+}
+
+func getBootEnvParams(cfg CliksConfig) bootEnvParams {
+	dev := cfg.EffectiveBootAudioDevice()
+	if dev == "" {
+		dev = "default"
+	}
+	vol := cfg.EffectiveBootVolume()
+	volStr := strconv.FormatFloat(vol, 'f', -1, 64)
+	return bootEnvParams{
+		DelaySec:    cfg.EffectiveBootDelay(),
+		CaptureMode: cfg.EffectiveBootCaptureMode(),
+		AudioDevice: dev,
+		VolumeStr:   volStr,
+	}
+}
+
 func linuxAutostart(action, code string) (string, error) {
 	home, _ := os.UserHomeDir()
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -139,6 +182,7 @@ func linuxAutostart(action, code string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		bootParams := getBootEnvParams(loadConfig())
 		body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
 After=network-online.target
@@ -150,10 +194,14 @@ Restart=on-failure
 RestartSec=10
 Environment=CLIKS_AUTOSTART_TEAM=%s
 Environment=CLIKS_RUN_MODE=%s
+Environment=CLIKS_BOOT_DELAY=%d
+Environment=CLIKS_BOOT_CAPTURE_MODE=%s
+Environment=CLIKS_BOOT_AUDIO_DEVICE=%s
+Environment=CLIKS_BOOT_VOLUME=%s
 
 [Install]
 WantedBy=default.target
-`, quotedExe, code, runModeBoot)
+`, quotedExe, code, runModeBoot, bootParams.DelaySec, bootParams.CaptureMode, bootParams.AudioDevice, bootParams.VolumeStr)
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
@@ -201,6 +249,7 @@ func macAutostart(action, code string) (string, error) {
 		domain := fmt.Sprintf("gui/%d", os.Getuid())
 		_ = exec.Command("launchctl", "bootout", domain+"/"+launchAgentID).Run()
 		_ = exec.Command("launchctl", "bootout", domain, path).Run()
+		bootParams := getBootEnvParams(loadConfig())
 		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -218,6 +267,14 @@ func macAutostart(action, code string) (string, error) {
     <string>%s</string>
     <key>CLIKS_RUN_MODE</key>
     <string>%s</string>
+    <key>CLIKS_BOOT_DELAY</key>
+    <string>%s</string>
+    <key>CLIKS_BOOT_CAPTURE_MODE</key>
+    <string>%s</string>
+    <key>CLIKS_BOOT_AUDIO_DEVICE</key>
+    <string>%s</string>
+    <key>CLIKS_BOOT_VOLUME</key>
+    <string>%s</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -231,7 +288,7 @@ func macAutostart(action, code string) (string, error) {
   <string>%s</string>
 </dict>
 </plist>
-`, launchAgentID, xmlText(exe), code, runModeBoot, xmlText(filepath.Join(home, "Library", "Logs", "cliks.log")), xmlText(filepath.Join(home, "Library", "Logs", "cliks.err.log")))
+`, launchAgentID, xmlText(exe), xmlText(code), xmlText(runModeBoot), xmlText(strconv.Itoa(bootParams.DelaySec)), xmlText(bootParams.CaptureMode), xmlText(bootParams.AudioDevice), xmlText(bootParams.VolumeStr), xmlText(filepath.Join(home, "Library", "Logs", "cliks.log")), xmlText(filepath.Join(home, "Library", "Logs", "cliks.err.log")))
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			return "", err
 		}
@@ -292,13 +349,19 @@ func windowsAutostart(action, code string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		bootParams := getBootEnvParams(loadConfig())
+		vbsEsc := func(val string) string { return strings.ReplaceAll(val, `"`, `""`) }
 		// WindowStyle 0 = hidden. No console flash at login.
 		body := fmt.Sprintf(
 			"Set sh = CreateObject(\"Wscript.Shell\")\r\n"+
 				"sh.Environment(\"Process\")(\"CLIKS_AUTOSTART_TEAM\") = \"%s\"\r\n"+
 				"sh.Environment(\"Process\")(\"CLIKS_RUN_MODE\") = \"%s\"\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_BOOT_DELAY\") = \"%d\"\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_BOOT_CAPTURE_MODE\") = \"%s\"\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_BOOT_AUDIO_DEVICE\") = \"%s\"\r\n"+
+				"sh.Environment(\"Process\")(\"CLIKS_BOOT_VOLUME\") = \"%s\"\r\n"+
 				"sh.Run \"\"\"%s\"\" start\", 0, False\r\n",
-			code, runModeBoot, strings.ReplaceAll(exe, `"`, `""`),
+			vbsEsc(code), runModeBoot, bootParams.DelaySec, vbsEsc(bootParams.CaptureMode), vbsEsc(bootParams.AudioDevice), vbsEsc(bootParams.VolumeStr), vbsEsc(exe),
 		)
 		if err := os.WriteFile(vbsPath, []byte(body), 0o644); err != nil {
 			return "", err
