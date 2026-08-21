@@ -19,10 +19,16 @@ func platformCaptureSetup() []setupStep {
 	} else if helper != "" {
 		steps = append(steps, setupStep{title: "Private background capture", status: "action", detail: "Enable only Cliks Capture in Input Monitoring, then restart Cliks. Do not enable Terminal, iTerm, Warp, or VS Code.", command: "Open System Settings → Privacy & Security → Input Monitoring"})
 	} else {
+		detail := "Cliks Capture.app is missing. Reinstall Cliks to add the signed helper app."
+		cmd := "Re-run the Cliks curl installer"
+		if _, err := exec.LookPath("swiftc"); err != nil {
+			detail = "Cliks Capture.app is missing and Swift compiler (swiftc) was not found. Install Xcode Command Line Tools ('xcode-select --install') or reinstall prebuilt Cliks."
+			cmd = "xcode-select --install"
+		}
 		steps = append(steps, setupStep{
 			title: "Private background capture", status: "action",
-			detail:  "Cliks Capture.app is missing. Reinstall Cliks to add the isolated open-source helper.",
-			command: "Re-run the Cliks curl installer",
+			detail:  detail,
+			command: cmd,
 		})
 	}
 	opened := false

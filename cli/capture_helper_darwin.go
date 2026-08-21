@@ -18,12 +18,15 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 	}
 	helper := macCaptureHelperPath()
 	if helper == "" {
-		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture.app is missing. Run cliks setup or reinstall. You can temporarily opt into the less-safe terminal permission with: cliks set capture.mode direct"}
+		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture.app is missing. Run cliks setup or reinstall."}
+	}
+	if !macCaptureHelperReady() {
+		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture.app failed to verify or is blocked by macOS Gatekeeper. Run cliks setup."}
 	}
 	cmd := exec.CommandContext(ctx, helper, "--stdio")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil || cmd.Start() != nil {
-		return CaptureState{Mode: "off", PermissionHint: "Could not start Cliks Capture.app. Run cliks setup; direct compatibility mode remains available in Capture safety."}
+		return CaptureState{Mode: "off", PermissionHint: "Could not start Cliks Capture.app. Run cliks setup."}
 	}
 	go func() {
 		defer cmd.Wait()
