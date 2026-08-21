@@ -663,6 +663,18 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 		}
 		cfg.Listening.Volume = clamp(parsed, 0, 1)
 		cfg.Listening.VolumeConfigured = true
+	case "volume.step":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.VolumeStep = clamp(parsed, 0.01, 0.25)
+	case "balance", "stereo.balance":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return false, err
+		}
+		cfg.Listening.Balance = clamp(parsed, -0.95, 0.95)
 	case "density":
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {

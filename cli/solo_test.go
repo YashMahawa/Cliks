@@ -81,7 +81,7 @@ func TestSoloShowsAndPersistsIndependentSoundLevels(t *testing.T) {
 	model := newSoloModel(cfg)
 	defer model.audio.Close()
 	model.width, model.height = 120, 36
-	for _, want := range []string{"Master", "Keyboard", "Clicks", "Room level"} {
+	for _, want := range []string{"Master", "Balance", "Keyboard", "Clicks", "Room level"} {
 		if !strings.Contains(model.View(), want) {
 			t.Fatalf("solo view missing %q", want)
 		}
@@ -169,5 +169,38 @@ func TestSoloSecondaryControlsAnchorToPanelBottom(t *testing.T) {
 	_, backY := renderedTextPosition(t, model.View(), "[ Back ]")
 	if backY < 42 {
 		t.Fatalf("Solo Back/status group stayed at row %d instead of using the panel bottom", backY)
+	}
+}
+
+func TestSoloStereoBalanceControl(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := newSoloModel(defaultConfig())
+	defer model.audio.Close()
+	model.width, model.height = 120, 38
+
+	region := liveHitRegion{}
+	for _, candidate := range model.hitRegions() {
+		if candidate.action == "balance-slider" {
+			region = candidate
+			break
+		}
+	}
+	if region.width == 0 {
+		t.Fatalf("balance slider has no rendered hit region:\n%s", ansi.Strip(model.View()))
+	}
+
+	// Hover balance slider and adjust with right arrow
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: region.x + 2, Y: region.y})
+	model = updated.(soloModel)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(soloModel)
+	if model.cfg.Listening.Balance <= 0 {
+		t.Fatalf("balance after right arrow = %v, want > 0", model.cfg.Listening.Balance)
+	}
+
+	// Check bounds persistence
+	if saved := loadConfig(); saved.Listening.Balance != model.cfg.Listening.Balance {
+		t.Fatalf("saved balance = %v, want %v", saved.Listening.Balance, model.cfg.Listening.Balance)
 	}
 }

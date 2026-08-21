@@ -596,6 +596,17 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter", " ":
 			return m.activate()
+		case "m":
+			m.cfg.Listening.Muted = !m.cfg.Listening.Muted
+			_ = saveConfig(m.cfg)
+			if m.activeOK {
+				_ = enqueueSessionCommand(localSessionCommand{Type: "reload_listening"})
+			}
+			if m.cfg.Listening.Muted {
+				m.message = "Muted."
+			} else {
+				m.message = "Unmuted."
+			}
 		case "s":
 			if m.mode == "preferences" {
 				if err := saveConfig(m.cfg); err != nil {
@@ -1107,6 +1118,9 @@ func (m *homeModel) changeSetting(delta int) {
 	row.apply(&m.cfg, delta)
 	applyTheme(m.cfg.Theme)
 	_ = saveConfig(m.cfg)
+	if m.activeOK {
+		_ = enqueueSessionCommand(localSessionCommand{Type: "reload_listening"})
+	}
 	m.message = "Saved."
 }
 
@@ -2052,8 +2066,36 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			return "self-hosted"
 		}, func(_ *CliksConfig, _ int) {}},
 		{"Volume", "overall loudness", func(c CliksConfig) string { return bar(c.Listening.Volume) }, func(c *CliksConfig, d int) {
-			c.Listening.Volume = clamp(c.Listening.Volume+float64(d)*0.05, 0, 1)
+			step := c.Listening.VolumeStep
+			if step <= 0 {
+				step = 0.05
+			}
+			c.Listening.Volume = clamp(c.Listening.Volume+float64(d)*step, 0, 1)
 			c.Listening.Muted = false
+		}},
+		{"Volume step", "volume adjustment step size (1%-25%)", func(c CliksConfig) string {
+			step := c.Listening.VolumeStep
+			if step <= 0 {
+				step = 0.05
+			}
+			return fmt.Sprintf("%d%%", int(step*100+0.5))
+		}, func(c *CliksConfig, d int) {
+			step := c.Listening.VolumeStep
+			if step <= 0 {
+				step = 0.05
+			}
+			c.Listening.VolumeStep = clamp(step+float64(d)*0.01, 0.01, 0.25)
+		}},
+		{"Stereo balance", "adjust left/right balance (-0.95 to +0.95)", func(c CliksConfig) string {
+			bal := c.Listening.Balance
+			if math.Abs(bal) < 0.01 {
+				return "Center"
+			} else if bal < 0 {
+				return fmt.Sprintf("L %.2f", -bal)
+			}
+			return fmt.Sprintf("R %.2f", bal)
+		}, func(c *CliksConfig, d int) {
+			c.Listening.Balance = clamp(c.Listening.Balance+float64(d)*0.05, -0.95, 0.95)
 		}},
 		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
 		{"Room tone", "private embedded soundscape with six choices", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},

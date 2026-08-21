@@ -84,6 +84,8 @@ type ListeningConfig struct {
 	Self              bool    `json:"self"`
 	Volume            float64 `json:"volume"`
 	VolumeConfigured  bool    `json:"volumeConfigured,omitempty"`
+	VolumeStep        float64 `json:"volumeStep,omitempty"`
+	Balance           float64 `json:"balance,omitempty"`
 	Muted             bool    `json:"muted"`
 	Spatial           bool    `json:"spatial"`
 	FatigueProtection bool    `json:"fatigueProtection"`
@@ -161,6 +163,8 @@ func defaultConfig() CliksConfig {
 			Self:              false,
 			Volume:            0.7,
 			VolumeConfigured:  true,
+			VolumeStep:        0.05,
+			Balance:           0.0,
 			Muted:             false,
 			Spatial:           true,
 			FatigueProtection: true,
@@ -401,6 +405,11 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.Listening.Volume = def.Listening.Volume
 		cfg.Listening.VolumeConfigured = true
 	}
+	if cfg.Listening.VolumeStep <= 0 {
+		cfg.Listening.VolumeStep = def.Listening.VolumeStep
+	}
+	cfg.Listening.VolumeStep = clamp(cfg.Listening.VolumeStep, 0.01, 0.25)
+	cfg.Listening.Balance = clamp(cfg.Listening.Balance, -0.95, 0.95)
 	if cfg.Listening.Density == 0 {
 		cfg.Listening.Density = def.Listening.Density
 	}

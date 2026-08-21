@@ -449,6 +449,15 @@ func (s *sessionController) flushSessionState() {
 }
 
 func (s *sessionController) adjustVolume(delta float64) {
+	step := s.cfg.Listening.VolumeStep
+	if step <= 0 {
+		step = 0.05
+	}
+	if delta > 0 {
+		delta = step
+	} else if delta < 0 {
+		delta = -step
+	}
 	s.set(func(state *SessionViewState) {
 		state.Listening.Volume = clamp(state.Listening.Volume+delta, 0, 1)
 		if state.Listening.Volume > 0 {
@@ -631,11 +640,23 @@ func (s *sessionController) commandLoop() {
 					s.cfg.APIURL = cfg.APIURL
 					s.cfg.WSURL = cfg.WSURL
 					s.cfg.BatchWindowMs = cfg.BatchWindowMs
+					s.cfg.Listening = cfg.Listening
+					s.set(func(state *SessionViewState) { state.Listening = cfg.Listening })
+					if s.audio != nil {
+						s.audio.updateListening(cfg.Listening)
+					}
 					s.wsMu.Lock()
 					if s.ws != nil {
 						_ = s.ws.Close()
 					}
 					s.wsMu.Unlock()
+				} else if command.Type == "reload_listening" || command.Type == "toggle_mute" {
+					cfg := loadConfig()
+					s.cfg.Listening = cfg.Listening
+					s.set(func(state *SessionViewState) { state.Listening = cfg.Listening })
+					if s.audio != nil {
+						s.audio.updateListening(cfg.Listening)
+					}
 				} else if command.Type == "reaction" {
 					if err := s.sendReaction(command.Reaction); err != nil {
 						s.set(func(state *SessionViewState) { state.Notice = "Signal failed: " + err.Error() })
