@@ -48,6 +48,30 @@ type windowsCaptureSession struct {
 	sharing  SharingConfig
 }
 
+type WindowsNativeHookProvider struct {
+	capture *ActivityCapture
+}
+
+func (p *WindowsNativeHookProvider) Name() string { return "windows-native" }
+
+func (p *WindowsNativeHookProvider) Probe(ctx context.Context) ProbeResult {
+	return ProbeResult{Name: "windows-native", Available: true, State: DriverStateActive, Mode: "windows-native"}
+}
+
+func (p *WindowsNativeHookProvider) Start(ctx context.Context, sharing SharingConfig, events chan<- LocalActivityEvent) (CaptureState, error) {
+	state := p.capture.startGlobalHook(ctx, sharing, "windows-native")
+	if state.Mode == "off" {
+		return state, fmt.Errorf("windows native capture failed: %s", state.PermissionHint)
+	}
+	return state, nil
+}
+
+func (p *WindowsNativeHookProvider) Stop() error { return nil }
+
+func (c *ActivityCapture) platformProviders(mode string) []InputCaptureProvider {
+	return []InputCaptureProvider{&WindowsNativeHookProvider{capture: c}, &TerminalCaptureProvider{capture: c}}
+}
+
 type windowsPoint struct {
 	X int32
 	Y int32
