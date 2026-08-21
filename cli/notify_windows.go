@@ -54,13 +54,12 @@ func sendNativeNotification(title string, body string, sound bool) error {
 	className, _ := windows.UTF16PtrFromString("STATIC")
 	windowName, _ := windows.UTF16PtrFromString("Cliks Notifications")
 	module, _, _ := procGetModuleHandleW.Call(0)
-	messageWindow := ^uintptr(2) // HWND_MESSAGE
 	window, _, createErr := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
 		0, 0, 0, 0, 0,
-		messageWindow,
+		0,
 		0,
 		module,
 		0,

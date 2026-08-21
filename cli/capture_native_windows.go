@@ -161,7 +161,7 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 			}
 			return CaptureState{Mode: "off", PermissionHint: "Windows capture helper failed readiness check: " + err.Error()}
 		}
-	case <-time.After(180 * time.Millisecond):
+	case <-time.After(2000 * time.Millisecond):
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -264,15 +264,13 @@ func runWindowsCaptureHelper(args []string) error {
 
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	hwndMsgVal := ^uintptr(2) // HWND_MESSAGE
-
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
 		0,
 		0, 0, 0, 0,
-		hwndMsgVal,
+		0,
 		0,
 		module,
 		0,

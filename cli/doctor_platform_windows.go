@@ -33,7 +33,7 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 }
 
 func probeWindowsNativeCapture() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
 	defer cancel()
 	capture := newActivityCapture()
 	state := capture.start(ctx, SharingConfig{Keyboard: true, Mouse: true}, "auto")
@@ -72,10 +72,5 @@ func windowsElevationStatus() (bool, string) {
 }
 
 func platformStartupCaptureNotice() string {
-	elevated, _ := windowsElevationStatus()
-	if elevated {
-		return ""
-	}
-	// UIPI is silent at the OS level — surface it so users know capture is not broken.
-	return "Windows tip: capture may pause while an Administrator window is focused (UIPI); it resumes on normal apps."
+	return ""
 }
