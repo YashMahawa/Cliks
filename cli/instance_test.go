@@ -222,6 +222,81 @@ func TestActiveSessionFindsLegacyProcessWithoutLock(t *testing.T) {
 	}
 }
 
+func TestActiveSessionRecognizesRunningProcessWithEmptyStatusFile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a lock file with current PID but empty session.json (status file)
+	lockState := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-DAEMON", Mode: runModeBackground, ConnectionStatus: ""}
+	data, _ := json.MarshalIndent(lockState, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sessionStatePath(), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("activeSession returned false for live daemon with empty status file")
+	}
+	if active.PID != os.Getpid() {
+		t.Fatalf("PID = %d, want %d", active.PID, os.Getpid())
+	}
+	if active.ConnectionStatus == "" || active.ConnectionStatus == "stopped" {
+		t.Fatalf("ConnectionStatus = %q, want non-empty non-stopped status", active.ConnectionStatus)
+	}
+}
+
+func TestActiveSessionRecognizesRunningProcessWithStoppedStatusInSessionJson(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockState := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-DAEMON", Mode: runModeBackground, ConnectionStatus: "starting"}
+	lockData, _ := json.MarshalIndent(lockState, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(lockData, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Leftover session.json with stopped status
+	stoppedState := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-DAEMON", Mode: runModeBackground, ConnectionStatus: "stopped"}
+	stoppedData, _ := json.MarshalIndent(stoppedState, "", "  ")
+	if err := os.WriteFile(sessionStatePath(), append(stoppedData, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("activeSession returned false for live daemon with stopped session.json")
+	}
+	if active.PID != os.Getpid() {
+		t.Fatalf("PID = %d, want %d", active.PID, os.Getpid())
+	}
+	if active.ConnectionStatus == "stopped" {
+		t.Fatalf("ConnectionStatus = %q, want active status when process is running", active.ConnectionStatus)
+	}
+}
+
+func TestActiveSessionRecognizesRunningBackgroundPIDWithEmptyState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	bgPID := os.Getppid()
+	if err := writeBackgroundPID(bgPID); err != nil {
+		t.Fatal(err)
+	}
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("activeSession returned false for running background PID")
+	}
+	if active.PID != bgPID {
+		t.Fatalf("PID = %d, want %d", active.PID, bgPID)
+	}
+	if active.ConnectionStatus == "" || active.ConnectionStatus == "stopped" {
+		t.Fatalf("ConnectionStatus = %q, want starting/running status", active.ConnectionStatus)
+	}
+}
+
 func processIDForTest() int {
 	return os.Getpid()
 }

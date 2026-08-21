@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -730,5 +731,57 @@ func TestHomeFooterKeepsConnectionAndVolumeVisible(t *testing.T) {
 func TestNewUsersGetDynamicCircleByDefault(t *testing.T) {
 	if !defaultConfig().Listening.DynamicPlacement {
 		t.Fatal("DynamicPlacement = false, want true for new configurations")
+	}
+}
+
+func TestOpenLiveRoutesToAttachWhenDaemonIsRunning(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	model := homeModel{
+		cfg:      cfg,
+		mode:     "home",
+		cursor:   0, // "start" -> "Open Live"
+		activeOK: true,
+		active: ActiveSessionState{
+			PID:              os.Getpid(),
+			TeamCode:         "CLIK-LOCAL",
+			ConnectionStatus: "starting",
+		},
+	}
+
+	updated, cmd := model.activate()
+	got := updated.(homeModel)
+	if cmd == nil {
+		t.Fatalf("cmd = nil, want tea.Quit command")
+	}
+	if msg := cmd(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("cmd() = %v, want tea.QuitMsg", msg)
+	}
+	if got.action != actionAttach {
+		t.Fatalf("action = %q, want %q for running daemon process", got.action, actionAttach)
+	}
+}
+
+func TestRefreshRuntimeUpdatesActiveSessionAvailabilityBasedOnProcessLiveness(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	bgPID := os.Getppid()
+	if err := writeBackgroundPID(bgPID); err != nil {
+		t.Fatal(err)
+	}
+
+	model := homeModel{
+		cfg:      cfg,
+		mode:     "home",
+		activeOK: false,
+	}
+
+	model.refreshRuntime()
+	if !model.activeOK {
+		t.Fatal("refreshRuntime failed to recognize running process")
+	}
+	if model.active.PID != bgPID {
+		t.Fatalf("active.PID = %d, want %d", model.active.PID, bgPID)
 	}
 }
