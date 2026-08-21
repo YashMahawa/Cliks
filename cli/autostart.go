@@ -51,11 +51,11 @@ func autostartAction(args []string) (string, error) {
 	}
 	switch runtime.GOOS {
 	case "linux":
-		return linuxAutostart(action, code)
+		return linuxAutostart(action, code, cfg)
 	case "darwin":
-		return macAutostart(action, code)
+		return macAutostart(action, code, cfg)
 	case "windows":
-		return windowsAutostart(action, code)
+		return windowsAutostart(action, code, cfg)
 	default:
 		return "", fmt.Errorf("autostart is supported on Linux, macOS, and Windows")
 	}
@@ -115,11 +115,11 @@ func syncLauncherIfAutostartEnabled(cfg CliksConfig) string {
 	var err error
 	switch runtime.GOOS {
 	case "linux":
-		msg, err = linuxAutostart("enable", cfg.CurrentTeamCode)
+		msg, err = linuxAutostart("enable", cfg.CurrentTeamCode, cfg)
 	case "darwin":
-		msg, err = macAutostart("enable", cfg.CurrentTeamCode)
+		msg, err = macAutostart("enable", cfg.CurrentTeamCode, cfg)
 	case "windows":
-		msg, err = windowsAutostart("enable", cfg.CurrentTeamCode)
+		msg, err = windowsAutostart("enable", cfg.CurrentTeamCode, cfg)
 	}
 	if err != nil {
 		return ""
@@ -149,7 +149,7 @@ func getBootEnvParams(cfg CliksConfig) bootEnvParams {
 	}
 }
 
-func linuxAutostart(action, code string) (string, error) {
+func linuxAutostart(action, code string, optionalCfg ...CliksConfig) (string, error) {
 	home, _ := os.UserHomeDir()
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
@@ -182,7 +182,11 @@ func linuxAutostart(action, code string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		bootParams := getBootEnvParams(loadConfig())
+		cfgToUse := loadConfig()
+		if len(optionalCfg) > 0 && optionalCfg[0].CurrentTeamCode != "" {
+			cfgToUse = optionalCfg[0]
+		}
+		bootParams := getBootEnvParams(cfgToUse)
 		body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
 After=network-online.target
@@ -216,7 +220,7 @@ WantedBy=default.target
 	}
 }
 
-func macAutostart(action, code string) (string, error) {
+func macAutostart(action, code string, optionalCfg ...CliksConfig) (string, error) {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "Library", "LaunchAgents")
 	path := filepath.Join(dir, launchAgentID+".plist")
@@ -249,7 +253,11 @@ func macAutostart(action, code string) (string, error) {
 		domain := fmt.Sprintf("gui/%d", os.Getuid())
 		_ = exec.Command("launchctl", "bootout", domain+"/"+launchAgentID).Run()
 		_ = exec.Command("launchctl", "bootout", domain, path).Run()
-		bootParams := getBootEnvParams(loadConfig())
+		cfgToUse := loadConfig()
+		if len(optionalCfg) > 0 && optionalCfg[0].CurrentTeamCode != "" {
+			cfgToUse = optionalCfg[0]
+		}
+		bootParams := getBootEnvParams(cfgToUse)
 		body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -313,7 +321,7 @@ func enableWantedAutostart(cfg CliksConfig) string {
 	return message
 }
 
-func windowsAutostart(action, code string) (string, error) {
+func windowsAutostart(action, code string, optionalCfg ...CliksConfig) (string, error) {
 	startup := os.Getenv("APPDATA")
 	if startup == "" {
 		return "", fmt.Errorf("could not locate Windows Startup folder")
@@ -349,7 +357,11 @@ func windowsAutostart(action, code string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		bootParams := getBootEnvParams(loadConfig())
+		cfgToUse := loadConfig()
+		if len(optionalCfg) > 0 && optionalCfg[0].CurrentTeamCode != "" {
+			cfgToUse = optionalCfg[0]
+		}
+		bootParams := getBootEnvParams(cfgToUse)
 		vbsEsc := func(val string) string { return strings.ReplaceAll(val, `"`, `""`) }
 		// WindowStyle 0 = hidden. No console flash at login.
 		body := fmt.Sprintf(
