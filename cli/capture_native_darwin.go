@@ -24,6 +24,7 @@ var (
 type darwinCaptureSession struct {
 	dispatch *nativeCaptureDispatcher
 	sharing  SharingConfig
+	capture  *ActivityCapture
 }
 
 func (c *ActivityCapture) startDirectGlobalHook(ctx context.Context, sharing SharingConfig) CaptureState {
@@ -33,7 +34,7 @@ func (c *ActivityCapture) startDirectGlobalHook(ctx context.Context, sharing Sha
 	token := darwinCaptureToken.Add(1)
 	darwinCaptureMu.Lock()
 	dispatch := newNativeCaptureDispatcher(c)
-	darwinCaptures[token] = &darwinCaptureSession{dispatch: dispatch, sharing: sharing}
+	darwinCaptures[token] = &darwinCaptureSession{dispatch: dispatch, sharing: sharing, capture: c}
 	darwinCaptureMu.Unlock()
 
 	handle := C.cliks_event_tap_create(C.uintptr_t(token))
@@ -83,13 +84,17 @@ func emitDarwinCaptureEvent(token uint64, kind int, button int) {
 		return
 	}
 	now := time.Now()
+	sharing := session.sharing
+	if session.capture != nil {
+		sharing = session.capture.getSharing()
+	}
 	switch kind {
 	case 1:
-		if session.sharing.Keyboard {
+		if sharing.Keyboard {
 			session.dispatch.push(LocalActivityEvent{Kind: "keyboard", At: now})
 		}
 	case 2:
-		if !session.sharing.Mouse {
+		if !sharing.Mouse {
 			return
 		}
 		mouseButton := ""

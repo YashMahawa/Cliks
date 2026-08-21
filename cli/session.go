@@ -495,6 +495,12 @@ func (s *sessionController) recordLocalActivity(event LocalActivityEvent) {
 	if s.attached {
 		return
 	}
+	s.mu.Lock()
+	sharing := s.cfg.Sharing
+	s.mu.Unlock()
+	if (event.Kind == "keyboard" && !sharing.Keyboard) || (event.Kind == "mouse" && !sharing.Mouse) {
+		return
+	}
 	s.set(func(state *SessionViewState) {
 		if !state.LastLocalActivityAt.IsZero() && event.At.Sub(state.LastLocalActivityAt) <= 5*time.Second {
 			state.LocalBurstCount++
@@ -583,6 +589,43 @@ func (s *sessionController) sendBatch(startedAt time.Time, events []RemoteActivi
 	}
 }
 
+func (s *sessionController) reloadConfig() {
+	cfg := loadConfig()
+
+	s.mu.Lock()
+	s.cfg.Sharing = cfg.Sharing
+	s.cfg.Listening = cfg.Listening
+	s.cfg.Notifications = cfg.Notifications
+	s.cfg.BatchWindowMs = cfg.BatchWindowMs
+	s.cfg.Theme = cfg.Theme
+	s.cfg.APIURL = cfg.APIURL
+	s.cfg.WSURL = cfg.WSURL
+	capture := s.capture
+	s.mu.Unlock()
+
+	if capture != nil {
+		capture.updateSharing(cfg.Sharing)
+	}
+
+	nickname := sanitizeNickname(cfg.Nickname)
+	oldNickname := sanitizeNickname(s.cfg.Nickname)
+	oldStatus := s.cfg.PresenceStatus
+	if nickname != oldNickname || cfg.PresenceStatus != oldStatus {
+		s.cfg.Nickname = nickname
+		s.cfg.PresenceStatus = cfg.PresenceStatus
+		s.sendProfile(nickname, cfg.PresenceStatus)
+	}
+
+	if s.audio != nil {
+		s.audio.updateListening(cfg.Listening)
+	}
+
+	s.set(func(state *SessionViewState) {
+		state.Listening = cfg.Listening
+		state.HearingSelf = cfg.Listening.Self
+	})
+}
+
 func (s *sessionController) configLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -591,25 +634,7 @@ func (s *sessionController) configLoop() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			cfg := loadConfig()
-			nickname := sanitizeNickname(cfg.Nickname)
-			if nickname != sanitizeNickname(s.cfg.Nickname) {
-				s.cfg.Nickname = nickname
-				s.sendProfile(nickname, cfg.PresenceStatus)
-			}
-			if cfg.PresenceStatus != s.cfg.PresenceStatus {
-				s.cfg.PresenceStatus = cfg.PresenceStatus
-				s.sendProfile(nickname, cfg.PresenceStatus)
-			}
-			s.cfg.Notifications = cfg.Notifications
-			if cfg.Listening != s.cfg.Listening {
-				s.cfg.Listening = cfg.Listening
-				s.audio.updateListening(cfg.Listening)
-				s.set(func(state *SessionViewState) {
-					state.Listening = cfg.Listening
-					state.HearingSelf = cfg.Listening.Self
-				})
-			}
+			s.reloadConfig()
 		}
 	}
 }
@@ -627,15 +652,14 @@ func (s *sessionController) commandLoop() {
 		case <-ticker.C:
 			consumeSessionCommands(func(command localSessionCommand) {
 				if command.Type == "reload_connection" {
-					cfg := loadConfig()
-					s.cfg.APIURL = cfg.APIURL
-					s.cfg.WSURL = cfg.WSURL
-					s.cfg.BatchWindowMs = cfg.BatchWindowMs
+					s.reloadConfig()
 					s.wsMu.Lock()
 					if s.ws != nil {
 						_ = s.ws.Close()
 					}
 					s.wsMu.Unlock()
+				} else if command.Type == "reload_config" {
+					s.reloadConfig()
 				} else if command.Type == "reaction" {
 					if err := s.sendReaction(command.Reaction); err != nil {
 						s.set(func(state *SessionViewState) { state.Notice = "Signal failed: " + err.Error() })

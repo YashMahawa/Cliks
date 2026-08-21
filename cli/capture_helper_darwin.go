@@ -31,15 +31,15 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 		for scanner.Scan() {
 			switch scanner.Text() {
 			case "k":
-				if sharing.Keyboard {
+				if c.getSharing().Keyboard {
 					c.emit(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
 				}
 			case "l":
-				if sharing.Mouse {
+				if c.getSharing().Mouse {
 					c.emit(LocalActivityEvent{Kind: "mouse", Button: "left", At: time.Now()})
 				}
 			case "r":
-				if sharing.Mouse {
+				if c.getSharing().Mouse {
 					c.emit(LocalActivityEvent{Kind: "mouse", Button: "right", At: time.Now()})
 				}
 			}
