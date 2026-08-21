@@ -92,3 +92,57 @@ func TestVerifiedClientIsRemovedWhenSocketCloses(t *testing.T) {
 	}
 	t.Fatal("closed client socket remained authorized")
 }
+
+func TestCheckSeatStatusFallbackWhenLoginctlMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	st := checkSeatStatus(1000)
+	if st != seatStatusFallback {
+		t.Fatalf("checkSeatStatus = %q, want %q", st, seatStatusFallback)
+	}
+	gate := &activeSeatGate{targetUID: 1000}
+	if !gate.allowed() {
+		t.Fatal("gate.allowed() = false when seat status is fallback")
+	}
+}
+
+func TestClientsSendDeliversEventsWhenSeatGateFallback(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	configureCurrentProcess(t)
+	clientConn, serverConn := testUnixConnection(t)
+	defer clientConn.Close()
+
+	verified, ok := verifyClient(serverConn)
+	if !ok {
+		t.Fatal("current executable was not verified")
+	}
+	gate := &activeSeatGate{targetUID: os.Getuid()}
+	peers := &clients{items: map[*verifiedClient]struct{}{}, seatGate: gate}
+	peers.add(verified)
+
+	peers.send("k")
+
+	buf := make([]byte, 16)
+	_ = clientConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	n, err := clientConn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read streamed token: %v", err)
+	}
+	if string(buf[:n]) != "k\n" {
+		t.Fatalf("streamed token = %q, want %q", string(buf[:n]), "k\n")
+	}
+}
+
+func TestActiveSeatGateStatusAllowed(t *testing.T) {
+	gateActive := &activeSeatGate{status: seatStatusActive, checkedAt: time.Now()}
+	if !gateActive.allowed() {
+		t.Fatal("active status should be allowed")
+	}
+	gateFallback := &activeSeatGate{status: seatStatusFallback, checkedAt: time.Now()}
+	if !gateFallback.allowed() {
+		t.Fatal("fallback status should be allowed")
+	}
+	gateMuted := &activeSeatGate{status: seatStatusMuted, checkedAt: time.Now()}
+	if gateMuted.allowed() {
+		t.Fatal("muted status should not be allowed")
+	}
+}
