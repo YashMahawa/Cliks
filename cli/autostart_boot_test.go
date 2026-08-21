@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -124,21 +125,42 @@ func TestUpdatingBootSettingRegeneratesLauncherWhenAutostartEnabled(t *testing.T
 	tempDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
+	t.Setenv("APPDATA", tempDir)
 
 	cfg := loadConfig()
 	cfg.CurrentTeamCode = "CLIK-AUTO01"
 	cfg.Boot.DelaySec = 5
 	_ = saveConfig(cfg)
 
-	// Enable autostart (creates service file on Linux)
-	_, _ = linuxAutostart("enable", "CLIK-AUTO01")
-	servicePath := filepath.Join(tempDir, "systemd", "user", serviceName+".service")
-	data1, err := os.ReadFile(servicePath)
-	if err != nil {
-		t.Fatalf("failed to read initial service file: %v", err)
+	var launcherPath string
+	var expectedInit, expectedUpdated string
+
+	switch runtime.GOOS {
+	case "linux":
+		_, _ = linuxAutostart("enable", "CLIK-AUTO01")
+		launcherPath = filepath.Join(tempDir, "systemd", "user", serviceName+".service")
+		expectedInit = "CLIKS_BOOT_DELAY=5"
+		expectedUpdated = "CLIKS_BOOT_DELAY=25"
+	case "darwin":
+		_, _ = macAutostart("enable", "CLIK-AUTO01")
+		launcherPath = filepath.Join(tempDir, "Library", "LaunchAgents", launchAgentID+".plist")
+		expectedInit = "<string>5</string>"
+		expectedUpdated = "<string>25</string>"
+	case "windows":
+		_, _ = windowsAutostart("enable", "CLIK-AUTO01")
+		launcherPath = filepath.Join(tempDir, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Cliks.vbs")
+		expectedInit = `CLIKS_BOOT_DELAY") = "5"`
+		expectedUpdated = `CLIKS_BOOT_DELAY") = "25"`
+	default:
+		t.Skip("Unsupported OS for autostart test")
 	}
-	if !strings.Contains(string(data1), "CLIKS_BOOT_DELAY=5") {
-		t.Fatalf("initial service file expected CLIKS_BOOT_DELAY=5:\n%s", string(data1))
+
+	data1, err := os.ReadFile(launcherPath)
+	if err != nil {
+		t.Fatalf("failed to read initial service/launcher file: %v", err)
+	}
+	if !strings.Contains(string(data1), expectedInit) {
+		t.Fatalf("initial launcher file expected %q:\n%s", expectedInit, string(data1))
 	}
 
 	// Now update boot setting via CLI set command
@@ -148,12 +170,12 @@ func TestUpdatingBootSettingRegeneratesLauncherWhenAutostartEnabled(t *testing.T
 	}
 
 	// Verify launcher file was automatically regenerated with delay=25
-	data2, err := os.ReadFile(servicePath)
+	data2, err := os.ReadFile(launcherPath)
 	if err != nil {
-		t.Fatalf("failed to read updated service file: %v", err)
+		t.Fatalf("failed to read updated launcher file: %v", err)
 	}
-	if !strings.Contains(string(data2), "CLIKS_BOOT_DELAY=25") {
-		t.Errorf("regenerated service file missing updated CLIKS_BOOT_DELAY=25:\n%s", string(data2))
+	if !strings.Contains(string(data2), expectedUpdated) {
+		t.Errorf("regenerated launcher file missing updated %q:\n%s", expectedUpdated, string(data2))
 	}
 }
 
