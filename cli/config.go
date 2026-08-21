@@ -118,6 +118,49 @@ type CaptureConfig struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+type PaletteConfig struct {
+	Accent string `json:"accent,omitempty"`
+	Dim    string `json:"dim,omitempty"`
+	Warn   string `json:"warn,omitempty"`
+	OK     string `json:"ok,omitempty"`
+	Panel  string `json:"panel,omitempty"`
+	Select string `json:"select,omitempty"`
+	OnPick string `json:"onPick,omitempty"`
+	Second string `json:"second,omitempty"`
+	Third  string `json:"third,omitempty"`
+}
+
+func isValidHex(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "#") {
+		s = s[1:]
+	}
+	n := len(s)
+	if n != 3 && n != 6 && n != 8 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeHex(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if !strings.HasPrefix(s, "#") {
+		s = "#" + s
+	}
+	return s
+}
+
 type CliksConfig struct {
 	APIURL          string             `json:"apiUrl"`
 	WSURL           string             `json:"wsUrl"`
@@ -129,6 +172,7 @@ type CliksConfig struct {
 	OnboardingSeen  bool               `json:"onboardingSeen,omitempty"`
 	OnboardingStep  int                `json:"onboardingStep,omitempty"`
 	Theme           string             `json:"theme,omitempty"`
+	Palette         PaletteConfig      `json:"palette,omitempty"`
 	KeepRunning     bool               `json:"keepRunning"`
 	AutostartWanted bool               `json:"autostartWanted,omitempty"`
 	Teams           []TeamConfig       `json:"teams"`
@@ -223,7 +267,9 @@ func loadConfig() CliksConfig {
 	}
 	if err != nil {
 		setConfigLoadWarning("")
-		return applyEnvURLOverrides(cfg)
+		cfg = applyEnvURLOverrides(cfg)
+		applyThemeWithPalette(cfg.Theme, cfg.Palette)
+		return cfg
 	}
 	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
 		backup, backupErr := os.ReadFile(configBackupPath())
@@ -240,7 +286,9 @@ func loadConfig() CliksConfig {
 		setConfigLoadWarning("")
 	}
 	normalizeConfig(&cfg)
-	return applyEnvURLOverrides(cfg)
+	cfg = applyEnvURLOverrides(cfg)
+	applyThemeWithPalette(cfg.Theme, cfg.Palette)
+	return cfg
 }
 
 func applyEnvURLOverrides(cfg CliksConfig) CliksConfig {
@@ -261,6 +309,7 @@ func applyEnvURLOverrides(cfg CliksConfig) CliksConfig {
 
 func saveConfig(cfg CliksConfig) error {
 	normalizeConfig(&cfg)
+	applyThemeWithPalette(cfg.Theme, cfg.Palette)
 	path := configPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
