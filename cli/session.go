@@ -742,7 +742,7 @@ func (s *sessionController) connectLoop() {
 		conn.SetPongHandler(func(string) error {
 			return conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
 		})
-		err = conn.WriteJSON(map[string]any{
+		joinPayload := map[string]any{
 			"type":     "join",
 			"teamCode": s.cfg.CurrentTeamCode,
 			"nickname": sanitizeNickname(s.cfg.Nickname),
@@ -752,7 +752,11 @@ func (s *sessionController) connectLoop() {
 				"version":  version,
 				"features": []string{"compact-v1"},
 			},
-		})
+		}
+		if s.cfg.Passcode != "" {
+			joinPayload["passcode"] = s.cfg.Passcode
+		}
+		err = conn.WriteJSON(joinPayload)
 		s.wsMu.Unlock()
 		if err != nil {
 			_ = conn.Close()
@@ -971,6 +975,20 @@ func (s *sessionController) readLoop(conn *websocket.Conn) bool {
 			return true
 		case "error":
 			msg := strings.TrimSpace(envelope.Message)
+			if envelope.Code == "kicked" {
+				s.set(func(state *SessionViewState) {
+					state.ConnectionStatus = "stopped: kicked"
+					state.Notice = valuePlain(msg, "You were kicked from this room by the host.")
+				})
+				return true
+			}
+			if envelope.Code == "invalid_passcode" {
+				s.set(func(state *SessionViewState) {
+					state.ConnectionStatus = "stopped: invalid passcode"
+					state.Notice = valuePlain(msg, "Invalid passcode for this room.")
+				})
+				return true
+			}
 			if envelope.Code == "room_full" {
 				s.set(func(state *SessionViewState) {
 					state.ConnectionStatus = "room full"

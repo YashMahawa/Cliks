@@ -183,6 +183,7 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 	case "join":
 		var message struct {
 			TeamCode string `json:"teamCode"`
+			Passcode string `json:"passcode"`
 			Nickname string `json:"nickname"`
 			Status   string `json:"status"`
 			Client   struct {
@@ -195,7 +196,23 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 			conn.sendJSON(serverError("Invalid join message."))
 			return
 		}
-		h.join(ctx, conn, normalizeTeamCode(message.TeamCode), normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status), boolFeature(message.Client.Features, compactFeatureV1))
+		h.join(ctx, conn, normalizeTeamCode(message.TeamCode), message.Passcode, normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status), boolFeature(message.Client.Features, compactFeatureV1))
+	case "kick":
+		var message struct {
+			TeamCode       string `json:"teamCode"`
+			TargetPeerID   string `json:"targetPeerId"`
+			DeletePassword string `json:"deletePassword"`
+		}
+		if json.Unmarshal(data, &message) != nil {
+			conn.sendJSON(serverError("Invalid kick message."))
+			return
+		}
+		kicked, err := h.KickPeer(ctx, normalizeTeamCode(message.TeamCode), message.TargetPeerID, message.DeletePassword)
+		if err != nil || !kicked {
+			conn.sendJSON(protocolError("kick_failed", "Could not kick participant."))
+		} else {
+			conn.sendJSON(map[string]any{"type": "kicked_ack", "targetPeerId": message.TargetPeerID})
+		}
 	case "profile":
 		var message struct {
 			Nickname string `json:"nickname"`
@@ -232,7 +249,7 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 	}
 }
 
-func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, nickname string, status string, compactV1 bool) {
+func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, passcode string, nickname string, status string, compactV1 bool) {
 	if h.joinRate.Blocked(conn.rateLimitKey) {
 		conn.sendJSONAndClose(joinRateLimitedPayload())
 		return
@@ -250,6 +267,15 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 	}
 	if team == nil {
 		h.rejectUnavailableJoin(conn, teamCode)
+		return
+	}
+	validPasscode, err := h.store.VerifyPasscode(ctx, team.Code, passcode)
+	if err != nil {
+		conn.sendJSONAndClose(serverError("Could not verify room passcode."))
+		return
+	}
+	if !validPasscode {
+		conn.sendJSONAndClose(protocolError("invalid_passcode", "Invalid passcode for this room."))
 		return
 	}
 	if activityStore, ok := h.store.(TeamActivityStore); ok {
@@ -743,6 +769,43 @@ func sanitizeEvents(input []ActivityEvent) []ActivityEvent {
 		}
 	}
 	return events
+}
+
+func (h *RoomHub) KickPeer(ctx context.Context, teamCode string, targetPeerID string, deletePassword string) (bool, error) {
+	teamCode = normalizeTeamCode(teamCode)
+	unlockTeam := h.lockTeam(teamCode)
+	defer unlockTeam()
+
+	valid, err := h.store.VerifyDeletePassword(ctx, teamCode, deletePassword)
+	if err != nil || !valid {
+		return false, err
+	}
+
+	var targetPeer *peer
+	var presencePayload any
+	var presencePeers []*peer
+
+	h.mu.Lock()
+	if currentRoom := h.rooms[teamCode]; currentRoom != nil {
+		if p := currentRoom.peers[targetPeerID]; p != nil {
+			targetPeer = p
+			delete(currentRoom.peers, targetPeerID)
+			p.conn.roomCode = ""
+			if len(currentRoom.peers) == 0 {
+				delete(h.rooms, teamCode)
+			} else {
+				presencePayload, presencePeers = presenceLocked(currentRoom)
+			}
+		}
+	}
+	h.mu.Unlock()
+
+	if targetPeer != nil {
+		targetPeer.conn.sendJSONAndClose(protocolError("kicked", "You were kicked from this room by the host."))
+		sendToPeers(presencePeers, presencePayload)
+	}
+
+	return true, nil
 }
 
 func newPeerID() string {

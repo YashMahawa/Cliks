@@ -51,6 +51,7 @@ try {
   const migrationTeam = await createTeam(apiUrl);
   await websocketRoomMigrationSmoke(wsUrl, team.code, migrationTeam.code);
   await websocketRoomLimitSmoke(wsUrl, team.code);
+  await passcodeAndKickSmoke(apiUrl, wsUrl);
 
   const health = await fetchJson(`${apiUrl}/health`);
   if (!health.ok || "rooms" in health) {
@@ -300,6 +301,63 @@ async function websocketRoomLimitSmoke(url, teamCode) {
     }
     await sleep(100);
   }
+}
+
+async function passcodeAndKickSmoke(baseUrl, wsUrl) {
+  const team = await fetchJson(`${baseUrl}/api/teams`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Passcode Room", deletePassword: "hostpassword", passcode: "secret123" })
+  }).then((res) => res.team);
+
+  if (!team.hasPasscode) {
+    throw new Error("Created team should report hasPasscode: true");
+  }
+
+  const invalidSocket = new WebSocket(wsUrl);
+  await once(invalidSocket, "open");
+  const errPromise = nextJsonMessage(invalidSocket);
+  invalidSocket.send(JSON.stringify({ type: "join", teamCode: team.code }));
+  const errMsg = await errPromise;
+  if (errMsg.type !== "error" || errMsg.code !== "invalid_passcode") {
+    throw new Error(`Expected invalid_passcode error, got ${JSON.stringify(errMsg)}`);
+  }
+  await onceWithTimeout(invalidSocket, "close", 1_500);
+
+  const hostSocket = new WebSocket(wsUrl);
+  const targetSocket = new WebSocket(wsUrl);
+  await Promise.all([once(hostSocket, "open"), once(targetSocket, "open")]);
+
+  const hostWelcomePromise = nextJsonMessage(hostSocket);
+  hostSocket.send(JSON.stringify({ type: "join", teamCode: team.code, passcode: "secret123", nickname: "Host" }));
+  const hostWelcome = await hostWelcomePromise;
+  if (hostWelcome.type !== "welcome") {
+    throw new Error(`Host welcome failed: ${JSON.stringify(hostWelcome)}`);
+  }
+
+  const targetWelcomePromise = nextJsonMessage(targetSocket);
+  targetSocket.send(JSON.stringify({ type: "join", teamCode: team.code, passcode: "secret123", nickname: "Target" }));
+  const targetWelcome = await targetWelcomePromise;
+  if (targetWelcome.type !== "welcome") {
+    throw new Error(`Target welcome failed: ${JSON.stringify(targetWelcome)}`);
+  }
+
+  const targetPeerId = targetWelcome.peerId;
+
+  const kickClosed = onceWithTimeout(targetSocket, "close", 1_500);
+  const kickResult = await fetchJson(`${baseUrl}/api/teams/${team.code}/kick`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ targetPeerId, deletePassword: "hostpassword" })
+  });
+
+  if (!kickResult.ok) {
+    throw new Error(`Kick result not ok: ${JSON.stringify(kickResult)}`);
+  }
+
+  await kickClosed;
+
+  hostSocket.close();
 }
 
 async function fetchJson(url, options) {

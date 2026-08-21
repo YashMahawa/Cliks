@@ -32,6 +32,14 @@ func (s *blockingTeamStore) DeleteTeam(context.Context, DeleteTeamInput) (bool, 
 	return true, nil
 }
 
+func (s *blockingTeamStore) VerifyPasscode(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
+func (s *blockingTeamStore) VerifyDeletePassword(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
 func TestDeleteWaitsForConcurrentJoinAndLeavesNoRoom(t *testing.T) {
 	store := &blockingTeamStore{
 		team:          Team{ID: "team-1", Code: "CLIK-RACE01", Name: "Race Room"},
@@ -45,7 +53,7 @@ func TestDeleteWaitsForConcurrentJoinAndLeavesNoRoom(t *testing.T) {
 
 	joined := make(chan struct{})
 	go func() {
-		hub.join(context.Background(), conn, store.team.Code, "", "available", false)
+		hub.join(context.Background(), conn, store.team.Code, "", "", "available", false)
 		close(joined)
 	}()
 	<-store.getStarted

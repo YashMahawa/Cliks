@@ -11,6 +11,7 @@ create table if not exists public.cliks_teams (
 alter table public.cliks_teams drop constraint if exists cliks_teams_code_key;
 
 alter table public.cliks_teams add column if not exists last_connected_at timestamptz;
+alter table public.cliks_teams add column if not exists passcode_hash text;
 update public.cliks_teams set last_connected_at = created_at where last_connected_at is null;
 alter table public.cliks_teams alter column last_connected_at set default now();
 alter table public.cliks_teams alter column last_connected_at set not null;

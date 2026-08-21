@@ -70,6 +70,7 @@ func normalizeBackendURL(value string) (string, error) {
 type TeamConfig struct {
 	Code         string `json:"code"`
 	Name         string `json:"name,omitempty"`
+	Passcode     string `json:"passcode,omitempty"`
 	LastJoinedAt string `json:"lastJoinedAt"`
 }
 
@@ -122,6 +123,7 @@ type CliksConfig struct {
 	APIURL          string             `json:"apiUrl"`
 	WSURL           string             `json:"wsUrl"`
 	CurrentTeamCode string             `json:"currentTeamCode,omitempty"`
+	Passcode        string             `json:"passcode,omitempty"`
 	Nickname        string             `json:"nickname,omitempty"`
 	PresenceStatus  string             `json:"presenceStatus,omitempty"`
 	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
@@ -280,7 +282,7 @@ func saveConfig(cfg CliksConfig) error {
 	return nil
 }
 
-func rememberTeam(code string, name string) (CliksConfig, error) {
+func rememberTeam(code string, name string, passcode ...string) (CliksConfig, error) {
 	cfg := loadConfig()
 	var err error
 	code, err = normalizeTeamCode(code)
@@ -290,7 +292,13 @@ func rememberTeam(code string, name string) (CliksConfig, error) {
 	if name == "" {
 		name = teamNameForCode(cfg, code)
 	}
-	next := []TeamConfig{{Code: code, Name: name, LastJoinedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	pCode := ""
+	if len(passcode) > 0 {
+		pCode = passcode[0]
+	} else {
+		pCode = teamPasscodeForCode(cfg, code)
+	}
+	next := []TeamConfig{{Code: code, Name: name, Passcode: pCode, LastJoinedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	for _, team := range cfg.Teams {
 		if strings.EqualFold(team.Code, code) {
 			continue
@@ -302,7 +310,18 @@ func rememberTeam(code string, name string) (CliksConfig, error) {
 	}
 	cfg.Teams = next
 	cfg.CurrentTeamCode = code
+	cfg.Passcode = pCode
 	return cfg, saveConfig(cfg)
+}
+
+func teamPasscodeForCode(cfg CliksConfig, code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	for _, team := range cfg.Teams {
+		if strings.EqualFold(team.Code, code) {
+			return team.Passcode
+		}
+	}
+	return ""
 }
 
 func forgetTeam(code string) (CliksConfig, error) {
@@ -392,6 +411,11 @@ func normalizeConfig(cfg *CliksConfig) {
 	cfg.CurrentTeamCode = strings.ToUpper(strings.TrimSpace(cfg.CurrentTeamCode))
 	for index := range cfg.Teams {
 		cfg.Teams[index].Code = strings.ToUpper(strings.TrimSpace(cfg.Teams[index].Code))
+	}
+	if cfg.CurrentTeamCode != "" {
+		if passcode := teamPasscodeForCode(*cfg, cfg.CurrentTeamCode); passcode != "" {
+			cfg.Passcode = passcode
+		}
 	}
 	cfg.Sharing.Keyboard = cfg.Sharing.Keyboard || (!cfg.Sharing.Keyboard && !cfg.Sharing.Mouse && cfg.BatchWindowMs == def.BatchWindowMs)
 	if !cfg.Sharing.Keyboard && !cfg.Sharing.Mouse {
