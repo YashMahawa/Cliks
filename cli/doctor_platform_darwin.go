@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -14,14 +15,20 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "installed"})
 	} else {
 		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "missing"})
+		detail := "Reinstall Cliks, then grant Input Monitoring only to Cliks Capture.app. Do not grant it to your terminal unless you explicitly choose compatibility mode."
+		cmds := []string{
+			"Re-run the Cliks installer",
+			"Open System Settings > Privacy & Security > Input Monitoring > Cliks Capture",
+			"cliks capture-test",
+		}
+		if _, err := exec.LookPath("swiftc"); err != nil {
+			detail = "Cliks Capture.app is missing and Swift compiler (swiftc) was not found. Install Xcode Command Line Tools ('xcode-select --install') or reinstall prebuilt Cliks."
+			cmds = append([]string{"xcode-select --install"}, cmds...)
+		}
 		report.issues = append(report.issues, doctorIssue{
-			title:  "Install isolated macOS capture",
-			detail: "Reinstall Cliks, then grant Input Monitoring only to Cliks Capture.app. Do not grant it to your terminal unless you explicitly choose compatibility mode.",
-			commands: []string{
-				"Re-run the Cliks installer",
-				"Open System Settings > Privacy & Security > Input Monitoring > Cliks Capture",
-				"cliks capture-test",
-			},
+			title:    "Install isolated macOS capture",
+			detail:   detail,
+			commands: cmds,
 		})
 	}
 
