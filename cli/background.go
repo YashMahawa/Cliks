@@ -83,10 +83,11 @@ func startBackgroundForTeam(code string) (string, error) {
 		StartedAt:        now,
 		UpdatedAt:        now,
 	})
-	if err := waitForBackgroundReady(cmd.Process.Pid, code, 2*time.Second); err != nil {
+	if err := waitForBackgroundReady(cmd.Process.Pid, code, 5*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		_ = logFile.Close()
+		cleanupStaleSession()
 		detail := tailBackgroundLog(logPath, 4096)
 		if detail != "" {
 			return "", fmt.Errorf("%w\nLast log output:\n%s\nLog: %s", err, detail, logPath)
@@ -118,25 +119,18 @@ func tailBackgroundLog(path string, limit int) string {
 
 func waitForBackgroundReady(pid int, code string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	var lockSeenAt time.Time
 	for time.Now().Before(deadline) {
 		if !processLooksAlive(pid) {
+			cleanupStaleSession()
 			return fmt.Errorf("Cliks background session exited during startup")
 		}
 		if lock, ok := readSessionFile(sessionLockPath()); ok && lock.PID == pid {
 			if lock.TeamCode == "" || strings.EqualFold(lock.TeamCode, code) {
-				if lockSeenAt.IsZero() {
-					lockSeenAt = time.Now()
-				}
-				if time.Since(lockSeenAt) >= 150*time.Millisecond {
-					return nil
-				}
-				time.Sleep(40 * time.Millisecond)
-				continue
+				return nil
 			}
 			return fmt.Errorf("background session started for unexpected team %s", lock.TeamCode)
 		}
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	return fmt.Errorf("Cliks background session did not become ready within %s", timeout.Round(time.Millisecond))
 }

@@ -295,6 +295,10 @@ func activeSession() (ActiveSessionState, bool) {
 	}
 	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
+		if state.PID == pid {
+			state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(pid))
+			return state, true
+		}
 		state.PID = pid
 		if state.Mode == "" {
 			state.Mode = runModeBackground
@@ -304,6 +308,8 @@ func activeSession() (ActiveSessionState, bool) {
 		}
 		state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(pid))
 		return state, true
+	} else if pid, ok := readBackgroundPID(); ok && !processLooksAlive(pid) {
+		cleanupStaleSession()
 	}
 	if siblings := findSiblingStartProcesses(); len(siblings) > 0 {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -319,6 +325,7 @@ func activeSession() (ActiveSessionState, bool) {
 		}
 		return state, true
 	}
+	cleanupStaleSession()
 	return ActiveSessionState{}, false
 }
 
@@ -356,6 +363,7 @@ func stopActiveSession() (string, error) {
 
 func cleanupStaleSession() {
 	_ = os.Remove(sessionLockPath())
+	_ = os.Remove(sessionStatePath())
 	_ = os.RemoveAll(sessionCommandDir())
 	if pid, ok := readBackgroundPID(); ok && !processLooksAlive(pid) {
 		_ = os.Remove(backgroundPIDPath())
@@ -388,6 +396,10 @@ func readSessionFile(path string) (ActiveSessionState, bool) {
 	}
 	var state ActiveSessionState
 	if json.Unmarshal(data, &state) != nil || state.PID <= 0 {
+		return ActiveSessionState{}, false
+	}
+	if !processLooksAlive(state.PID) {
+		cleanupStaleSession()
 		return ActiveSessionState{}, false
 	}
 	return state, true
