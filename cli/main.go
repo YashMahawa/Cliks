@@ -279,6 +279,9 @@ func cmdNickname(args []string) error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
+	if err := enqueueSessionCommand(localSessionCommand{Type: "reload_config"}); err != nil {
+		return fmt.Errorf("saved, but could not notify active session: %w", err)
+	}
 	if name == "" {
 		fmt.Println("Nickname cleared.")
 		return nil
@@ -446,6 +449,9 @@ func cmdPreset(args []string) error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
+	if err := enqueueSessionCommand(localSessionCommand{Type: "reload_config"}); err != nil {
+		return fmt.Errorf("saved, but could not notify active session: %w", err)
+	}
 	fmt.Printf("Applied %s preset.\n", strings.ToLower(args[0]))
 	return nil
 }
@@ -491,12 +497,12 @@ func cmdSet(args []string) error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
+	cmdType := "reload_config"
 	if reconnect {
-		if _, ok := activeSession(); ok {
-			if err := enqueueSessionCommand(localSessionCommand{Type: "reload_connection"}); err != nil {
-				return fmt.Errorf("saved, but could not refresh the running connection: %w", err)
-			}
-		}
+		cmdType = "reload_connection"
+	}
+	if err := enqueueSessionCommand(localSessionCommand{Type: cmdType}); err != nil {
+		return fmt.Errorf("saved, but could not notify active session: %w", err)
 	}
 	fmt.Println("Saved.")
 	return nil
