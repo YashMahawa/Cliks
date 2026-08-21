@@ -44,7 +44,7 @@ func cmdBackground(args []string) error {
 	}
 }
 
-func startBackgroundForTeam(code string) (string, error) {
+func startBackgroundForTeam(code string, parentPID ...int) (string, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	active, switched, err := disconnectActiveSessionForTransition(code)
 	if err != nil {
@@ -63,7 +63,12 @@ func startBackgroundForTeam(code string) (string, error) {
 		return "", err
 	}
 	cmd := exec.Command(currentExecutable(), "start")
-	cmd.Env = append(os.Environ(), "CLIKS_AUTOSTART_TEAM="+code, "CLIKS_RUN_MODE="+runModeBackground)
+	env := filterHandoffEnv(os.Environ())
+	env = append(env, "CLIKS_AUTOSTART_TEAM="+code, "CLIKS_RUN_MODE="+runModeBackground)
+	if len(parentPID) > 0 && parentPID[0] > 0 {
+		env = append(env, fmt.Sprintf("%s=%d", handoffParentPIDEnv, parentPID[0]))
+	}
+	cmd.Env = env
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	prepareBackgroundCommand(cmd)

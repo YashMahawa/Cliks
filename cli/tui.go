@@ -2517,7 +2517,7 @@ func toggleBackgroundCmd(code string, active ActiveSessionState, activeOK bool) 
 		if code == "" {
 			return commandDoneMsg{err: fmt.Errorf("no team selected. Create or join a team first")}
 		}
-		message, err := startBackgroundForTeam(code)
+		message, err := startBackgroundForTeam(code, os.Getpid())
 		return commandDoneMsg{message: message, err: err}
 	}
 }
