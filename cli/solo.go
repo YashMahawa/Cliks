@@ -96,10 +96,10 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if action := m.hit(msg.X, msg.Y); action != "" {
 				return m.activate(action)
 			}
-		case tea.MouseWheelUp:
-			m.adjustActiveSlider(-.05)
-		case tea.MouseWheelDown:
-			m.adjustActiveSlider(.05)
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			if delta, ok := StandardWheelAdjustDelta(msg, .05); ok {
+				m.adjustActiveSlider(delta)
+			}
 		}
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -112,10 +112,15 @@ func (m soloModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.sliderCursor = (m.sliderCursor + 1) % len(soloSliderActions)
 			m.hoverAction = ""
-		case "right", "up":
-			m.adjustActiveSlider(.05)
-		case "left", "down":
-			m.adjustActiveSlider(-.05)
+		case "up", "down":
+			if next, ok := NavigateFocusRow(msg.String(), m.sliderCursor, len(soloSliderActions)); ok {
+				m.sliderCursor = next
+				m.hoverAction = ""
+			}
+		case "right", "left":
+			if delta, ok := StandardValueAdjustKeyDelta(msg.String(), .05); ok {
+				m.adjustActiveSlider(delta)
+			}
 		case "k":
 			m.cfg.Solo.Keyboard = !m.cfg.Solo.Keyboard
 			m.persist()
@@ -360,9 +365,9 @@ func (m soloModel) View() string {
 	bodyHeight := maxInt(12, m.height-7)
 	header := m.header(width)
 	deskModel := sessionModel{state: m.state, now: m.now}
-	footerText := " Hover slider + arrows/scroll adjust    Tab next slider    +/- people    Space wakes room    Esc back"
+	footerText := " Up/Down focus slider    Left/Right/scroll adjust value    Tab next slider    +/- people    Space wakes room    Esc back"
 	if width < 110 {
-		footerText = " Sliders: hover + arrows/scroll    Tab next    +/- people    Esc back"
+		footerText = " Up/Down focus    Left/Right/scroll adjust    Tab next    +/- people    Esc back"
 	}
 	footer := styleDim.Render(ansi.Truncate(footerText, width, ""))
 	if width < 96 {
