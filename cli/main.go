@@ -50,6 +50,8 @@ func run(args []string) error {
 		return cmdCreate(rest[1:])
 	case "delete":
 		return cmdDelete(rest[1:])
+	case "kick":
+		return cmdKick(rest[1:])
 	case "nickname", "name":
 		return cmdNickname(rest[1:])
 	case "start":
@@ -123,10 +125,11 @@ func cmdService(args []string) error {
 
 func cmdJoin(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
+		return errors.New("usage: cliks join [--passcode PASSCODE] [--no-start] CLIK-XXXXXX")
 	}
 	nickname := ""
 	code := ""
+	passcode := ""
 	autoStart := true
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -136,25 +139,44 @@ func cmdJoin(args []string) error {
 			}
 			nickname = args[i+1]
 			i++
+		case "-p", "--passcode":
+			if i+1 >= len(args) {
+				return errors.New("--passcode needs a value")
+			}
+			passcode = args[i+1]
+			i++
 		case "--no-start":
 			autoStart = false
 		case "--start":
 			autoStart = true
 		default:
-			if code == "" {
+			if code == "" && !strings.HasPrefix(args[i], "-") {
 				code = args[i]
 			}
 		}
 	}
 	if code == "" {
-		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
+		return errors.New("usage: cliks join [--passcode PASSCODE] [--no-start] CLIK-XXXXXX")
 	}
 	cfg := loadConfig()
 	team, err := getTeamViaAPI(cfg, code)
 	if err != nil {
 		return err
 	}
-	cfg, err = rememberTeam(team.Code, team.Name)
+	if team.HasPasscode && passcode == "" {
+		passcode = teamPasscodeForCode(cfg, team.Code)
+		if passcode == "" {
+			pass, err := readSecret("Join passcode: ")
+			if err != nil {
+				return err
+			}
+			if pass == "" {
+				return errors.New("passcode is required for this room")
+			}
+			passcode = pass
+		}
+	}
+	cfg, err = rememberTeam(team.Code, team.Name, passcode)
 	if err != nil {
 		return err
 	}
@@ -191,7 +213,22 @@ func cmdJoin(args []string) error {
 
 func cmdCreate(args []string) error {
 	reader := bufio.NewReader(os.Stdin)
-	name := strings.TrimSpace(strings.Join(args, " "))
+	name := ""
+	passcode := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-p" || args[i] == "--passcode" {
+			if i+1 < len(args) {
+				passcode = args[i+1]
+				i++
+			}
+		} else {
+			if name != "" {
+				name += " "
+			}
+			name += args[i]
+		}
+	}
+	name = strings.TrimSpace(name)
 	if name == "" {
 		line, err := readPrompt(reader, "Team name: ")
 		if err != nil {
@@ -209,12 +246,18 @@ func cmdCreate(args []string) error {
 	if len(password) < 6 {
 		return errors.New("delete password must be at least 6 characters")
 	}
+	if passcode == "" {
+		pass, err := readSecret("Join passcode (optional, press Enter to skip): ")
+		if err == nil {
+			passcode = strings.TrimSpace(pass)
+		}
+	}
 	cfg := loadConfig()
-	team, err := createTeamViaAPI(cfg, name, password)
+	team, err := createTeamViaAPI(cfg, name, password, passcode)
 	if err != nil {
 		return err
 	}
-	cfg, err = rememberTeam(team.Code, team.Name)
+	cfg, err = rememberTeam(team.Code, team.Name, passcode)
 	if err != nil {
 		return err
 	}
@@ -261,6 +304,47 @@ func cmdDelete(args []string) error {
 	}
 	stopDeletedTeamSession(code)
 	fmt.Printf("Deleted %s.\n", code)
+	return nil
+}
+
+func cmdKick(args []string) error {
+	reader := bufio.NewReader(os.Stdin)
+	cfg := loadConfig()
+	code := ""
+	targetPeerID := ""
+	if len(args) == 0 {
+		return errors.New("usage: cliks kick [CODE] PEER_ID")
+	} else if len(args) == 1 {
+		code = cfg.CurrentTeamCode
+		targetPeerID = args[0]
+	} else {
+		code = args[0]
+		targetPeerID = args[1]
+	}
+	if code == "" {
+		line, err := readPrompt(reader, "Team code: ")
+		if err != nil {
+			return err
+		}
+		code = strings.ToUpper(strings.TrimSpace(line))
+	}
+	if code == "" {
+		return errors.New("team code is required")
+	}
+	if targetPeerID == "" {
+		return errors.New("target peer ID is required")
+	}
+	password, err := readSecret("Delete password: ")
+	if err != nil {
+		return err
+	}
+	if password == "" {
+		return errors.New("delete password is required")
+	}
+	if err := kickPeerViaAPI(cfg, code, targetPeerID, password); err != nil {
+		return err
+	}
+	fmt.Printf("Kicked peer %s from %s.\n", targetPeerID, code)
 	return nil
 }
 
@@ -832,9 +916,10 @@ func printHelp(commandName string) {
 
 Usage:
   %[1]s                  Open the control interface
-  %[1]s create           Create a team
+  %[1]s create           Create a team (--passcode PASSCODE optional)
   %[1]s delete [CODE]    Delete a team
-  %[1]s join CODE        Save, select, and start a background session
+  %[1]s kick [CODE] PEER_ID Kick a participant using delete password
+  %[1]s join CODE        Save, select, and start a background session (--passcode PASSCODE)
   %[1]s join --no-start CODE
   %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience

@@ -17,14 +17,15 @@ export function RoomForm() {
   const { triggerSound } = useAcoustic();
   const [name, setName] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
+  const [passcode, setPasscode] = useState("");
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 	const [codeCopied, setCodeCopied] = useState(false);
 
   const joinCommand = useMemo(
-    () => (createdTeam ? `cliks join ${createdTeam.code}` : ""),
-    [createdTeam]
+    () => (createdTeam ? `cliks join ${passcode ? `--passcode ${passcode} ` : ""}${createdTeam.code}` : ""),
+    [createdTeam, passcode]
   );
 
   const shareText = useMemo(
@@ -46,7 +47,7 @@ export function RoomForm() {
       const response = await fetch(`${apiBase}/api/teams`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, deletePassword }),
+        body: JSON.stringify({ name, deletePassword, passcode }),
         signal: controller.signal,
       });
       window.clearTimeout(timer);
@@ -136,6 +137,7 @@ export function RoomForm() {
             setCreatedTeam(null);
             setName("");
             setDeletePassword("");
+            setPasscode("");
           }}
           className="mt-8 font-mono text-xs text-mute underline-offset-2 hover:text-soft hover:underline"
         >
@@ -186,6 +188,22 @@ export function RoomForm() {
             className="w-full border-b border-line bg-transparent pb-2 text-lg text-fg outline-none transition-colors placeholder:text-mute focus:border-[var(--accent)]"
           />
           <p className="text-xs text-mute">Not a login. Just a kill switch for this room.</p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="room-passcode" className="font-mono text-xs text-mute">
+            Join passcode (optional)
+          </label>
+          <input
+            id="room-passcode"
+            type="password"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            maxLength={128}
+            placeholder="Require a passcode to enter this room"
+            className="w-full border-b border-line bg-transparent pb-2 text-lg text-fg outline-none transition-colors placeholder:text-mute focus:border-[var(--accent)]"
+          />
+          <p className="text-xs text-mute">Optional. Teammates must enter this passcode when joining.</p>
         </div>
 
         <button type="submit" disabled={isCreating} className="btn-primary mt-1 flex h-12 items-center justify-center">

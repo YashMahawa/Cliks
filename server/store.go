@@ -30,16 +30,18 @@ const (
 var errTeamUnavailable = errors.New("team unavailable")
 
 type Team struct {
-	ID        string `json:"id"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"createdAt"`
-	ExpiresAt string `json:"expiresAt"`
+	ID          string `json:"id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	HasPasscode bool   `json:"hasPasscode"`
+	CreatedAt   string `json:"createdAt"`
+	ExpiresAt   string `json:"expiresAt"`
 }
 
 type CreateTeamInput struct {
 	Name           string
 	DeletePassword string
+	Passcode       string
 }
 
 type DeleteTeamInput struct {
@@ -51,6 +53,8 @@ type TeamStore interface {
 	CreateTeam(context.Context, CreateTeamInput) (Team, error)
 	GetTeamByCode(context.Context, string) (*Team, error)
 	DeleteTeam(context.Context, DeleteTeamInput) (bool, error)
+	VerifyPasscode(context.Context, string, string) (bool, error)
+	VerifyDeletePassword(context.Context, string, string) (bool, error)
 }
 
 type TeamActivityStore interface {
@@ -112,6 +116,7 @@ func (s *PostgresTeamStore) init(ctx context.Context) error {
 		)`,
 		`alter table cliks_teams drop constraint if exists cliks_teams_code_key`,
 		`alter table cliks_teams add column if not exists last_connected_at timestamptz`,
+		`alter table cliks_teams add column if not exists passcode_hash text`,
 		`update cliks_teams set last_connected_at = created_at where last_connected_at is null`,
 		`alter table cliks_teams alter column last_connected_at set default now()`,
 		`alter table cliks_teams alter column last_connected_at set not null`,
@@ -132,16 +137,24 @@ func (s *PostgresTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 	if err != nil {
 		return Team{}, err
 	}
+	var passcodeHash sql.NullString
+	if strings.TrimSpace(input.Passcode) != "" {
+		pHash, err := bcrypt.GenerateFromPassword([]byte(input.Passcode), 12)
+		if err != nil {
+			return Team{}, err
+		}
+		passcodeHash = sql.NullString{String: string(pHash), Valid: true}
+	}
 	for attempt := 0; attempt < 8; attempt++ {
 		id := newUUID()
 		code := makeCode()
 		var row postgresTeamRow
 		err := s.db.QueryRowContext(ctx,
-			`insert into cliks_teams (id, code, name, delete_password_hash)
-			 values ($1, $2, $3, $4)
-			 returning id, code, name, created_at, last_connected_at`,
-			id, code, input.Name, string(hash),
-		).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt)
+			`insert into cliks_teams (id, code, name, delete_password_hash, passcode_hash)
+			 values ($1, $2, $3, $4, $5)
+			 returning id, code, name, created_at, last_connected_at, passcode_hash`,
+			id, code, input.Name, string(hash), passcodeHash,
+		).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt, &row.PasscodeHash)
 		if err == nil {
 			return row.toTeam(), nil
 		}
@@ -156,12 +169,12 @@ func (s *PostgresTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 func (s *PostgresTeamStore) GetTeamByCode(ctx context.Context, code string) (*Team, error) {
 	var row postgresTeamRow
 	err := s.db.QueryRowContext(ctx,
-		`select id, code, name, created_at, last_connected_at
+		`select id, code, name, created_at, last_connected_at, passcode_hash
 		 from cliks_teams
 		 where code = $1 and deleted_at is null and last_connected_at > now() - interval '48 hours'
 		 limit 1`,
 		normalizeTeamCode(code),
-	).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt)
+	).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt, &row.PasscodeHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -224,21 +237,67 @@ func (s *PostgresTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInpu
 	return err == nil, err
 }
 
+func (s *PostgresTeamStore) VerifyPasscode(ctx context.Context, code string, passcode string) (bool, error) {
+	var hash sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`select passcode_hash
+		 from cliks_teams
+		 where code = $1 and deleted_at is null
+		 limit 1`,
+		normalizeTeamCode(code),
+	).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyDeletePasswordHash), []byte(passcode))
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !hash.Valid || hash.String == "" {
+		return true, nil
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash.String), []byte(passcode)) != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *PostgresTeamStore) VerifyDeletePassword(ctx context.Context, code string, deletePassword string) (bool, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx,
+		`select delete_password_hash
+		 from cliks_teams
+		 where code = $1 and deleted_at is null
+		 limit 1`,
+		normalizeTeamCode(code),
+	).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyDeletePasswordHash), []byte(deletePassword))
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(deletePassword)) == nil, nil
+}
+
 type postgresTeamRow struct {
 	ID              string
 	Code            string
 	Name            string
 	CreatedAt       time.Time
 	LastConnectedAt time.Time
+	PasscodeHash    sql.NullString
 }
 
 func (r postgresTeamRow) toTeam() Team {
 	return Team{
-		ID:        r.ID,
-		Code:      r.Code,
-		Name:      r.Name,
-		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339Nano),
-		ExpiresAt: r.LastConnectedAt.Add(teamIdleTTL).UTC().Format(time.RFC3339Nano),
+		ID:          r.ID,
+		Code:        r.Code,
+		Name:        r.Name,
+		HasPasscode: r.PasscodeHash.Valid && r.PasscodeHash.String != "",
+		CreatedAt:   r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ExpiresAt:   r.LastConnectedAt.Add(teamIdleTTL).UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -250,6 +309,7 @@ type MemoryTeamStore struct {
 type memoryTeam struct {
 	Team
 	DeletePasswordHash string
+	PasscodeHash       string
 	DeletedAt          string
 }
 
@@ -275,6 +335,16 @@ func (s *MemoryTeamStore) CreateTeam(ctx context.Context, input CreateTeamInput)
 	if err != nil {
 		return Team{}, err
 	}
+	var passcodeHash string
+	hasPasscode := false
+	if strings.TrimSpace(input.Passcode) != "" {
+		pHash, err := bcrypt.GenerateFromPassword([]byte(input.Passcode), 12)
+		if err != nil {
+			return Team{}, err
+		}
+		passcodeHash = string(pHash)
+		hasPasscode = true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	code := makeCode()
@@ -282,8 +352,8 @@ func (s *MemoryTeamStore) CreateTeam(ctx context.Context, input CreateTeamInput)
 		code = makeCode()
 	}
 	now := time.Now().UTC()
-	team := Team{ID: newUUID(), Code: code, Name: input.Name, CreatedAt: now.Format(time.RFC3339Nano), ExpiresAt: now.Add(teamIdleTTL).Format(time.RFC3339Nano)}
-	s.teams[code] = memoryTeam{Team: team, DeletePasswordHash: string(hash)}
+	team := Team{ID: newUUID(), Code: code, Name: input.Name, HasPasscode: hasPasscode, CreatedAt: now.Format(time.RFC3339Nano), ExpiresAt: now.Add(teamIdleTTL).Format(time.RFC3339Nano)}
+	s.teams[code] = memoryTeam{Team: team, DeletePasswordHash: string(hash), PasscodeHash: passcodeHash}
 	return team, nil
 }
 
@@ -351,6 +421,36 @@ func (s *MemoryTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInput)
 	return true, nil
 }
 
+func (s *MemoryTeamStore) VerifyPasscode(ctx context.Context, code string, passcode string) (bool, error) {
+	_ = ctx
+	s.mu.Lock()
+	team := s.teams[normalizeTeamCode(code)]
+	s.mu.Unlock()
+	if team.Code == "" || team.DeletedAt != "" {
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyDeletePasswordHash), []byte(passcode))
+		return false, nil
+	}
+	if team.PasscodeHash == "" {
+		return true, nil
+	}
+	if bcrypt.CompareHashAndPassword([]byte(team.PasscodeHash), []byte(passcode)) != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *MemoryTeamStore) VerifyDeletePassword(ctx context.Context, code string, deletePassword string) (bool, error) {
+	_ = ctx
+	s.mu.Lock()
+	team := s.teams[normalizeTeamCode(code)]
+	s.mu.Unlock()
+	hash := dummyDeletePasswordHash
+	if team.Code != "" && team.DeletedAt == "" {
+		hash = team.DeletePasswordHash
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(deletePassword)) == nil, nil
+}
+
 type SupabaseTeamStore struct {
 	baseURL string
 	key     string
@@ -370,14 +470,22 @@ func (s *SupabaseTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 	if err != nil {
 		return Team{}, err
 	}
+	body := map[string]string{
+		"name":                 input.Name,
+		"delete_password_hash": string(hash),
+	}
+	if strings.TrimSpace(input.Passcode) != "" {
+		pHash, err := bcrypt.GenerateFromPassword([]byte(input.Passcode), 12)
+		if err != nil {
+			return Team{}, err
+		}
+		body["passcode_hash"] = string(pHash)
+	}
 	for attempt := 0; attempt < 8; attempt++ {
 		code := makeCode()
+		body["code"] = code
 		var rows []supabaseTeamRow
-		err := s.rest(ctx, http.MethodPost, "/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at", map[string]string{
-			"code":                 code,
-			"name":                 input.Name,
-			"delete_password_hash": string(hash),
-		}, &rows, "return=representation")
+		err := s.rest(ctx, http.MethodPost, "/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at,passcode_hash", body, &rows, "return=representation")
 		if err == nil && len(rows) > 0 {
 			team := rows[0].toTeam()
 			return team, nil
@@ -394,7 +502,7 @@ func (s *SupabaseTeamStore) CreateTeam(ctx context.Context, input CreateTeamInpu
 
 func (s *SupabaseTeamStore) GetTeamByCode(ctx context.Context, code string) (*Team, error) {
 	cutoff := url.QueryEscape(time.Now().UTC().Add(-teamIdleTTL).Format(time.RFC3339Nano))
-	query := fmt.Sprintf("/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at&code=eq.%s&deleted_at=is.null&last_connected_at=gt.%s&limit=1", url.QueryEscape(normalizeTeamCode(code)), cutoff)
+	query := fmt.Sprintf("/rest/v1/cliks_teams?select=id,code,name,created_at,last_connected_at,passcode_hash&code=eq.%s&deleted_at=is.null&last_connected_at=gt.%s&limit=1", url.QueryEscape(normalizeTeamCode(code)), cutoff)
 	var rows []supabaseTeamRow
 	if err := s.rest(ctx, http.MethodGet, query, nil, &rows, ""); err != nil {
 		return nil, err
@@ -458,6 +566,42 @@ func (s *SupabaseTeamStore) DeleteTeam(ctx context.Context, input DeleteTeamInpu
 	return true, s.rest(ctx, http.MethodPatch, patch, map[string]string{"deleted_at": time.Now().UTC().Format(time.RFC3339Nano)}, nil, "")
 }
 
+func (s *SupabaseTeamStore) VerifyPasscode(ctx context.Context, code string, passcode string) (bool, error) {
+	query := fmt.Sprintf("/rest/v1/cliks_teams?select=passcode_hash&code=eq.%s&deleted_at=is.null&limit=1", url.QueryEscape(normalizeTeamCode(code)))
+	var rows []struct {
+		PasscodeHash *string `json:"passcode_hash"`
+	}
+	if err := s.rest(ctx, http.MethodGet, query, nil, &rows, ""); err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyDeletePasswordHash), []byte(passcode))
+		return false, nil
+	}
+	if rows[0].PasscodeHash == nil || *rows[0].PasscodeHash == "" {
+		return true, nil
+	}
+	if bcrypt.CompareHashAndPassword([]byte(*rows[0].PasscodeHash), []byte(passcode)) != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *SupabaseTeamStore) VerifyDeletePassword(ctx context.Context, code string, deletePassword string) (bool, error) {
+	query := fmt.Sprintf("/rest/v1/cliks_teams?select=delete_password_hash&code=eq.%s&deleted_at=is.null&limit=1", url.QueryEscape(normalizeTeamCode(code)))
+	var rows []struct {
+		DeletePasswordHash string `json:"delete_password_hash"`
+	}
+	if err := s.rest(ctx, http.MethodGet, query, nil, &rows, ""); err != nil {
+		return false, err
+	}
+	hash := dummyDeletePasswordHash
+	if len(rows) > 0 {
+		hash = rows[0].DeletePasswordHash
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(deletePassword)) == nil, nil
+}
+
 func (s *SupabaseTeamStore) rest(ctx context.Context, method string, path string, input any, output any, prefer string) error {
 	var body io.Reader
 	if input != nil {
@@ -496,11 +640,12 @@ func (s *SupabaseTeamStore) rest(ctx context.Context, method string, path string
 }
 
 type supabaseTeamRow struct {
-	ID              string `json:"id"`
-	Code            string `json:"code"`
-	Name            string `json:"name"`
-	CreatedAt       string `json:"created_at"`
-	LastConnectedAt string `json:"last_connected_at"`
+	ID              string  `json:"id"`
+	Code            string  `json:"code"`
+	Name            string  `json:"name"`
+	CreatedAt       string  `json:"created_at"`
+	LastConnectedAt string  `json:"last_connected_at"`
+	PasscodeHash    *string `json:"passcode_hash,omitempty"`
 }
 
 func (r supabaseTeamRow) toTeam() Team {
@@ -512,7 +657,8 @@ func (r supabaseTeamRow) toTeam() Team {
 	if parsed, err := time.Parse(time.RFC3339Nano, lastConnected); err == nil {
 		lastConnected = parsed.UTC().Add(teamIdleTTL).Format(time.RFC3339Nano)
 	}
-	return Team{ID: r.ID, Code: r.Code, Name: r.Name, CreatedAt: created, ExpiresAt: lastConnected}
+	hasPasscode := r.PasscodeHash != nil && *r.PasscodeHash != ""
+	return Team{ID: r.ID, Code: r.Code, Name: r.Name, HasPasscode: hasPasscode, CreatedAt: created, ExpiresAt: lastConnected}
 }
 
 func makeCode() string {

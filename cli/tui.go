@@ -191,7 +191,9 @@ type homeModel struct {
 	formReturnMode        string
 	createName            string
 	createPassword        string
+	createPasscode        string
 	joinCode              string
+	joinPasscode          string
 	deleteCode            string
 	deletePassword        string
 	nicknameValue         string
@@ -860,8 +862,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.mouseOver = false
 		m.createName = ""
 		m.createPassword = ""
+		m.createPasscode = ""
 		m.moveFormTextCursorToEnd()
-		m.message = "Name the room and set a delete password."
+		m.message = "Name the room, set a delete password, and optional passcode."
 	case "join":
 		returnMode := m.mode
 		if returnMode != "home" {
@@ -872,6 +875,7 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.joinCode = ""
+		m.joinPasscode = ""
 		m.moveFormTextCursorToEnd()
 		m.message = "Paste or type a team code. Join opens live automatically."
 	case "delete":
@@ -2237,9 +2241,10 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.formCursor = 0
 			return m, nil
 		}
+		passcode := strings.TrimSpace(m.joinPasscode)
 		m.busy = true
 		m.message = "Joining team..."
-		return m, joinTeamCmd(code)
+		return m, joinTeamCmd(code, passcode)
 	}
 	if m.mode == "create" {
 		name := strings.TrimSpace(m.createName)
@@ -2252,9 +2257,10 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.formCursor = 1
 			return m, nil
 		}
+		passcode := strings.TrimSpace(m.createPasscode)
 		m.busy = true
 		m.message = "Creating team..."
-		return m, createTeamCmd(name, password)
+		return m, createTeamCmd(name, password, passcode)
 	}
 	code := strings.ToUpper(strings.TrimSpace(m.deleteCode))
 	if code == "" {
@@ -2274,10 +2280,13 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
-	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" || m.mode == "backend-url" {
-		return 1
+	if m.mode == "create" {
+		return 3
 	}
-	return 2
+	if m.mode == "join" || m.mode == "delete" {
+		return 2
+	}
+	return 1
 }
 
 func (m homeModel) formValue() string {
@@ -2286,9 +2295,15 @@ func (m homeModel) formValue() string {
 		if m.formCursor == 0 {
 			return m.createName
 		}
-		return m.createPassword
+		if m.formCursor == 1 {
+			return m.createPassword
+		}
+		return m.createPasscode
 	case "join":
-		return m.joinCode
+		if m.formCursor == 0 {
+			return m.joinCode
+		}
+		return m.joinPasscode
 	case "delete":
 		if m.formCursor == 0 {
 			return m.deleteCode
@@ -2312,11 +2327,17 @@ func (m *homeModel) setFormValue(value string) {
 	case "create":
 		if m.formCursor == 0 {
 			m.createName = value
-		} else {
+		} else if m.formCursor == 1 {
 			m.createPassword = value
+		} else {
+			m.createPasscode = value
 		}
 	case "join":
-		m.joinCode = strings.ToUpper(value)
+		if m.formCursor == 0 {
+			m.joinCode = strings.ToUpper(value)
+		} else {
+			m.joinPasscode = value
+		}
 	case "delete":
 		if m.formCursor == 0 {
 			m.deleteCode = strings.ToUpper(value)
@@ -2407,11 +2428,13 @@ func (m homeModel) formView() string {
 		rows = []string{
 			formLine("Team name", m.createName, "Cliks Room", m.formCursor == 0, m.formTextCursor, false),
 			formLine("Delete password", m.createPassword, "not set", m.formCursor == 1, m.formTextCursor, true),
+			formLine("Join passcode", m.createPasscode, "optional", m.formCursor == 2, m.formTextCursor, true),
 		}
 	} else if m.mode == "join" {
 		title = "Join Team"
 		rows = []string{
-			formLine("Team code", m.joinCode, "CLIK-XXXXXX", true, m.formTextCursor, false),
+			formLine("Team code", m.joinCode, "CLIK-XXXXXX", m.formCursor == 0, m.formTextCursor, false),
+			formLine("Join passcode", m.joinPasscode, "optional", m.formCursor == 1, m.formTextCursor, true),
 		}
 	} else if m.mode == "delete" {
 		title = "Delete Team"
@@ -2475,14 +2498,14 @@ func formLine(label string, value string, placeholder string, selected bool, cur
 	return line
 }
 
-func createTeamCmd(name string, password string) tea.Cmd {
+func createTeamCmd(name string, password string, passcode string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := loadConfig()
-		team, err := createTeamViaAPI(cfg, name, password)
+		team, err := createTeamViaAPI(cfg, name, password, passcode)
 		if err != nil {
 			return formDoneMsg{kind: "create", err: err}
 		}
-		next, err := rememberTeam(team.Code, team.Name)
+		next, err := rememberTeam(team.Code, team.Name, passcode)
 		if err != nil {
 			return formDoneMsg{kind: "create", err: err}
 		}
@@ -2494,14 +2517,21 @@ func createTeamCmd(name string, password string) tea.Cmd {
 	}
 }
 
-func joinTeamCmd(code string) tea.Cmd {
+func joinTeamCmd(code string, passcode string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := loadConfig()
 		team, err := getTeamViaAPI(cfg, code)
 		if err != nil {
 			return formDoneMsg{kind: "join", code: code, err: err}
 		}
-		next, err := rememberTeam(team.Code, team.Name)
+		if team.HasPasscode && passcode == "" {
+			p := teamPasscodeForCode(cfg, team.Code)
+			if p == "" {
+				return formDoneMsg{kind: "join", code: code, err: errors.New("passcode required for this room")}
+			}
+			passcode = p
+		}
+		next, err := rememberTeam(team.Code, team.Name, passcode)
 		if err != nil {
 			return formDoneMsg{kind: "join", code: team.Code, err: err}
 		}

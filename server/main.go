@@ -150,18 +150,19 @@ func (s *apiServer) handleTeams(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name           string `json:"name"`
 		DeletePassword string `json:"deletePassword"`
+		Passcode       string `json:"passcode"`
 	}
 	if err := readJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Please provide a team name and a delete password.")
 		return
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if len([]rune(input.Name)) < 2 || len([]rune(input.Name)) > 80 || len(input.DeletePassword) < 6 || len(input.DeletePassword) > 128 {
+	if len([]rune(input.Name)) < 2 || len([]rune(input.Name)) > 80 || len(input.DeletePassword) < 6 || len(input.DeletePassword) > 128 || len(input.Passcode) > 128 {
 		writeError(w, http.StatusBadRequest, "Please provide a team name and a delete password.")
 		return
 	}
 
-	team, err := s.store.CreateTeam(r.Context(), CreateTeamInput{Name: input.Name, DeletePassword: input.DeletePassword})
+	team, err := s.store.CreateTeam(r.Context(), CreateTeamInput{Name: input.Name, DeletePassword: input.DeletePassword, Passcode: input.Passcode})
 	if err != nil {
 		log.Printf("create team: %v", err)
 		writeError(w, http.StatusInternalServerError, "Could not create team.")
@@ -171,6 +172,42 @@ func (s *apiServer) handleTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) handleTeamByCode(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/kick") {
+		code := normalizeTeamCode(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/teams/"), "/kick"))
+		if code == "" || len(code) > 16 {
+			writeError(w, http.StatusNotFound, "Team not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !s.deleteTeamLimiter.Allow(rateLimitKey(r)) {
+			writeError(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment and try again.")
+			return
+		}
+		var input struct {
+			TargetPeerID   string `json:"targetPeerId"`
+			DeletePassword string `json:"deletePassword"`
+		}
+		if err := readJSON(r, &input); err != nil || input.DeletePassword == "" || input.TargetPeerID == "" || len(input.DeletePassword) > 128 {
+			writeError(w, http.StatusBadRequest, "Invalid kick request.")
+			return
+		}
+		kicked, err := s.hub.KickPeer(r.Context(), code, input.TargetPeerID, input.DeletePassword)
+		if err != nil {
+			log.Printf("kick peer: %v", err)
+			writeError(w, http.StatusInternalServerError, "Could not kick participant.")
+			return
+		}
+		if !kicked {
+			writeError(w, http.StatusForbidden, "Could not kick participant.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+
 	code := normalizeTeamCode(strings.TrimPrefix(r.URL.Path, "/api/teams/"))
 	if code == "" || len(code) > 16 {
 		writeError(w, http.StatusNotFound, "Team not found")
