@@ -5,12 +5,12 @@ import { useAcoustic } from "./AcousticProvider";
 
 /** Six peers at listener-relative distances. */
 const PEERS = [
-  { name: "Mira", role: "design", seat: "near" as const, angle: 28, ring: 0 },
-  { name: "Jules", role: "backend", seat: "mid" as const, angle: 97, ring: 1 },
-  { name: "Ken", role: "mobile", seat: "far" as const, angle: 151, ring: 2 },
-  { name: "Ava", role: "product", seat: "mid" as const, angle: 203, ring: 1 },
-  { name: "Rio", role: "infra", seat: "far" as const, angle: 268, ring: 2 },
-  { name: "Sam", role: "research", seat: "near" as const, angle: 331, ring: 0 },
+  { name: "Mira", role: "design", seat: "near" as const, angle: 28, ring: 0, statusText: "Reviewing PR #104" },
+  { name: "Jules", role: "backend", seat: "mid" as const, angle: 97, ring: 1, statusText: "Refactoring WebSocket hub" },
+  { name: "Ken", role: "mobile", seat: "far" as const, angle: 151, ring: 2, statusText: "" },
+  { name: "Ava", role: "product", seat: "mid" as const, angle: 203, ring: 1, statusText: "Sprint planning" },
+  { name: "Rio", role: "infra", seat: "far" as const, angle: 268, ring: 2, statusText: "Scaling relay cluster" },
+  { name: "Sam", role: "research", seat: "near" as const, angle: 331, ring: 0, statusText: "" },
 ];
 
 /** Seat centers leave room for full name labels at narrow widths. */
@@ -222,6 +222,15 @@ export function RoomDemo() {
             <span className="orbit-avatar">{peer.name}</span>
           </button>
         ))}
+        {tip !== null ? (
+          <div className="orbit-tip">
+            <strong>{PEERS[tip].name}</strong>
+            <span>
+              {PEERS[tip].role} · {PEERS[tip].seat}
+              {PEERS[tip].statusText ? ` · ${PEERS[tip].statusText}` : ""}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="orbit-actions">

@@ -82,3 +82,16 @@ func TestSetEndpointQueuesRunningSessionReconnect(t *testing.T) {
 		t.Fatalf("commands = %+v, want one reconnect", commands)
 	}
 }
+
+func TestSetStatusTextSanitizesAndPersists(t *testing.T) {
+	isolateSetConfig(t)
+	input := "\x1b[32mReviewing\x1b[0m \x00PR #104 with \u202econtext note that exceeds sixty characters in total length"
+	if err := cmdSet([]string{"status.text", input}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadConfig()
+	want := "Reviewing PR #104 with context note that exceeds sixty chara"
+	if cfg.StatusText != want {
+		t.Fatalf("StatusText = %q (len %d), want %q (len %d)", cfg.StatusText, len([]rune(cfg.StatusText)), want, len([]rune(want)))
+	}
+}
