@@ -121,15 +121,23 @@ type windowsMessage struct {
 	Private uint32
 }
 
+var windowsCaptureWndProc uintptr
+
 func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig, mode string) CaptureState {
 	_ = mode
 	helperExe, helperArgs := windowsCaptureHelperCommand()
 	cmd := exec.CommandContext(ctx, helperExe, helperArgs...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return CaptureState{Mode: "off", PermissionHint: "Could not create stdin pipe for Windows capture helper: " + err.Error()}
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return CaptureState{Mode: "off", PermissionHint: "Could not create stdout pipe for Windows capture helper."}
+		_ = stdin.Close()
+		return CaptureState{Mode: "off", PermissionHint: "Could not create stdout pipe for Windows capture helper: " + err.Error()}
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
 		return CaptureState{Mode: "off", PermissionHint: "Could not start Windows capture helper process: " + err.Error()}
 	}
 
@@ -150,18 +158,21 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 
 	select {
 	case <-ctx.Done():
+		_ = stdin.Close()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
 		return CaptureState{Mode: "off", PermissionHint: ctx.Err().Error()}
 	case err := <-readyChan:
 		if err != nil {
+			_ = stdin.Close()
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
 			return CaptureState{Mode: "off", PermissionHint: "Windows capture helper failed readiness check: " + err.Error()}
 		}
 	case <-time.After(2000 * time.Millisecond):
+		_ = stdin.Close()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -169,7 +180,13 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 	}
 
 	go func() {
-		defer cmd.Wait()
+		defer func() {
+			_ = stdin.Close()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+		}()
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			select {
@@ -224,7 +241,7 @@ func runWindowsCaptureHelper(args []string) error {
 
 	module, _, _ := procGetModuleHandleW.Call(0)
 
-	wndProc := syscall.NewCallback(func(hwnd uintptr, msg uint32, wParam uintptr, lParam uintptr) uintptr {
+	windowsCaptureWndProc = syscall.NewCallback(func(hwnd uintptr, msg uint32, wParam uintptr, lParam uintptr) uintptr {
 		if msg == wmInput {
 			var raw rawInput
 			size := uint32(unsafe.Sizeof(raw))
@@ -258,7 +275,7 @@ func runWindowsCaptureHelper(args []string) error {
 
 	var wc wndClassExW
 	wc.Size = uint32(unsafe.Sizeof(wc))
-	wc.WndProc = wndProc
+	wc.WndProc = windowsCaptureWndProc
 	wc.Instance = module
 	wc.ClassName = className
 
