@@ -34,12 +34,12 @@ func platformCaptureSetup() []setupStep {
 }
 
 func isolatedLinuxCaptureReady() bool {
-	conn, err := net.DialTimeout("unix", linuxCaptureSocket(), 250*time.Millisecond)
+	conn, err := net.DialTimeout("unix", linuxCaptureSocket(), 100*time.Millisecond)
 	if err != nil {
 		return false
 	}
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	line, err := bufio.NewReader(conn).ReadString('\n')
 	return err == nil && strings.TrimSpace(line) == "ready"
 }

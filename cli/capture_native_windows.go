@@ -3,10 +3,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
-	"sync"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -15,37 +19,90 @@ import (
 )
 
 const (
-	whKeyboardLL  = 13
-	whMouseLL     = 14
-	hcAction      = 0
+	ridInput  = 0x10000003
+	ridHeader = 0x10000005
+
+	rimTypeMouse    = 0
+	rimTypeKeyboard = 1
+
+	ridevInputSink = 0x00000100
+
+	wmInput       = 0x00FF
 	wmKeyDown     = 0x0100
 	wmSysKeyDown  = 0x0104
 	wmLButtonDown = 0x0201
 	wmRButtonDown = 0x0204
 	wmQuit        = 0x0012
-	pmNoRemove    = 0x0000
+
+	riMouseLeftButtonDown  = 0x0001
+	riMouseRightButtonDown = 0x0004
 )
 
 var (
-	user32                   = windows.NewLazySystemDLL("user32.dll")
-	kernel32                 = windows.NewLazySystemDLL("kernel32.dll")
-	procSetWindowsHookExW    = user32.NewProc("SetWindowsHookExW")
-	procUnhookWindowsHookEx  = user32.NewProc("UnhookWindowsHookEx")
-	procCallNextHookEx       = user32.NewProc("CallNextHookEx")
-	procGetMessageW          = user32.NewProc("GetMessageW")
-	procPeekMessageW         = user32.NewProc("PeekMessageW")
-	procPostThreadMessageW   = user32.NewProc("PostThreadMessageW")
-	procGetCurrentThreadID   = kernel32.NewProc("GetCurrentThreadId")
-	procGetModuleHandleW     = kernel32.NewProc("GetModuleHandleW")
-	windowsKeyboardCallback  = syscall.NewCallback(lowLevelKeyboardCallback)
-	windowsMouseCallback     = syscall.NewCallback(lowLevelMouseCallback)
-	windowsNativeCaptureLock sync.RWMutex
-	windowsNativeCapture     *windowsCaptureSession
+	user32                      = windows.NewLazySystemDLL("user32.dll")
+	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
+	procGetMessageW             = user32.NewProc("GetMessageW")
+	procDefWindowProcW          = user32.NewProc("DefWindowProcW")
+	procCreateWindowExW         = user32.NewProc("CreateWindowExW")
+	procRegisterClassExW        = user32.NewProc("RegisterClassExW")
+	procDestroyWindow           = user32.NewProc("DestroyWindow")
+	procUnregisterClassW        = user32.NewProc("UnregisterClassW")
+	procRegisterRawInputDevices = user32.NewProc("RegisterRawInputDevices")
+	procGetRawInputData         = user32.NewProc("GetRawInputData")
+	procGetModuleHandleW        = kernel32.NewProc("GetModuleHandleW")
 )
 
-type windowsCaptureSession struct {
-	dispatch *nativeCaptureDispatcher
-	sharing  SharingConfig
+type rawInputHeader struct {
+	Type   uint32
+	Size   uint32
+	Device uintptr
+	WParam uintptr
+}
+
+type rawKeybd struct {
+	MakeCode         uint16
+	Flags            uint16
+	Reserved         uint16
+	VKey             uint16
+	Message          uint32
+	ExtraInformation uint32
+}
+
+type rawMouse struct {
+	Flags            uint16
+	ButtonFlags      uint16
+	ButtonData       uint16
+	RawButtons       uint32
+	LastX            int32
+	LastY            int32
+	ExtraInformation uint32
+}
+
+type rawInput struct {
+	Header rawInputHeader
+	Data   [32]byte
+}
+
+type rawInputDevice struct {
+	UsagePage uint16
+	Usage     uint16
+	Flags     uint32
+	Target    uintptr
+}
+
+type wndClassExW struct {
+	Size       uint32
+	Style      uint32
+	WndProc    uintptr
+	ClsExtra   int32
+	WndExtra   int32
+	Instance   uintptr
+	Icon       uintptr
+	Cursor     uintptr
+	Background uintptr
+	MenuName   *uint16
+	ClassName  *uint16
+	IconSm     uintptr
 }
 
 type windowsPoint struct {
@@ -63,128 +120,211 @@ type windowsMessage struct {
 	Private uint32
 }
 
-type windowsHookStart struct {
-	threadID uint32
-	err      error
-}
-
 func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig, mode string) CaptureState {
-	_ = mode // Windows hooks require no special cross-application permission.
-	ready := make(chan windowsHookStart, 1)
-	go c.runWindowsHooks(ctx, sharing, ready)
+	_ = mode
+	helperExe, helperArgs := windowsCaptureHelperCommand()
+	cmd := exec.CommandContext(ctx, helperExe, helperArgs...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return CaptureState{Mode: "off", PermissionHint: "Could not create stdout pipe for Windows capture helper."}
+	}
+	if err := cmd.Start(); err != nil {
+		return CaptureState{Mode: "off", PermissionHint: "Could not start Windows capture helper process: " + err.Error()}
+	}
+
+	reader := bufio.NewReader(stdout)
+	readyChan := make(chan error, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			readyChan <- fmt.Errorf("reading ready token: %w", err)
+			return
+		}
+		if strings.TrimSpace(line) != "ready" {
+			readyChan <- fmt.Errorf("unexpected initial token: %q", line)
+			return
+		}
+		readyChan <- nil
+	}()
+
 	select {
 	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
 		return CaptureState{Mode: "off", PermissionHint: ctx.Err().Error()}
-	case result := <-ready:
-		if result.err != nil {
-			return CaptureState{Mode: "off", PermissionHint: "Windows native capture could not start: " + result.err.Error()}
-		}
-		return CaptureState{Mode: "windows-native"}
-	case <-time.After(3 * time.Second):
-		if c.cancel != nil {
-			c.cancel()
-		}
-		return CaptureState{Mode: "off", PermissionHint: "Windows native capture timed out while starting."}
-	}
-}
-
-func (c *ActivityCapture) runWindowsHooks(ctx context.Context, sharing SharingConfig, ready chan<- windowsHookStart) {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	threadID, _, _ := procGetCurrentThreadID.Call()
-	var message windowsMessage
-	// Force creation of this thread's message queue before another goroutine can post WM_QUIT.
-	procPeekMessageW.Call(uintptr(unsafe.Pointer(&message)), 0, 0, 0, pmNoRemove)
-
-	module, _, _ := procGetModuleHandleW.Call(0)
-	keyboardHook := uintptr(0)
-	mouseHook := uintptr(0)
-	if sharing.Keyboard {
-		keyboardHook, _, _ = procSetWindowsHookExW.Call(whKeyboardLL, windowsKeyboardCallback, module, 0)
-		if keyboardHook == 0 {
-			ready <- windowsHookStart{err: fmt.Errorf("SetWindowsHookExW keyboard hook failed")}
-			return
-		}
-	}
-	if sharing.Mouse {
-		mouseHook, _, _ = procSetWindowsHookExW.Call(whMouseLL, windowsMouseCallback, module, 0)
-		if mouseHook == 0 {
-			if keyboardHook != 0 {
-				procUnhookWindowsHookEx.Call(keyboardHook)
+	case err := <-readyChan:
+		if err != nil {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
 			}
-			ready <- windowsHookStart{err: fmt.Errorf("SetWindowsHookExW mouse hook failed")}
-			return
+			return CaptureState{Mode: "off", PermissionHint: "Windows capture helper failed readiness check: " + err.Error()}
 		}
+	case <-time.After(180 * time.Millisecond):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return CaptureState{Mode: "off", PermissionHint: "Windows capture helper timed out during readiness probe."}
 	}
-	defer func() {
-		if keyboardHook != 0 {
-			procUnhookWindowsHookEx.Call(keyboardHook)
-		}
-		if mouseHook != 0 {
-			procUnhookWindowsHookEx.Call(mouseHook)
-		}
-		windowsNativeCaptureLock.Lock()
-		session := windowsNativeCapture
-		windowsNativeCapture = nil
-		windowsNativeCaptureLock.Unlock()
-		if session != nil {
-			session.dispatch.stop()
+
+	go func() {
+		defer cmd.Wait()
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			switch strings.TrimSpace(scanner.Text()) {
+			case "k":
+				if sharing.Keyboard {
+					c.emit(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
+				}
+			case "l":
+				if sharing.Mouse {
+					c.emit(LocalActivityEvent{Kind: "mouse", Button: "left", At: time.Now()})
+				}
+			case "r":
+				if sharing.Mouse {
+					c.emit(LocalActivityEvent{Kind: "mouse", Button: "right", At: time.Now()})
+				}
+			}
 		}
 	}()
 
-	windowsNativeCaptureLock.Lock()
-	windowsNativeCapture = &windowsCaptureSession{dispatch: newNativeCaptureDispatcher(c), sharing: sharing}
-	windowsNativeCaptureLock.Unlock()
-	ready <- windowsHookStart{threadID: uint32(threadID)}
+	return CaptureState{
+		Mode:           "windows-isolated-helper",
+		PermissionHint: "Windows capture helper active using Raw Input across normal and elevated windows.",
+	}
+}
 
-	go func(id uint32) {
-		<-ctx.Done()
-		procPostThreadMessageW.Call(uintptr(id), wmQuit, 0, 0)
-	}(uint32(threadID))
+func windowsCaptureHelperCommand() (string, []string) {
+	if helper := strings.TrimSpace(os.Getenv("CLIKS_CAPTURE_HELPER")); helper != "" {
+		return helper, []string{"--stdio"}
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidate := filepath.Join(dir, "cliks-capture.exe")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, []string{"--stdio"}
+		}
+		return exe, []string{"capture-helper", "--stdio"}
+	}
+	return "cliks-capture.exe", []string{"--stdio"}
+}
 
-	for {
-		result, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&message)), 0, 0, 0)
-		if int32(result) <= 0 {
-			if ctx.Err() == nil && c.cancel != nil {
-				c.cancel()
+func runWindowsCaptureHelper(args []string) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	className, _ := windows.UTF16PtrFromString("CliksCaptureClass")
+	windowName, _ := windows.UTF16PtrFromString("CliksCaptureWindow")
+
+	module, _, _ := procGetModuleHandleW.Call(0)
+
+	wndProc := syscall.NewCallback(func(hwnd uintptr, msg uint32, wParam uintptr, lParam uintptr) uintptr {
+		if msg == wmInput {
+			var raw rawInput
+			size := uint32(unsafe.Sizeof(raw))
+			res, _, _ := procGetRawInputData.Call(
+				lParam,
+				uintptr(ridInput),
+				uintptr(unsafe.Pointer(&raw)),
+				uintptr(unsafe.Pointer(&size)),
+				uintptr(unsafe.Sizeof(rawInputHeader{})),
+			)
+			if int32(res) >= 0 {
+				if raw.Header.Type == rimTypeKeyboard {
+					keybd := (*rawKeybd)(unsafe.Pointer(&raw.Data[0]))
+					if keybd.Message == wmKeyDown || keybd.Message == wmSysKeyDown {
+						fmt.Println("k")
+					}
+				} else if raw.Header.Type == rimTypeMouse {
+					mouse := (*rawMouse)(unsafe.Pointer(&raw.Data[0]))
+					if mouse.ButtonFlags&riMouseLeftButtonDown != 0 {
+						fmt.Println("l")
+					}
+					if mouse.ButtonFlags&riMouseRightButtonDown != 0 {
+						fmt.Println("r")
+					}
+				}
 			}
-			return
+		}
+		res, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+		return res
+	})
+
+	var wc wndClassExW
+	wc.Size = uint32(unsafe.Sizeof(wc))
+	wc.WndProc = wndProc
+	wc.Instance = module
+	wc.ClassName = className
+
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+
+	hwndMsgVal := uintptr(unsafe.Pointer(uintptr(0) - 3)) // HWND_MESSAGE
+
+	hwnd, _, _ := procCreateWindowExW.Call(
+		0,
+		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(windowName)),
+		0,
+		0, 0, 0, 0,
+		hwndMsgVal,
+		0,
+		module,
+		0,
+	)
+
+	devices := []rawInputDevice{
+		{
+			UsagePage: 0x01,
+			Usage:     0x06,
+			Flags:     ridevInputSink,
+			Target:    hwnd,
+		},
+		{
+			UsagePage: 0x01,
+			Usage:     0x02,
+			Flags:     ridevInputSink,
+			Target:    hwnd,
+		},
+	}
+
+	res, _, err := procRegisterRawInputDevices.Call(
+		uintptr(unsafe.Pointer(&devices[0])),
+		uintptr(len(devices)),
+		uintptr(unsafe.Sizeof(devices[0])),
+	)
+	if res == 0 {
+		return fmt.Errorf("RegisterRawInputDevices failed: %v", err)
+	}
+
+	fmt.Println("ready")
+
+	go func() {
+		buf := make([]byte, 1)
+		_, _ = os.Stdin.Read(buf)
+		os.Exit(0)
+	}()
+
+	var msg windowsMessage
+	for {
+		res, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(res) <= 0 {
+			break
 		}
 	}
-}
 
-func lowLevelKeyboardCallback(code int, wParam uintptr, lParam uintptr) uintptr {
-	if code == hcAction && (wParam == wmKeyDown || wParam == wmSysKeyDown) {
-		emitWindowsNativeEvent("keyboard", "")
+	if hwnd != 0 {
+		procDestroyWindow.Call(hwnd)
 	}
-	result, _, _ := procCallNextHookEx.Call(0, uintptr(code), wParam, lParam)
-	return result
-}
-
-func lowLevelMouseCallback(code int, wParam uintptr, lParam uintptr) uintptr {
-	if code == hcAction {
-		switch wParam {
-		case wmLButtonDown:
-			emitWindowsNativeEvent("mouse", "left")
-		case wmRButtonDown:
-			emitWindowsNativeEvent("mouse", "right")
-		}
-	}
-	result, _, _ := procCallNextHookEx.Call(0, uintptr(code), wParam, lParam)
-	return result
-}
-
-func emitWindowsNativeEvent(kind string, button string) {
-	windowsNativeCaptureLock.RLock()
-	session := windowsNativeCapture
-	windowsNativeCaptureLock.RUnlock()
-	if session == nil || (kind == "keyboard" && !session.sharing.Keyboard) || (kind == "mouse" && !session.sharing.Mouse) {
-		return
-	}
-	session.dispatch.push(LocalActivityEvent{Kind: kind, Button: button, At: time.Now()})
+	procUnregisterClassW.Call(uintptr(unsafe.Pointer(className)), module)
+	return nil
 }
 
 func globalHookPermissionHint() string {
-	return "Capture may pause only while an Administrator window is focused (Windows security)."
+	return "Raw Input IPC helper captures keyboard/mouse activity across normal and elevated windows without pauses."
 }
+

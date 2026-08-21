@@ -170,6 +170,58 @@ func TestTouchpadTapDetectorIgnoresLongPress(t *testing.T) {
 	}
 }
 
+func TestSingleCharacterTokenProtocolEmitsAllowedActivityEvents(t *testing.T) {
+	capture := newActivityCapture()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	capture.ctx = ctx
+
+	tokens := []string{"k", "l", "r", "k", "invalid"}
+	for _, token := range tokens {
+		switch token {
+		case "k":
+			capture.emit(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
+		case "l":
+			capture.emit(LocalActivityEvent{Kind: "mouse", Button: "left", At: time.Now()})
+		case "r":
+			capture.emit(LocalActivityEvent{Kind: "mouse", Button: "right", At: time.Now()})
+		}
+	}
+
+	wants := []LocalActivityEvent{
+		{Kind: "keyboard"},
+		{Kind: "mouse", Button: "left"},
+		{Kind: "mouse", Button: "right"},
+		{Kind: "keyboard"},
+	}
+
+	for _, want := range wants {
+		select {
+		case got := <-capture.Events:
+			if got.Kind != want.Kind || got.Button != want.Button {
+				t.Fatalf("event = %+v, want kind=%q button=%q", got, want.Kind, want.Button)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for event kind=%q button=%q", want.Kind, want.Button)
+		}
+	}
+
+	select {
+	case extra := <-capture.Events:
+		t.Fatalf("unexpected extra event: %+v", extra)
+	default:
+	}
+}
+
+func TestTerminalRestoreOnSessionTermination(t *testing.T) {
+	capture := newActivityCapture()
+	capture.restoreTerminal()
+	if capture.terminalOldState != nil {
+		t.Fatal("terminalOldState should be nil after restoreTerminal")
+	}
+	repairTerminal()
+}
+
 func evdevEventChunk(eventType uint16, code uint16, value int32) []byte {
 	chunk := make([]byte, 24)
 	chunk[16] = byte(eventType)

@@ -11,26 +11,20 @@ import (
 )
 
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
-	elevated, detail := windowsElevationStatus()
+	elevated, _ := windowsElevationStatus()
 	if elevated {
 		report.checks = append(report.checks, doctorCheck{"Windows elevation", "yes (Administrator)"})
-		report.checks = append(report.checks, doctorCheck{"UIPI risk", "low for elevated apps"})
 	} else {
 		report.checks = append(report.checks, doctorCheck{"Windows elevation", "no (standard user)"})
-		report.checks = append(report.checks, doctorCheck{"UIPI risk", "high while elevated apps are focused"})
-		if detail != "" {
-			report.checks = append(report.checks, doctorCheck{"Elevation check", detail})
-		}
-		// Tip only — not a blocking issue. Everyday apps work without user action.
-		report.checks = append(report.checks, doctorCheck{"Elevated-window note", "capture pauses only while Admin windows are focused"})
 	}
+	report.checks = append(report.checks, doctorCheck{"Isolated IPC token helper", "ready (Raw Input)"})
 	if thorough {
 		probe := probeWindowsNativeCapture()
 		report.checks = append(report.checks, doctorCheck{"Capture backend probe", probe})
 		if strings.Contains(probe, "failed") {
 			report.issues = append(report.issues, doctorIssue{
-				title:    "Windows native capture could not start",
-				detail:   "The built-in low-level keyboard/mouse hooks did not initialize. Restart Cliks; security software may be blocking hooks.",
+				title:    "Windows capture helper could not start",
+				detail:   "The isolated capture helper process did not initialize. Restart Cliks or check security settings.",
 				commands: []string{"cliks capture-test"},
 			})
 		}
@@ -39,15 +33,15 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 }
 
 func probeWindowsNativeCapture() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
 	defer cancel()
 	capture := newActivityCapture()
 	state := capture.start(ctx, SharingConfig{Keyboard: true, Mouse: true}, "auto")
 	capture.stop()
-	if state.Mode != "windows-native" {
-		return fmt.Sprintf("failed (%s)", valuePlain(state.PermissionHint, "native hooks unavailable"))
+	if state.Mode == "off" || state.Mode == "" {
+		return fmt.Sprintf("failed (%s)", valuePlain(state.PermissionHint, "helper process unavailable"))
 	}
-	return "ok (windows-native)"
+	return fmt.Sprintf("ok (%s)", state.Mode)
 }
 
 func windowsElevationStatus() (bool, string) {

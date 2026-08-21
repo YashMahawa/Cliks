@@ -144,7 +144,7 @@ Current modes:
 
 Important platform reality:
 
-- Windows can use low-level hooks.
+- Windows uses a process-isolated capture helper streaming single-character tokens over stdio via Raw Input (RIDEV_INPUTSINK) to maintain capture across normal and elevated windows.
 - macOS uses a dedicated listen-only Cliks Capture.app with Input Monitoring permission. Direct terminal permission is compatibility-only.
 - Linux Xorg can use XRecord/XInput/native hooks.
 - Linux Wayland intentionally blocks normal desktop global input APIs. A hardened `cliks-capture` system helper reads evdev and exposes only fixed activity-kind tokens over a target-user-owned `0600` Unix socket. It verifies both peer UID and installed Cliks executable and emits only while that user owns an active local logind seat. Direct evdev is an explicit compatibility fallback.

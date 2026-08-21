@@ -70,6 +70,45 @@ func TestVerifyClientRejectsUnexpectedExecutable(t *testing.T) {
 	}
 }
 
+func TestVerifyClientRejectsMismatchedUID(t *testing.T) {
+	executable, err := os.Readlink("/proc/self/exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLIKS_CAPTURE_UID", strconv.Itoa(os.Getuid()+999))
+	t.Setenv("CLIKS_CAPTURE_CLIENT_EXE", executable)
+	clientConn, serverConn := testUnixConnection(t)
+	defer clientConn.Close()
+	defer serverConn.Close()
+	if verified, ok := verifyClient(serverConn); ok || verified != nil {
+		t.Fatal("mismatched UID was accepted")
+	}
+}
+
+func TestActiveSeatGateBlocksTokensWhenInactive(t *testing.T) {
+	configureCurrentProcess(t)
+	clientConn, serverConn := testUnixConnection(t)
+	defer clientConn.Close()
+	verified, ok := verifyClient(serverConn)
+	if !ok {
+		t.Fatal("current executable was not verified")
+	}
+	defer verified.close()
+
+	inactiveSeat := &activeSeatGate{targetUID: os.Getuid(), active: false, checkedAt: time.Now()}
+	peers := &clients{items: map[*verifiedClient]struct{}{}, seatGate: inactiveSeat}
+	peers.add(verified)
+
+	peers.send("k")
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	buf := make([]byte, 32)
+	n, _ := clientConn.Read(buf)
+	if n > 0 {
+		t.Fatalf("expected no token transmission when active seat gate is false, got %q", string(buf[:n]))
+	}
+}
+
 func TestVerifiedClientIsRemovedWhenSocketCloses(t *testing.T) {
 	configureCurrentProcess(t)
 	clientConn, serverConn := testUnixConnection(t)
