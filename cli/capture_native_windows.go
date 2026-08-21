@@ -42,6 +42,7 @@ var (
 	user32                      = windows.NewLazySystemDLL("user32.dll")
 	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
 	procGetMessageW             = user32.NewProc("GetMessageW")
+	procPeekMessageW            = user32.NewProc("PeekMessageW")
 	procDefWindowProcW          = user32.NewProc("DefWindowProcW")
 	procCreateWindowExW         = user32.NewProc("CreateWindowExW")
 	procRegisterClassExW        = user32.NewProc("RegisterClassExW")
@@ -263,7 +264,7 @@ func runWindowsCaptureHelper(args []string) error {
 
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	hwndMsgVal := uintptr(unsafe.Pointer(uintptr(0) - 3)) // HWND_MESSAGE
+	hwndMsgVal := ^uintptr(2) // HWND_MESSAGE
 
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
