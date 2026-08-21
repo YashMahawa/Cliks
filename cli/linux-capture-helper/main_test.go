@@ -92,3 +92,11 @@ func TestVerifiedClientIsRemovedWhenSocketCloses(t *testing.T) {
 	}
 	t.Fatal("closed client socket remained authorized")
 }
+
+func TestTargetOwnsActiveSeatFallbackWhenLoginctlMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if !targetOwnsActiveSeat(1000) {
+		t.Fatal("targetOwnsActiveSeat should return true when loginctl is missing or fails")
+	}
+}
+

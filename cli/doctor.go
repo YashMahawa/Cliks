@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -194,23 +193,8 @@ func linuxInputStatus() inputStatus {
 			_ = file.Close()
 		}
 	}
-	groupBytes, err := os.ReadFile("/etc/group")
-	if err == nil {
-		for _, line := range strings.Split(string(groupBytes), "\n") {
-			if strings.HasPrefix(line, "input:") {
-				parts := strings.Split(line, ":")
-				if len(parts) > 2 {
-					gid, _ := strconv.Atoi(parts[2])
-					groups, _ := os.Getgroups()
-					for _, group := range groups {
-						if group == gid {
-							status.inputGroupActive = true
-						}
-					}
-				}
-			}
-		}
-	}
+	inGroup, _ := userInGroup(status.username, "input")
+	status.inputGroupActive = inGroup
 	return status
 }
 
