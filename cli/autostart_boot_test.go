@@ -42,6 +42,7 @@ func TestLauncherTemplatesIncludeBootEnvVars(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 	t.Setenv("APPDATA", tempDir)
+	t.Setenv("LOCALAPPDATA", tempDir)
 
 	cfg := loadConfig()
 	cfg.CurrentTeamCode = "CLIK-TEST01"
@@ -55,9 +56,9 @@ func TestLauncherTemplatesIncludeBootEnvVars(t *testing.T) {
 	}
 
 	// 1. Linux systemd
-	msgLinux, _ := linuxAutostart("enable", "CLIK-TEST01")
-	if msgLinux == "" {
-		t.Errorf("linuxAutostart enable returned empty message")
+	msgLinux, errLinux := linuxAutostart("enable", "CLIK-TEST01")
+	if errLinux != nil || msgLinux == "" {
+		t.Errorf("linuxAutostart enable failed: %v (msg: %s)", errLinux, msgLinux)
 	}
 	servicePath := filepath.Join(tempDir, "systemd", "user", serviceName+".service")
 	serviceData, err := os.ReadFile(servicePath)
@@ -79,7 +80,10 @@ func TestLauncherTemplatesIncludeBootEnvVars(t *testing.T) {
 	}
 
 	// 2. macOS LaunchAgent plist
-	_, _ = macAutostart("enable", "CLIK-TEST01")
+	msgMac, errMac := macAutostart("enable", "CLIK-TEST01")
+	if errMac != nil || msgMac == "" {
+		t.Errorf("macAutostart enable failed: %v (msg: %s)", errMac, msgMac)
+	}
 	plistPath := filepath.Join(tempDir, "Library", "LaunchAgents", launchAgentID+".plist")
 	plistData, err := os.ReadFile(plistPath)
 	if err != nil {
@@ -100,7 +104,10 @@ func TestLauncherTemplatesIncludeBootEnvVars(t *testing.T) {
 	}
 
 	// 3. Windows Startup VBScript
-	_, _ = windowsAutostart("enable", "CLIK-TEST01")
+	msgWin, errWin := windowsAutostart("enable", "CLIK-TEST01")
+	if errWin != nil || msgWin == "" {
+		t.Errorf("windowsAutostart enable failed: %v (msg: %s)", errWin, msgWin)
+	}
 	vbsPath := filepath.Join(tempDir, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Cliks.vbs")
 	vbsData, err := os.ReadFile(vbsPath)
 	if err != nil {
@@ -126,28 +133,40 @@ func TestUpdatingBootSettingRegeneratesLauncherWhenAutostartEnabled(t *testing.T
 	t.Setenv("XDG_CONFIG_HOME", tempDir)
 	t.Setenv("HOME", tempDir)
 	t.Setenv("APPDATA", tempDir)
+	t.Setenv("LOCALAPPDATA", tempDir)
 
 	cfg := loadConfig()
 	cfg.CurrentTeamCode = "CLIK-AUTO01"
 	cfg.Boot.DelaySec = 5
-	_ = saveConfig(cfg)
+	if err := saveConfig(cfg); err != nil {
+		t.Fatalf("saveConfig failed: %v", err)
+	}
 
 	var launcherPath string
 	var expectedInit, expectedUpdated string
 
 	switch runtime.GOOS {
 	case "linux":
-		_, _ = linuxAutostart("enable", "CLIK-AUTO01")
+		msg, err := linuxAutostart("enable", "CLIK-AUTO01")
+		if err != nil {
+			t.Fatalf("linuxAutostart enable failed: %v (msg: %s)", err, msg)
+		}
 		launcherPath = filepath.Join(tempDir, "systemd", "user", serviceName+".service")
 		expectedInit = "CLIKS_BOOT_DELAY=5"
 		expectedUpdated = "CLIKS_BOOT_DELAY=25"
 	case "darwin":
-		_, _ = macAutostart("enable", "CLIK-AUTO01")
+		msg, err := macAutostart("enable", "CLIK-AUTO01")
+		if err != nil {
+			t.Fatalf("macAutostart enable failed: %v (msg: %s)", err, msg)
+		}
 		launcherPath = filepath.Join(tempDir, "Library", "LaunchAgents", launchAgentID+".plist")
 		expectedInit = "<string>5</string>"
 		expectedUpdated = "<string>25</string>"
 	case "windows":
-		_, _ = windowsAutostart("enable", "CLIK-AUTO01")
+		msg, err := windowsAutostart("enable", "CLIK-AUTO01")
+		if err != nil {
+			t.Fatalf("windowsAutostart enable failed: %v (msg: %s)", err, msg)
+		}
 		launcherPath = filepath.Join(tempDir, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Cliks.vbs")
 		expectedInit = `CLIKS_BOOT_DELAY") = "5"`
 		expectedUpdated = `CLIKS_BOOT_DELAY") = "25"`
