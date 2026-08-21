@@ -12,6 +12,7 @@ Incoming WebSocket messages are capped at 8 KiB and each connection has a local 
 {
   "type": "join",
   "teamCode": "CLIK-842KQ9",
+  "passcode": "roompass123",
   "nickname": "local optional name",
   "status": "available",
   "client": {
@@ -21,6 +22,18 @@ Incoming WebSocket messages are capped at 8 KiB and each connection has a local 
   }
 }
 ```
+
+`passcode` is an optional join passcode. If the room was created with a passcode, join attempts with missing or invalid passcodes are rejected before room entry with:
+
+```json
+{
+  "type": "error",
+  "code": "invalid_passcode",
+  "message": "Invalid passcode for this room."
+}
+```
+
+The socket is then closed and the client halts automatic reconnection.
 
 `nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `status` is one of `available`, `focus`, `break`, or `dnd`; missing and unknown values become `available`. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
 
@@ -197,3 +210,29 @@ The CLI should remove that team from local config, disable launch-at-login, stop
 ## Room limits
 
 Rooms are capped at 20 live peers. The 21st peer receives an error with code `room_full` and the socket closes.
+
+## Host Kick
+
+A room host can disconnect a specific participant using the room's deletion password either via `POST /api/teams/:code/kick` or via WebSocket:
+
+```json
+{
+  "type": "kick",
+  "teamCode": "CLIK-842KQ9",
+  "targetPeerId": "peer_abc123",
+  "deletePassword": "hostpassword123"
+}
+```
+
+When authenticated, the target participant is disconnected and receives a fatal error frame:
+
+```json
+{
+  "type": "error",
+  "code": "kicked",
+  "message": "You were kicked from this room by the host."
+}
+```
+
+Receiving `code: "kicked"` terminates automatic client reconnection loops.
+
