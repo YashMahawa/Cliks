@@ -305,6 +305,11 @@ func (s *sessionController) startCaptureAsync() {
 	captureState := CaptureState{Mode: "terminal"}
 	// In a pure terminal session with --terminal, let the live TUI own keyboard/mouse capture.
 	if s.opts.CaptureMode == "terminal" && term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) {
+		disableQuickEditForTerminalCapture()
+		go func() {
+			<-s.ctx.Done()
+			restoreQuickEditConsoleMode()
+		}()
 		s.set(func(state *SessionViewState) {
 			state.CaptureMode = "terminal"
 			state.PermissionHint = ""
