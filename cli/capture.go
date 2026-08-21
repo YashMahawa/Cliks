@@ -55,10 +55,28 @@ type ActivityCapture struct {
 	mu               sync.Mutex
 	terminalOldState *term.State
 	terminalReader   cancelreader.CancelReader
+	OnStateChange    func(CaptureState)
+	currentState     CaptureState
 }
 
 func newActivityCapture() *ActivityCapture {
 	return &ActivityCapture{Events: make(chan LocalActivityEvent, 1024), ctx: context.Background()}
+}
+
+func (c *ActivityCapture) updateState(state CaptureState) {
+	c.mu.Lock()
+	c.currentState = state
+	cb := c.OnStateChange
+	c.mu.Unlock()
+	if cb != nil {
+		cb(state)
+	}
+}
+
+func (c *ActivityCapture) CurrentState() CaptureState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.currentState
 }
 
 func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, mode string) CaptureState {
