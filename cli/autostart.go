@@ -322,7 +322,7 @@ func enableWantedAutostart(cfg CliksConfig) string {
 }
 
 func windowsAutostart(action, code string, optionalCfg ...CliksConfig) (string, error) {
-	startup := os.Getenv("APPDATA")
+	startup := strings.TrimSpace(os.Getenv("APPDATA"))
 	if startup == "" {
 		return "", fmt.Errorf("could not locate Windows Startup folder")
 	}

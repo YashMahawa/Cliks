@@ -168,8 +168,8 @@ func TestUpdatingBootSettingRegeneratesLauncherWhenAutostartEnabled(t *testing.T
 			t.Fatalf("windowsAutostart enable failed: %v (msg: %s)", err, msg)
 		}
 		launcherPath = filepath.Join(tempDir, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Cliks.vbs")
-		expectedInit = `CLIKS_BOOT_DELAY") = "5"`
-		expectedUpdated = `CLIKS_BOOT_DELAY") = "25"`
+		expectedInit = `sh.Environment("Process")("CLIKS_BOOT_DELAY") = "5"`
+		expectedUpdated = `sh.Environment("Process")("CLIKS_BOOT_DELAY") = "25"`
 	default:
 		t.Skip("Unsupported OS for autostart test")
 	}
