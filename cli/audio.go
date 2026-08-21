@@ -456,9 +456,52 @@ func (a *AudioEngine) playWorker() {
 		playbackCanceled := ctx.Err() != nil
 		cancel()
 		if err != nil && !playbackCanceled && a.ctx.Err() == nil {
-			a.warnUnavailableOnce()
+			if fallback := a.tryFallbackAudioPlayer(player.Command); fallback != nil {
+				retryCtx, retryCancel := context.WithTimeout(a.ctx, audioPlaybackTimeout)
+				_ = runAudioCommand(retryCtx, fallback, job)
+				retryCancel()
+			} else {
+				a.warnUnavailableOnce()
+			}
 		}
 	}
+}
+
+func (a *AudioEngine) tryFallbackAudioPlayer(failedCommand string) *audioPlayer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	var candidates []*audioPlayer
+	if failedCommand != "mpv" && hasCommand("mpv") {
+		candidates = append(candidates, mpvAudioPlayer())
+	}
+	if failedCommand != "ffplay" && hasCommand("ffplay") {
+		candidates = append(candidates, ffplayAudioPlayer())
+	}
+	if runtime.GOOS == "darwin" && failedCommand != "afplay" && hasCommand("afplay") {
+		candidates = append(candidates, afplayAudioPlayer())
+	}
+	if runtime.GOOS == "windows" && failedCommand != "powershell.exe" && hasCommand("powershell.exe") {
+		candidates = append(candidates, windowsMediaPlayer())
+	}
+	if isTermuxRuntime() && failedCommand != "termux-media-player" && hasCommand("termux-media-player") {
+		candidates = append(candidates, termuxAudioPlayer())
+	}
+	if failedCommand != "paplay" && hasCommand("paplay") {
+		candidates = append(candidates, paplayAudioPlayer())
+	}
+	if failedCommand != "pw-play" && hasCommand("pw-play") {
+		candidates = append(candidates, pipewireAudioPlayer())
+	}
+	if failedCommand != "aplay" && hasCommand("aplay") {
+		candidates = append(candidates, alsaAudioPlayer())
+	}
+
+	if len(candidates) > 0 {
+		a.player = candidates[0]
+		return candidates[0]
+	}
+	return nil
 }
 
 var audioCommandRunner = func(ctx context.Context, player *audioPlayer, job playbackJob) error {
@@ -565,31 +608,128 @@ func (a *AudioEngine) warnUnavailableOnce() {
 	fmt.Fprintln(os.Stderr, "\nAudio disabled: "+audioInstallMessage())
 }
 
+type BuiltInAudioProvider struct{}
+
+func (p *BuiltInAudioProvider) Name() string { return "built-in" }
+
+func (p *BuiltInAudioProvider) Probe(ctx context.Context) ProbeResult {
+	return probeBuiltInAudioBackend()
+}
+
+func (p *BuiltInAudioProvider) Play(ctx context.Context, job playbackJob) error {
+	player := newBuiltInAudioPlayer()
+	if player != nil && player.Play != nil {
+		return player.Play(ctx, job)
+	}
+	return fmt.Errorf("built-in audio player unavailable")
+}
+
+func (p *BuiltInAudioProvider) Capabilities() AudioCapabilities {
+	return AudioCapabilities{Spatial: true, VolumeCapable: true, IsNative: true}
+}
+
+type CLIAudioProvider struct {
+	name   string
+	player *audioPlayer
+}
+
+func (p *CLIAudioProvider) Name() string { return p.name }
+
+func (p *CLIAudioProvider) Probe(ctx context.Context) ProbeResult {
+	if _, err := exec.LookPath(p.player.Command); err == nil {
+		return ProbeResult{Name: p.name, Available: true, State: DriverStateActive, Mode: p.name}
+	}
+	return ProbeResult{Name: p.name, Available: false, State: DriverStateOff, Mode: "off"}
+}
+
+func (p *CLIAudioProvider) Play(ctx context.Context, job playbackJob) error {
+	return runAudioCommand(ctx, p.player, job)
+}
+
+func (p *CLIAudioProvider) Capabilities() AudioCapabilities {
+	if p.player == nil {
+		return AudioCapabilities{}
+	}
+	return AudioCapabilities{
+		Spatial:       p.player.Spatial,
+		DeviceRouting: p.player.DeviceRouting,
+		VolumeCapable: p.player.VolumeCapable,
+		IsNative:      false,
+	}
+}
+
+func getAudioBackendCandidates(device string) []AudioBackendProvider {
+	var candidates []AudioBackendProvider
+	if builtIn := newBuiltInAudioPlayer(); builtIn != nil {
+		candidates = append(candidates, &BuiltInAudioProvider{})
+	}
+	if hasCommand("mpv") {
+		candidates = append(candidates, &CLIAudioProvider{name: "mpv", player: mpvAudioPlayer()})
+	}
+	if hasCommand("ffplay") {
+		candidates = append(candidates, &CLIAudioProvider{name: "ffplay", player: ffplayAudioPlayer()})
+	}
+	if runtime.GOOS == "darwin" && hasCommand("afplay") {
+		candidates = append(candidates, &CLIAudioProvider{name: "afplay", player: afplayAudioPlayer()})
+	}
+	if runtime.GOOS == "windows" && hasCommand("powershell.exe") {
+		candidates = append(candidates, &CLIAudioProvider{name: "powershell", player: windowsMediaPlayer()})
+	}
+	if isTermuxRuntime() && hasCommand("termux-media-player") {
+		candidates = append(candidates, &CLIAudioProvider{name: "termux-media-player", player: termuxAudioPlayer()})
+	}
+	if hasCommand("paplay") {
+		candidates = append(candidates, &CLIAudioProvider{name: "paplay", player: paplayAudioPlayer()})
+	}
+	if hasCommand("pw-play") {
+		candidates = append(candidates, &CLIAudioProvider{name: "pw-play", player: pipewireAudioPlayer()})
+	}
+	if hasCommand("aplay") {
+		candidates = append(candidates, &CLIAudioProvider{name: "aplay", player: alsaAudioPlayer()})
+	}
+	return candidates
+}
+
+func ffplayAudioPlayer() *audioPlayer {
+	return &audioPlayer{
+		Command:       "ffplay",
+		Spatial:       true,
+		VolumeCapable: true,
+		ArgsFor: func(job playbackJob) []string {
+			return withAudioDevice("ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}, job.Device)
+		},
+	}
+}
+
+func afplayAudioPlayer() *audioPlayer {
+	return &audioPlayer{
+		Command:       "afplay",
+		Spatial:       false,
+		VolumeCapable: true,
+		ArgsFor: func(job playbackJob) []string {
+			return withAudioDevice("afplay", []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
+		},
+	}
+}
+
 func detectAudioPlayer() *audioPlayer {
 	// macOS and Windows ship a built-in stereo PCM path, so ordinary installs
 	// do not need mpv, PowerShell audio, or another player.
 	if builtIn := newBuiltInAudioPlayer(); builtIn != nil {
-		return builtIn
+		if probeBuiltInAudioBackend().Available {
+			return builtIn
+		}
 	}
-	// Linux/Termux prefer players that can stereo-pan teammates.
+	// Linux/Termux or native fallback: prefer players that can stereo-pan teammates.
 	if _, err := exec.LookPath("mpv"); err == nil {
 		return mpvAudioPlayer()
 	}
 	if _, err := exec.LookPath("ffplay"); err == nil {
-		return &audioPlayer{
-			Command:       "ffplay",
-			Spatial:       true,
-			VolumeCapable: true,
-			ArgsFor: func(job playbackJob) []string {
-				return withAudioDevice("ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}, job.Device)
-			},
-		}
+		return ffplayAudioPlayer()
 	}
 	if runtime.GOOS == "darwin" {
 		// afplay is always present; distance via volume only (no stereo pan).
-		return &audioPlayer{Command: "afplay", Spatial: false, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
-			return withAudioDevice("afplay", []string{"-v", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
-		}}
+		return afplayAudioPlayer()
 	}
 	if runtime.GOOS == "windows" {
 		// Compatibility fallback for unusual Windows builds where native audio is unavailable.

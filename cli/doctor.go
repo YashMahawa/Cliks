@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,13 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 		"Cliks does not send key values, key codes, words, coordinates, windows, or app names.",
 	}}
 	report.checks = append(report.checks, doctorCheck{"Runtime", "Go " + runtime.Version()})
+
+	hwStatus := ProbeHardwareSubsystem(context.Background(), cfg)
+	if hwStatus.DegradedFallback {
+		report.checks = append(report.checks, doctorCheck{"Hardware health", "degraded fallback active"})
+	} else {
+		report.checks = append(report.checks, doctorCheck{"Hardware health", "ok"})
+	}
 
 	player, spatial, hint, commands := getAudioPlayerStatus(cfg.Listening.AudioDevice)
 	if player != "" {

@@ -5,12 +5,70 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+type MacIsolatedAppProvider struct {
+	capture *ActivityCapture
+}
+
+func (p *MacIsolatedAppProvider) Name() string { return "macos-isolated-app" }
+
+func (p *MacIsolatedAppProvider) Probe(ctx context.Context) ProbeResult {
+	helper := macCaptureHelperPath()
+	if helper == "" {
+		return ProbeResult{Name: "macos-isolated-app", Available: false, State: DriverStateFailed, Mode: "off", PermissionHint: "Cliks Capture.app is missing."}
+	}
+	if macCaptureHelperReady() {
+		return ProbeResult{Name: "macos-isolated-app", Available: true, State: DriverStateActive, Mode: "macos-isolated-app"}
+	}
+	return ProbeResult{Name: "macos-isolated-app", Available: false, State: DriverStateFailed, Mode: "off", PermissionHint: "Cliks Capture.app is installed but not ready."}
+}
+
+func (p *MacIsolatedAppProvider) Start(ctx context.Context, sharing SharingConfig, events chan<- LocalActivityEvent) (CaptureState, error) {
+	state := p.capture.startGlobalHook(ctx, sharing, "isolated")
+	if state.Mode == "off" {
+		return state, fmt.Errorf("macOS isolated capture app failed: %s", state.PermissionHint)
+	}
+	return state, nil
+}
+
+func (p *MacIsolatedAppProvider) Stop() error { return nil }
+
+type MacDirectEventTapProvider struct {
+	capture *ActivityCapture
+}
+
+func (p *MacDirectEventTapProvider) Name() string { return "macos-event-tap" }
+
+func (p *MacDirectEventTapProvider) Probe(ctx context.Context) ProbeResult {
+	if macListenEventAccessAllowed() {
+		return ProbeResult{Name: "macos-event-tap", Available: true, State: DriverStateActive, Mode: "macos-event-tap"}
+	}
+	return ProbeResult{Name: "macos-event-tap", Available: false, State: DriverStateFailed, Mode: "off", PermissionHint: globalHookPermissionHint()}
+}
+
+func (p *MacDirectEventTapProvider) Start(ctx context.Context, sharing SharingConfig, events chan<- LocalActivityEvent) (CaptureState, error) {
+	state := p.capture.startDirectGlobalHook(ctx, sharing)
+	if state.Mode == "off" {
+		return state, fmt.Errorf("macOS direct event tap failed: %s", state.PermissionHint)
+	}
+	return state, nil
+}
+
+func (p *MacDirectEventTapProvider) Stop() error { return nil }
+
+func (c *ActivityCapture) platformProviders(mode string) []InputCaptureProvider {
+	if mode == "direct" {
+		return []InputCaptureProvider{&MacDirectEventTapProvider{capture: c}, &TerminalCaptureProvider{capture: c}}
+	}
+	return []InputCaptureProvider{&MacIsolatedAppProvider{capture: c}, &MacDirectEventTapProvider{capture: c}, &TerminalCaptureProvider{capture: c}}
+}
 
 func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingConfig, mode string) CaptureState {
 	if mode == "direct" {
