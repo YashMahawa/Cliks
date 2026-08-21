@@ -39,10 +39,11 @@ type RemoteActivityEvent struct {
 }
 
 type PeerPresence struct {
-	PeerID   string `json:"peerId"`
-	Nickname string `json:"nickname,omitempty"`
-	JoinedAt int64  `json:"joinedAt,omitempty"`
-	Status   string `json:"status,omitempty"`
+	PeerID     string `json:"peerId"`
+	Nickname   string `json:"nickname,omitempty"`
+	JoinedAt   int64  `json:"joinedAt,omitempty"`
+	Status     string `json:"status,omitempty"`
+	StatusText string `json:"statusText,omitempty"`
 }
 
 type peerPlacement struct {

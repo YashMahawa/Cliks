@@ -195,6 +195,7 @@ type homeModel struct {
 	deleteCode            string
 	deletePassword        string
 	nicknameValue         string
+	statusTextValue       string
 	audioDeviceValue      string
 	batchWindowValue      string
 	backendURLValue       string
@@ -895,6 +896,18 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.nicknameValue = m.cfg.Nickname
 		m.moveFormTextCursorToEnd()
 		m.message = "Set the short name teammates see in the live room. Max 10 characters."
+	case "status-text", "status":
+		returnMode := m.mode
+		if returnMode != "advanced" && returnMode != "first-setup" {
+			returnMode = "team"
+		}
+		m.mode = "status-text"
+		m.formCursor = 0
+		m.formReturnMode = returnMode
+		m.mouseOver = false
+		m.statusTextValue = m.cfg.StatusText
+		m.moveFormTextCursorToEnd()
+		m.message = "Set a working context note shared with teammates in the room. Max 60 characters."
 	case "onboarding-random-name":
 		m.cfg.Nickname = m.onboardingSuggestion
 		_ = saveConfig(m.cfg)
@@ -1595,6 +1608,7 @@ func (m homeModel) items() []homeItem {
 	case "team":
 		items := []homeItem{
 			{key: "nickname", label: "Nickname", help: valuePlain(m.cfg.Nickname, "set a short name")},
+			{key: "status-text", label: "Context Note", help: valuePlain(m.cfg.StatusText, "set a status note for teammates")},
 			{key: "join", label: "Join", help: "save a team code and open live"},
 			{key: "create", label: "Create", help: "make a new team code"},
 		}
@@ -2195,6 +2209,24 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.mode == "status-text" || m.mode == "status" {
+		note := sanitizeStatusText(m.statusTextValue)
+		m.cfg.StatusText = note
+		if err := saveConfig(m.cfg); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		returnMode := valuePlain(m.formReturnMode, "team")
+		m.mode = returnMode
+		m.cursor = 0
+		m.mouseOver = false
+		if note != "" {
+			m.message = fmt.Sprintf("Working context set to %q.", note)
+		} else {
+			m.message = "Working context cleared."
+		}
+		return m, nil
+	}
 	if m.mode == "audio-device" {
 		device := strings.TrimSpace(m.audioDeviceValue)
 		if strings.EqualFold(device, "default") {
@@ -2274,7 +2306,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
-	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" || m.mode == "backend-url" {
+	if m.mode == "nickname" || m.mode == "status-text" || m.mode == "status" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" || m.mode == "backend-url" {
 		return 1
 	}
 	return 2
@@ -2296,6 +2328,8 @@ func (m homeModel) formValue() string {
 		return m.deletePassword
 	case "nickname":
 		return m.nicknameValue
+	case "status-text", "status":
+		return m.statusTextValue
 	case "audio-device":
 		return m.audioDeviceValue
 	case "batch-window":
@@ -2325,6 +2359,8 @@ func (m *homeModel) setFormValue(value string) {
 		}
 	case "nickname":
 		m.nicknameValue = value
+	case "status-text", "status":
+		m.statusTextValue = value
 	case "audio-device":
 		m.audioDeviceValue = value
 	case "batch-window":
@@ -2352,6 +2388,11 @@ func (m *homeModel) insertFormRunes(inserted []rune) {
 	next = append(next, value[:index]...)
 	next = append(next, inserted...)
 	next = append(next, value[index:]...)
+	if m.mode == "status-text" || m.mode == "status" {
+		if len(next) > 60 {
+			next = next[:60]
+		}
+	}
 	m.setFormValue(string(next))
 	m.formTextCursor = clampInt(index+len(inserted), 0, len([]rune(m.formValue())))
 }
@@ -2384,7 +2425,7 @@ func (m homeModel) formHit(x int, y int) int {
 
 func isFormMode(mode string) bool {
 	switch mode {
-	case "create", "join", "delete", "nickname", "audio-device", "batch-window", "backend-url":
+	case "create", "join", "delete", "nickname", "status-text", "status", "audio-device", "batch-window", "backend-url":
 		return true
 	default:
 		return false
@@ -2418,6 +2459,12 @@ func (m homeModel) formView() string {
 		rows = []string{
 			formLine("Team code", m.deleteCode, "CLIK-XXXXXX", m.formCursor == 0, m.formTextCursor, false),
 			formLine("Delete password", m.deletePassword, "not set", m.formCursor == 1, m.formTextCursor, true),
+		}
+	} else if m.mode == "status-text" || m.mode == "status" {
+		title = "Working Context Note"
+		rows = []string{
+			formLine("Status note", m.statusTextValue, "e.g. Reviewing PR #104", true, m.formTextCursor, false),
+			styleDim.Render("Shared with room peers (60 characters max). ANSI and control sequences are stripped."),
 		}
 	} else if m.mode == "audio-device" {
 		title = "Audio Output"
@@ -2673,6 +2720,8 @@ type sessionModel struct {
 	hoverAction        string
 	pendingReaction    string
 	pendingReactionAt  time.Time
+	statusModalValue   string
+	statusModalCursor  int
 }
 
 func newSessionModel(controller *sessionController) sessionModel {
@@ -2803,6 +2852,62 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpOpen = true
 			return m, nil
 		}
+		if m.mode == "status-modal" {
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				m.mode = ""
+			case "enter":
+				note := sanitizeStatusText(m.statusModalValue)
+				m.controller.cfg.StatusText = note
+				_ = saveConfig(m.controller.cfg)
+				m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus, note)
+				m.mode = ""
+				if note != "" {
+					m.message = fmt.Sprintf("Context note set to %q.", note)
+				} else {
+					m.message = "Context note cleared."
+				}
+			case "left", "ctrl+b":
+				m.statusModalCursor = maxInt(0, m.statusModalCursor-1)
+			case "right", "ctrl+f":
+				m.statusModalCursor = minInt(len([]rune(m.statusModalValue)), m.statusModalCursor+1)
+			case "home", "ctrl+a":
+				m.statusModalCursor = 0
+			case "end", "ctrl+e":
+				m.statusModalCursor = len([]rune(m.statusModalValue))
+			case "backspace", "ctrl+h":
+				runes := []rune(m.statusModalValue)
+				if len(runes) > 0 && m.statusModalCursor > 0 {
+					idx := clampInt(m.statusModalCursor, 0, len(runes))
+					m.statusModalValue = string(append(runes[:idx-1], runes[idx:]...))
+					m.statusModalCursor = idx - 1
+				}
+			case "delete":
+				runes := []rune(m.statusModalValue)
+				idx := clampInt(m.statusModalCursor, 0, len(runes))
+				if idx < len(runes) {
+					m.statusModalValue = string(append(runes[:idx], runes[idx+1:]...))
+				}
+			case "ctrl+u":
+				m.statusModalValue = ""
+				m.statusModalCursor = 0
+			default:
+				if len(msg.Runes) > 0 {
+					runes := []rune(m.statusModalValue)
+					idx := clampInt(m.statusModalCursor, 0, len(runes))
+					inserted := sanitizeStatusText(string(msg.Runes))
+					if inserted != "" {
+						next := append(runes[:idx], append([]rune(inserted), runes[idx:]...)...)
+						if len(next) > 60 {
+							next = next[:60]
+						}
+						m.statusModalValue = string(next)
+						m.statusModalCursor = clampInt(idx+len([]rune(inserted)), 0, len(next))
+					}
+				}
+			}
+			return m, nil
+		}
 		if m.mode == "control" {
 			switch msg.String() {
 			case "up", "k":
@@ -2861,6 +2966,10 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.controller.toggle("spatial")
 		case "f":
 			m.controller.toggle("fade")
+		case "c":
+			m.mode = "status-modal"
+			m.statusModalValue = m.controller.cfg.StatusText
+			m.statusModalCursor = len([]rune(m.statusModalValue))
 		case "1":
 			m.sendLiveReaction("wave")
 		case "2":
@@ -2898,6 +3007,9 @@ func (m sessionModel) View() string {
 	if m.mode == "control" {
 		return m.sessionControlView()
 	}
+	if m.mode == "status-modal" {
+		return m.renderStatusModalOverlay(panelWidth(m.width), m.height)
+	}
 	width := maxInt(44, panelWidth(m.width))
 	bodyHeight := maxInt(12, m.height-7)
 	header := m.liveHeader(width)
@@ -2928,6 +3040,64 @@ func (m sessionModel) liveHeader(width int) string {
 	left = ansi.Truncate(left, maxInt(8, contentWidth-rightWidth-2), "…")
 	gap := maxInt(2, contentWidth-ansi.StringWidth(left)-rightWidth)
 	return styleTitle.Width(width).MaxWidth(width).Render(left + strings.Repeat(" ", gap) + right)
+}
+
+func (m sessionModel) renderStatusModalOverlay(width int, height int) string {
+	runes := []rune(m.statusModalValue)
+	cursor := clampInt(m.statusModalCursor, 0, len(runes))
+
+	var displayValue string
+	if cursor < len(runes) {
+		displayValue = string(runes[:cursor]) + "|" + string(runes[cursor:])
+	} else {
+		displayValue = string(runes) + "|"
+	}
+	if displayValue == "|" {
+		displayValue = "| (empty)"
+	}
+
+	boxWidth := minInt(66, maxInt(40, width-6))
+	counter := fmt.Sprintf("%d/60 characters", len(runes))
+
+	lines := []string{
+		styleAccent.Render("Working Context Note"),
+		styleDim.Render("Broadcasting to room peers:"),
+		"",
+		styleSelected.Render(" " + displayValue + " "),
+		"",
+		styleDim.Render(counter),
+		styleDim.Render("[Enter] Save & Broadcast   [Esc] Cancel   [Ctrl+U] Clear"),
+	}
+	if m.message != "" {
+		lines = append(lines, "", styleAccent.Render(m.message))
+	}
+
+	content := strings.Join(lines, "\n")
+	box := lipgloss.NewStyle().
+		Width(boxWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPanel).
+		Padding(1, 2).
+		Render(content)
+
+	return centerOverlay(box, width, height)
+}
+
+func centerOverlay(box string, width int, height int) string {
+	boxLines := strings.Split(box, "\n")
+	boxHeight := len(boxLines)
+	topPad := maxInt(1, (height-boxHeight)/2)
+
+	var sb strings.Builder
+	for i := 0; i < topPad; i++ {
+		sb.WriteString("\n")
+	}
+	for _, line := range boxLines {
+		lineWidth := ansi.StringWidth(line)
+		leftPad := maxInt(0, (width-lineWidth)/2)
+		sb.WriteString(strings.Repeat(" ", leftPad) + line + "\n")
+	}
+	return sb.String()
 }
 
 func (m sessionModel) renderSpatialDesk(width int, height int) string {
@@ -3009,6 +3179,11 @@ func (m sessionModel) renderSpatialDesk(width int, height int) string {
 		}
 		label := marker + " " + truncateRunes(name, 10)
 		put(x-len([]rune(label))/2, y, label)
+		statusNote := sanitizeStatusText(peer.StatusText)
+		if statusNote != "" {
+			noteLabel := truncateRunes(statusNote, 18)
+			put(x-len([]rune(noteLabel))/2, y+1, noteLabel)
+		}
 		if latestReaction != nil && latestReaction.PeerID == peer.PeerID {
 			burst := reactionGlyph(latestReaction.Reaction)
 			if (m.now.UnixMilli()/250)%2 == 0 {
@@ -3082,12 +3257,12 @@ func reactionGlyph(value string) string {
 func (m sessionModel) liveActivityView(width int, height int) string {
 	team := valuePlain(m.state.TeamName, teamNameForCode(m.controller.cfg, m.state.TeamCode))
 	code := valuePlain(m.state.TeamCode, m.controller.cfg.CurrentTeamCode)
-	navigation := m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop")
+	navigation := m.liveActionLine("status-modal", "Status Note") + "   " + m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop")
 	navigationLines := []string{navigation}
 	if ansi.StringWidth(navigation) > width {
 		navigationLines = []string{
-			m.liveActionLine("prefs", "Preferences") + "   " + m.liveActionLine("back", "Back"),
-			m.liveActionLine("stop", "Stop"),
+			m.liveActionLine("status-modal", "Status Note") + "   " + m.liveActionLine("prefs", "Preferences"),
+			m.liveActionLine("back", "Back") + "   " + m.liveActionLine("stop", "Stop"),
 		}
 	}
 	lines := []string{
@@ -3252,6 +3427,7 @@ func (m sessionModel) liveHitRegions() []liveHitRegion {
 		{"reaction-coffee", "3  ☕ Coffee"},
 		{"reaction-celebrate", "4  🎉 Celebrate"},
 		{"reaction-break", "5  🧘 Break"},
+		{"status-modal", "Status Note"},
 		{"prefs", "Preferences"},
 		{"back", "Back"},
 		{"stop", "Stop"},
@@ -3303,6 +3479,10 @@ func (m sessionModel) activateLiveAction(action string) (tea.Model, tea.Cmd) {
 		m.sendLiveReaction("celebrate")
 	case "reaction-break":
 		m.sendLiveReaction("break")
+	case "status-modal":
+		m.mode = "status-modal"
+		m.statusModalValue = m.controller.cfg.StatusText
+		m.statusModalCursor = len([]rune(m.statusModalValue))
 	case "prefs":
 		m.settingsReturnMode = ""
 		m.mode = "settings"
@@ -3357,7 +3537,7 @@ func (m *sessionModel) applyLiveSetting(delta int) {
 	}
 	if previousStatus != m.controller.cfg.PresenceStatus {
 		if !m.controller.attached {
-			m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus)
+			m.controller.sendProfile(sanitizeNickname(m.controller.cfg.Nickname), m.controller.cfg.PresenceStatus, sanitizeStatusText(m.controller.cfg.StatusText))
 		}
 	}
 	m.state = m.controller.viewState()

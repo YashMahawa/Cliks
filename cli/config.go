@@ -123,6 +123,7 @@ type CliksConfig struct {
 	WSURL           string             `json:"wsUrl"`
 	CurrentTeamCode string             `json:"currentTeamCode,omitempty"`
 	Nickname        string             `json:"nickname,omitempty"`
+	StatusText      string             `json:"statusText,omitempty"`
 	PresenceStatus  string             `json:"presenceStatus,omitempty"`
 	WelcomeSeen     bool               `json:"welcomeSeen,omitempty"`
 	LaunchSeen      bool               `json:"launchSeen,omitempty"`
@@ -451,6 +452,7 @@ func normalizeConfig(cfg *CliksConfig) {
 	cfg.Solo.KeyboardVolume = clamp(cfg.Solo.KeyboardVolume, 0.05, 1)
 	cfg.Solo.MouseVolume = clamp(cfg.Solo.MouseVolume, 0.05, 1)
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
+	cfg.StatusText = sanitizeStatusText(cfg.StatusText)
 	cfg.Listening.AudioDevice = strings.TrimSpace(cfg.Listening.AudioDevice)
 }
 
@@ -468,6 +470,22 @@ func sanitizeNickname(value string) string {
 	}
 	runes := []rune(value)
 	return string(runes[:10])
+}
+
+func sanitizeStatusText(value string) string {
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return -1
+		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	runes := []rune(value)
+	if len(runes) <= 60 {
+		return value
+	}
+	return string(runes[:60])
 }
 
 func toWSURL(apiURL string) string {

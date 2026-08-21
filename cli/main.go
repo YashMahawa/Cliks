@@ -725,6 +725,15 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 		return true, nil
 	case "nickname", "name":
 		cfg.Nickname = sanitizeNickname(value)
+	case "status.text", "status_text", "statusText", "context", "note":
+		cfg.StatusText = sanitizeStatusText(value)
+	case "status":
+		statusVal := strings.ToLower(strings.TrimSpace(value))
+		if statusVal == "available" || statusVal == "focus" || statusVal == "break" || statusVal == "dnd" {
+			cfg.PresenceStatus = statusVal
+		} else {
+			cfg.StatusText = sanitizeStatusText(value)
+		}
 	default:
 		return false, fmt.Errorf("unknown setting: %s", key)
 	}
