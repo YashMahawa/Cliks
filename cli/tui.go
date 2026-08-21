@@ -2776,12 +2776,11 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseMotion:
 			m.hoverAction = m.liveHit(msg.X, msg.Y)
 			m.codeHover = m.hoverAction == "copy-code"
-		case tea.MouseWheelUp:
-			m.controller.adjustVolume(-0.05)
-			m.hoverAction = ""
-		case tea.MouseWheelDown:
-			m.controller.adjustVolume(0.05)
-			m.hoverAction = ""
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			if delta, ok := StandardWheelAdjustDelta(msg, 0.05); ok {
+				m.controller.adjustVolume(delta)
+				m.hoverAction = ""
+			}
 		case tea.MouseLeft:
 			if action := m.liveHit(msg.X, msg.Y); action != "" {
 				m.hoverAction = action

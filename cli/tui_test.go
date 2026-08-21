@@ -732,3 +732,28 @@ func TestNewUsersGetDynamicCircleByDefault(t *testing.T) {
 		t.Fatal("DynamicPlacement = false, want true for new configurations")
 	}
 }
+
+func TestLiveSessionMouseWheelAdjustsVolume(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-LOCAL"
+	cfg.Listening.Volume = 0.50
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+
+	// Wheel Up increases volume
+	beforeVolume := model.controller.cfg.Listening.Volume
+	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseWheelUp})
+	got := updated.(sessionModel)
+	if got.controller.cfg.Listening.Volume <= beforeVolume {
+		t.Fatalf("MouseWheelUp did not increase volume: %v -> %v", beforeVolume, got.controller.cfg.Listening.Volume)
+	}
+
+	// Wheel Down decreases volume
+	beforeVolume = got.controller.cfg.Listening.Volume
+	updated, _ = got.Update(tea.MouseMsg{Type: tea.MouseWheelDown})
+	got = updated.(sessionModel)
+	if got.controller.cfg.Listening.Volume >= beforeVolume {
+		t.Fatalf("MouseWheelDown did not decrease volume: %v -> %v", beforeVolume, got.controller.cfg.Listening.Volume)
+	}
+}

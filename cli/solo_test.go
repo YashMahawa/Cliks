@@ -129,17 +129,94 @@ func TestSoloHoveredSliderUsesWheelAndArrowKeys(t *testing.T) {
 	}
 	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: region.x + 2, Y: region.y})
 	model = updated.(soloModel)
+
+	// Wheel Up increases value
 	before := model.cfg.Listening.AmbientVolume
-	updated, _ = model.Update(tea.MouseMsg{Type: tea.MouseWheelDown, X: region.x + 2, Y: region.y})
+	updated, _ = model.Update(tea.MouseMsg{Type: tea.MouseWheelUp, X: region.x + 2, Y: region.y})
 	model = updated.(soloModel)
 	if model.cfg.Listening.AmbientVolume <= before {
-		t.Fatalf("hovered room slider did not increase: %v -> %v", before, model.cfg.Listening.AmbientVolume)
+		t.Fatalf("wheel up did not increase hovered room slider: %v -> %v", before, model.cfg.Listening.AmbientVolume)
 	}
+
+	// Wheel Down decreases value
+	before = model.cfg.Listening.AmbientVolume
+	updated, _ = model.Update(tea.MouseMsg{Type: tea.MouseWheelDown, X: region.x + 2, Y: region.y})
+	model = updated.(soloModel)
+	if model.cfg.Listening.AmbientVolume >= before {
+		t.Fatalf("wheel down did not decrease hovered room slider: %v -> %v", before, model.cfg.Listening.AmbientVolume)
+	}
+
+	// Left arrow key decreases value
 	before = model.cfg.Listening.AmbientVolume
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	model = updated.(soloModel)
 	if model.cfg.Listening.AmbientVolume >= before {
 		t.Fatalf("left arrow did not decrease hovered room slider: %v -> %v", before, model.cfg.Listening.AmbientVolume)
+	}
+
+	// Right arrow key increases value
+	before = model.cfg.Listening.AmbientVolume
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(soloModel)
+	if model.cfg.Listening.AmbientVolume <= before {
+		t.Fatalf("right arrow did not increase hovered room slider: %v -> %v", before, model.cfg.Listening.AmbientVolume)
+	}
+}
+
+func TestSoloArrowKeysMoveFocusAndModifyValue(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := newSoloModel(defaultConfig())
+	defer model.audio.Close()
+
+	if model.sliderCursor != 0 {
+		t.Fatalf("initial sliderCursor = %d, want 0", model.sliderCursor)
+	}
+
+	// Press Down arrow to move focus to index 1 (keyboard slider)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(soloModel)
+	if model.sliderCursor != 1 {
+		t.Fatalf("after Down arrow, sliderCursor = %d, want 1", model.sliderCursor)
+	}
+
+	// Press Down arrow again to move focus to index 2 (mouse slider)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(soloModel)
+	if model.sliderCursor != 2 {
+		t.Fatalf("after Down arrow, sliderCursor = %d, want 2", model.sliderCursor)
+	}
+
+	// Press Up arrow to move focus back to index 1 (keyboard slider)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(soloModel)
+	if model.sliderCursor != 1 {
+		t.Fatalf("after Up arrow, sliderCursor = %d, want 1", model.sliderCursor)
+	}
+
+	// Down/Up arrow keys should NOT modify slider values
+	beforeVolume := model.cfg.Solo.KeyboardVolume
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(soloModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(soloModel)
+	if model.cfg.Solo.KeyboardVolume != beforeVolume {
+		t.Fatalf("Up/Down arrow key unexpectedly changed slider value: %v -> %v", beforeVolume, model.cfg.Solo.KeyboardVolume)
+	}
+
+	// Right arrow modifies focused slider value (increases)
+	beforeVolume = model.cfg.Solo.KeyboardVolume
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(soloModel)
+	if model.cfg.Solo.KeyboardVolume <= beforeVolume {
+		t.Fatalf("Right arrow did not increase focused slider value: %v -> %v", beforeVolume, model.cfg.Solo.KeyboardVolume)
+	}
+
+	// Left arrow modifies focused slider value (decreases)
+	beforeVolume = model.cfg.Solo.KeyboardVolume
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(soloModel)
+	if model.cfg.Solo.KeyboardVolume >= beforeVolume {
+		t.Fatalf("Left arrow did not decrease focused slider value: %v -> %v", beforeVolume, model.cfg.Solo.KeyboardVolume)
 	}
 }
 
