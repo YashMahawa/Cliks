@@ -312,6 +312,12 @@ func (s *sessionController) startCaptureAsync() {
 		return
 	}
 	capture := newActivityCapture()
+	capture.OnStateChange = func(cs CaptureState) {
+		s.set(func(state *SessionViewState) {
+			state.CaptureMode = cs.Mode
+			state.PermissionHint = cs.PermissionHint
+		})
+	}
 	captureState = capture.start(s.ctx, s.cfg.Sharing, s.opts.CaptureMode)
 	// If global capture failed, fall back to terminal mode when interactive so users are not stuck silent.
 	if captureState.Mode == "off" && term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd())) && s.opts.CaptureMode != "evdev" {

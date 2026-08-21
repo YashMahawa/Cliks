@@ -182,3 +182,29 @@ func evdevEventChunk(eventType uint16, code uint16, value int32) []byte {
 	chunk[23] = byte(value >> 24)
 	return chunk
 }
+
+func TestActivityCaptureStateCallback(t *testing.T) {
+	capture := newActivityCapture()
+	var received []CaptureState
+	capture.OnStateChange = func(cs CaptureState) {
+		received = append(received, cs)
+	}
+
+	wantState1 := CaptureState{Mode: "windows-native", PermissionHint: ""}
+	wantState2 := CaptureState{Mode: "uipi-paused", PermissionHint: "Capture paused"}
+	wantState3 := CaptureState{Mode: "recovering", PermissionHint: "Restoring dropped hooks"}
+
+	capture.updateState(wantState1)
+	capture.updateState(wantState2)
+	capture.updateState(wantState3)
+
+	if len(received) != 3 {
+		t.Fatalf("received %d state callbacks, want 3", len(received))
+	}
+	if received[0].Mode != wantState1.Mode || received[1].Mode != wantState2.Mode || received[2].Mode != wantState3.Mode {
+		t.Fatalf("received states = %#v, want [%v, %v, %v]", received, wantState1, wantState2, wantState3)
+	}
+	if capture.CurrentState().Mode != wantState3.Mode {
+		t.Fatalf("CurrentState() = %q, want %q", capture.CurrentState().Mode, wantState3.Mode)
+	}
+}
