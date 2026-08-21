@@ -86,6 +86,7 @@ type AudioEngine struct {
 	queue           chan playbackJob
 	ambient         *ambientController
 	warned          bool
+	fallbackWarned  bool
 	mu              sync.Mutex
 	recent          []time.Time
 	fatigueGain     float64
@@ -114,6 +115,9 @@ func newAudioEngineWithContext(parent context.Context, listening ListeningConfig
 	}
 	engine.ambient = newAmbientController(ctx)
 	engine.ambient.update(listening)
+	engine.mu.Lock()
+	engine.validateAndFallbackEndpointLocked()
+	engine.mu.Unlock()
 	for i := 0; i < 4; i++ {
 		engine.workers.Add(1)
 		go func() {
@@ -139,15 +143,21 @@ func (a *AudioEngine) Close() {
 
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.mu.Lock()
-	if strings.TrimSpace(listening.AudioDevice) != strings.TrimSpace(a.listening.AudioDevice) {
-		a.player = detectAudioPlayerForDevice(listening.AudioDevice)
-		a.warned = false
-	}
+	deviceChanged := strings.TrimSpace(listening.AudioDevice) != strings.TrimSpace(a.listening.AudioDevice)
 	a.listening = listening
+	if deviceChanged {
+		if strings.TrimSpace(listening.AudioDevice) != "" && !strings.EqualFold(strings.TrimSpace(listening.AudioDevice), "default") {
+			a.player = detectAudioPlayerForDevice(listening.AudioDevice)
+			a.fallbackWarned = false
+			a.validateAndFallbackEndpointLocked()
+		} else {
+			a.player = detectAudioPlayerForDevice("")
+		}
+	}
 	a.recomputePlacementsLocked(false)
 	a.mu.Unlock()
 	if a.ambient != nil {
-		a.ambient.update(listening)
+		a.ambient.update(a.listening)
 	}
 }
 
@@ -437,6 +447,27 @@ func queuePressureDropProbability(queueLength int, queueCapacity int) float64 {
 	return clamp((fill-0.5)/0.4*0.75, 0, 0.85)
 }
 
+func (a *AudioEngine) validateAndFallbackEndpointLocked() {
+	device := strings.TrimSpace(a.listening.AudioDevice)
+	if device == "" || strings.EqualFold(device, "default") {
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(a.ctx, 400*time.Millisecond)
+	defer cancel()
+	if err := validateAudioEndpoint(probeCtx, a.player, device); err != nil {
+		a.performFallbackLocked(device)
+	}
+}
+
+func (a *AudioEngine) performFallbackLocked(failedDevice string) {
+	a.listening.AudioDevice = ""
+	a.player = detectAudioPlayerForDevice("")
+	if !a.fallbackWarned {
+		a.fallbackWarned = true
+		fmt.Fprintf(os.Stderr, "Warning: Audio output endpoint %q is unreachable or invalid. Falling back to default system audio endpoint.\n", failedDevice)
+	}
+}
+
 func (a *AudioEngine) playWorker() {
 	for {
 		var job playbackJob
@@ -456,7 +487,23 @@ func (a *AudioEngine) playWorker() {
 		playbackCanceled := ctx.Err() != nil
 		cancel()
 		if err != nil && !playbackCanceled && a.ctx.Err() == nil {
-			a.warnUnavailableOnce()
+			if job.Device != "" && !strings.EqualFold(job.Device, "default") {
+				a.mu.Lock()
+				failedDevice := job.Device
+				a.performFallbackLocked(failedDevice)
+				defaultPlayer := a.player
+				a.mu.Unlock()
+
+				fallbackJob := job
+				fallbackJob.Device = ""
+				if defaultPlayer != nil {
+					retryCtx, retryCancel := context.WithTimeout(a.ctx, audioPlaybackTimeout)
+					_ = runAudioCommand(retryCtx, defaultPlayer, fallbackJob)
+					retryCancel()
+				}
+			} else {
+				a.warnUnavailableOnce()
+			}
 		}
 	}
 }
@@ -565,6 +612,89 @@ func (a *AudioEngine) warnUnavailableOnce() {
 	fmt.Fprintln(os.Stderr, "\nAudio disabled: "+audioInstallMessage())
 }
 
+func probeWavFile() (string, func(), error) {
+	root, err := soundsRoot()
+	if err == nil {
+		files, err := filepath.Glob(filepath.Join(root, "*", "*.wav"))
+		if err == nil && len(files) > 0 {
+			return files[0], nil, nil
+		}
+	}
+	header := []byte{
+		'R', 'I', 'F', 'F',
+		36, 0, 0, 0,
+		'W', 'A', 'V', 'E',
+		'f', 'm', 't', ' ',
+		16, 0, 0, 0,
+		1, 0,
+		1, 0,
+		0x44, 0xac, 0, 0,
+		0x88, 0x58, 0x01, 0,
+		2, 0,
+		16, 0,
+		'd', 'a', 't', 'a',
+		0, 0, 0, 0,
+	}
+	tmp, err := os.CreateTemp("", "cliks-probe-*.wav")
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(header); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", nil, err
+	}
+	_ = tmp.Close()
+	return tmpPath, func() { _ = os.Remove(tmpPath) }, nil
+}
+
+func validateAudioEndpoint(ctx context.Context, player *audioPlayer, device string) error {
+	device = strings.TrimSpace(device)
+	if device == "" || strings.EqualFold(device, "default") {
+		return nil
+	}
+	if player == nil {
+		return fmt.Errorf("no audio player available for device %q", device)
+	}
+	if !player.DeviceRouting {
+		return fmt.Errorf("%s cannot select an output device", player.Command)
+	}
+
+	probeTimeout := 300 * time.Millisecond
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < probeTimeout {
+			probeTimeout = remaining
+		}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	samplePath, cleanup, err := probeWavFile()
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	job := playbackJob{
+		File:   samplePath,
+		Gain:   0.0,
+		Pan:    0,
+		Device: device,
+	}
+
+	err = runAudioCommand(probeCtx, player, job)
+	if probeCtx.Err() != nil {
+		return nil
+	}
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("audio device %q is unreachable or invalid: %w", device, err)
+}
+
 func detectAudioPlayer() *audioPlayer {
 	// macOS and Windows ship a built-in stereo PCM path, so ordinary installs
 	// do not need mpv, PowerShell audio, or another player.
@@ -639,7 +769,9 @@ func windowsMediaPlayer() *audioPlayer {
 	}
 }
 
-func detectAudioPlayerForDevice(device string) *audioPlayer {
+var detectAudioPlayerForDevice = defaultDetectAudioPlayerForDevice
+
+func defaultDetectAudioPlayerForDevice(device string) *audioPlayer {
 	if strings.TrimSpace(device) != "" {
 		if _, err := exec.LookPath("mpv"); err == nil {
 			return mpvAudioPlayer()

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -30,3 +32,52 @@ func TestPassiveDoctorWarningSkipsMissingTeamOnly(t *testing.T) {
 		t.Fatalf("passive warning = %q", got)
 	}
 }
+
+func TestDoctorReportUnreachableAudioEndpoint(t *testing.T) {
+	originalRunner := audioCommandRunner
+	originalDetector := detectAudioPlayerForDevice
+	defer func() {
+		audioCommandRunner = originalRunner
+		detectAudioPlayerForDevice = originalDetector
+	}()
+
+	detectAudioPlayerForDevice = func(device string) *audioPlayer {
+		return &audioPlayer{
+			Command:       "mpv",
+			DeviceRouting: true,
+		}
+	}
+
+	audioCommandRunner = func(_ context.Context, _ *audioPlayer, job playbackJob) error {
+		if job.Device == "missing_speaker" {
+			return errors.New("device not found")
+		}
+		return nil
+	}
+
+	cfg := CliksConfig{}
+	cfg.Listening.AudioDevice = "missing_speaker"
+
+	report := buildDoctorReportOptions(cfg, false)
+	foundUnreachableCheck := false
+	foundUnreachableIssue := false
+
+	for _, check := range report.checks {
+		if check.label == "Audio output" && strings.Contains(check.status, "unreachable") {
+			foundUnreachableCheck = true
+		}
+	}
+	for _, issue := range report.issues {
+		if strings.Contains(issue.title, "unreachable") {
+			foundUnreachableIssue = true
+		}
+	}
+
+	if !foundUnreachableCheck {
+		t.Fatalf("expected 'Audio output' check to report unreachable, got checks: %#v", report.checks)
+	}
+	if !foundUnreachableIssue {
+		t.Fatalf("expected issue for unreachable endpoint, got issues: %#v", report.issues)
+	}
+}
+

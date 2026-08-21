@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -82,3 +84,41 @@ func TestSetEndpointQueuesRunningSessionReconnect(t *testing.T) {
 		t.Fatalf("commands = %+v, want one reconnect", commands)
 	}
 }
+
+func TestSetAudioDeviceValidation(t *testing.T) {
+	isolateSetConfig(t)
+	originalRunner := audioCommandRunner
+	originalDetector := detectAudioPlayerForDevice
+	defer func() {
+		audioCommandRunner = originalRunner
+		detectAudioPlayerForDevice = originalDetector
+	}()
+
+	detectAudioPlayerForDevice = func(device string) *audioPlayer {
+		return &audioPlayer{Command: "mpv", DeviceRouting: true}
+	}
+
+	audioCommandRunner = func(_ context.Context, _ *audioPlayer, job playbackJob) error {
+		if job.Device == "unreachable_sink" {
+			return errors.New("sink unreachable")
+		}
+		return nil
+	}
+
+	if err := cmdSet([]string{"audio.device", "default"}); err != nil {
+		t.Fatalf("setting audio.device default failed: %v", err)
+	}
+
+	if err := cmdSet([]string{"audio.device", "unreachable_sink"}); err == nil {
+		t.Fatal("expected error setting unreachable_sink, got nil")
+	}
+
+	if err := cmdSet([]string{"audio.device", "valid_sink"}); err != nil {
+		t.Fatalf("setting valid_sink failed: %v", err)
+	}
+
+	if got := loadConfig().Listening.AudioDevice; got != "valid_sink" {
+		t.Fatalf("AudioDevice = %q, want valid_sink", got)
+	}
+}
+

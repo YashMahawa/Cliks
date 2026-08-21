@@ -2200,6 +2200,14 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		if strings.EqualFold(device, "default") {
 			device = ""
 		}
+		if device != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			if err := validateAudioEndpoint(ctx, detectAudioPlayerForDevice(device), device); err != nil {
+				m.message = fmt.Sprintf("Audio device %q is unreachable or invalid.", device)
+				return m, nil
+			}
+		}
 		m.cfg.Listening.AudioDevice = device
 		if err := saveConfig(m.cfg); err != nil {
 			m.message = err.Error()

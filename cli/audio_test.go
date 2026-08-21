@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"math"
 	"path/filepath"
 	"reflect"
@@ -284,3 +285,110 @@ func TestBundledReleaseSoundsExtractWithoutSourceTree(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateAudioEndpoint(t *testing.T) {
+	originalRunner := audioCommandRunner
+	defer func() { audioCommandRunner = originalRunner }()
+
+	player := &audioPlayer{
+		Command:       "mpv",
+		DeviceRouting: true,
+	}
+
+	// Default/empty device is always valid
+	if err := validateAudioEndpoint(context.Background(), player, "default"); err != nil {
+		t.Fatalf("default device validation failed: %v", err)
+	}
+	if err := validateAudioEndpoint(context.Background(), player, ""); err != nil {
+		t.Fatalf("empty device validation failed: %v", err)
+	}
+
+	// Mock audioCommandRunner to fail for "invalid_sink"
+	audioCommandRunner = func(ctx context.Context, _ *audioPlayer, job playbackJob) error {
+		if job.Device == "invalid_sink" {
+			return errors.New("failed to open device")
+		}
+		return nil
+	}
+
+	if err := validateAudioEndpoint(context.Background(), player, "invalid_sink"); err == nil {
+		t.Fatal("expected error for invalid_sink, got nil")
+	}
+
+	if err := validateAudioEndpoint(context.Background(), player, "valid_sink"); err != nil {
+		t.Fatalf("expected valid_sink to pass, got: %v", err)
+	}
+}
+
+func TestAudioEngineStartupValidationAndFallback(t *testing.T) {
+	originalRunner := audioCommandRunner
+	defer func() { audioCommandRunner = originalRunner }()
+
+	audioCommandRunner = func(ctx context.Context, _ *audioPlayer, job playbackJob) error {
+		if job.Device == "broken_device" {
+			return errors.New("device unreachable")
+		}
+		return nil
+	}
+
+	start := time.Now()
+	engine := newAudioEngine(ListeningConfig{AudioDevice: "broken_device"})
+	duration := time.Since(start)
+	defer engine.Close()
+
+	if duration > 500*time.Millisecond {
+		t.Fatalf("startup validation took %v, expected < 500ms", duration)
+	}
+
+	engine.mu.Lock()
+	dev := engine.listening.AudioDevice
+	engine.mu.Unlock()
+
+	if dev != "" {
+		t.Fatalf("expected AudioDevice to fall back to empty/default, got %q", dev)
+	}
+}
+
+func TestAudioEnginePlaybackFailureFallback(t *testing.T) {
+	originalRunner := audioCommandRunner
+	defer func() { audioCommandRunner = originalRunner }()
+
+	// First probe during startup succeeds for "usb-headset", but playback fails
+	var mu sync.Mutex
+	failPlayback := false
+
+	audioCommandRunner = func(ctx context.Context, _ *audioPlayer, job playbackJob) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if job.Device == "usb-headset" && failPlayback {
+			return errors.New("headset disconnected")
+		}
+		return nil
+	}
+
+	engine := newAudioEngine(ListeningConfig{AudioDevice: "usb-headset"})
+	defer engine.Close()
+
+	mu.Lock()
+	failPlayback = true
+	mu.Unlock()
+
+	// Enqueue job with custom device
+	engine.queue <- playbackJob{File: "sample.wav", Device: "usb-headset"}
+
+	// Wait for worker to process fallback
+	time.Sleep(100 * time.Millisecond)
+
+	engine.mu.Lock()
+	dev := engine.listening.AudioDevice
+	warned := engine.fallbackWarned
+	engine.mu.Unlock()
+
+	if dev != "" {
+		t.Fatalf("expected fallback to default endpoint after disconnect, got %q", dev)
+	}
+	if !warned {
+		t.Fatal("expected fallbackWarned to be set after device failure")
+	}
+}
+

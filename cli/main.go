@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -702,6 +704,11 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 			}
 			if hint != "" {
 				return false, errors.New(hint)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			if err := validateAudioEndpoint(ctx, detectAudioPlayerForDevice(device), device); err != nil {
+				return false, fmt.Errorf("audio device %q is unreachable or invalid; run cliks setup or use audio.device default", device)
 			}
 		}
 		cfg.Listening.AudioDevice = device
