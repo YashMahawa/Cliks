@@ -9,3 +9,7 @@ func platformCaptureSetup() []setupStep {
 		detail: "Global capture is best supported on Linux, macOS, and Windows. Try: cliks start --terminal --self",
 	}}
 }
+
+func userInGroup(username, groupName string) (bool, error) {
+	return false, nil
+}
