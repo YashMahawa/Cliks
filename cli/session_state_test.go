@@ -97,3 +97,28 @@ func TestServiceCommandHelpMentionsAliases(t *testing.T) {
 		t.Fatalf("cmdService help = %v", err)
 	}
 }
+
+func TestHandleTeamUnavailablePreservesConfiguration(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CurrentTeamCode = "CLIK-KEEP12"
+	cfg.Teams = []TeamConfig{{Code: "CLIK-KEEP12", Name: "Preserved Room"}}
+
+	controller := &sessionController{
+		cfg: cfg,
+	}
+
+	controller.handleTeamUnavailable("CLIK-KEEP12", "This team is unavailable.")
+
+	if controller.cfg.CurrentTeamCode != "CLIK-KEEP12" {
+		t.Fatalf("CurrentTeamCode = %q, want CLIK-KEEP12", controller.cfg.CurrentTeamCode)
+	}
+	if len(controller.cfg.Teams) != 1 || controller.cfg.Teams[0].Code != "CLIK-KEEP12" {
+		t.Fatalf("Teams = %+v, want preserved team", controller.cfg.Teams)
+	}
+	if controller.state.ConnectionStatus != "stopped: team unavailable" {
+		t.Fatalf("ConnectionStatus = %q, want stopped: team unavailable", controller.state.ConnectionStatus)
+	}
+	if controller.state.Notice != "This team is unavailable." {
+		t.Fatalf("Notice = %q, want 'This team is unavailable.'", controller.state.Notice)
+	}
+}

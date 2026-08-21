@@ -177,7 +177,7 @@ Cliks allows only one active local connection per config/device. Joining a diffe
 
 While `cliks start` is open, Cliks uses the terminal as a full spatial desk: you sit in the center, teammates occupy adaptive rings, active typers light up, and large rooms collapse overflow into calm semantic dots. Wave, nice, coffee, celebrate, and break signals are fixed low-cost room-wide events—no teammate selection required. Each signal animates at its sender's place and, when Signal sound is on, plays a brief distinct rhythm through the same locally panned audio queue. Optional OS-native banners remain visual-only, avoiding a second system chime. Local mute suppresses remote signal animation, sound, and notifications; focus/DND suppress banners and signal cues. The action rail makes code copy, notifications, signal sound, mute, spatial audio, all five signals, Preferences, Back, and Stop directly clickable. Keyboard equivalents remain visible in the footer and under `?`.
 
-Rooms automatically expire after 48 hours without a live connection. A successful connection refreshes the 48-hour clock; a room that remains connected is kept alive.
+Rooms automatically expire after 120 hours (5 days) without a live connection. A successful connection refreshes the 120-hour clock; a room that remains connected is kept alive.
 
 The hosted Cliks relay is a shared free service: rooms are capped at 20 people and client batching is locked to 500 ms. To use a private backend, open `More → Server` and paste its HTTPS URL, or run `cliks set api.url https://your-cliks-server`. Self-hosted clients may then choose a 100–2000 ms batch window. Self-hosted servers can set `CLIKS_MAX_PEERS_PER_ROOM` from 2–200; larger rooms consume substantially more fan-out bandwidth and CPU.
 
