@@ -146,19 +146,25 @@ func stopBackground() (string, error) {
 }
 
 func backgroundStatusText() string {
-	if active, ok := activeSession(); ok {
-		return fmt.Sprintf("Cliks: running for %s (%s, pid %d)\nConnection: %s\nActive users: %d\nCaptured: %d\nSent: %d\nLog: %s\n",
-			valuePlain(active.TeamCode, "current team"),
-			modeLabel(active.Mode),
-			active.PID,
-			valuePlain(active.ConnectionStatus, "starting"),
-			active.ActiveCount,
-			active.LocalCapturedEvents,
-			active.LocalSentEvents,
+	status := getPassiveRuntimeStatus()
+	autostartStr := "disabled"
+	if status.AutostartEnabled {
+		autostartStr = "enabled"
+	}
+	if status.IsRunning {
+		return fmt.Sprintf("Cliks: running for %s (%s, pid %d)\nAutostart: %s\nConnection: %s\nActive users: %d\nCaptured: %d\nSent: %d\nLog: %s\n",
+			valuePlain(status.TeamCode, "current team"),
+			status.ExecutionMode,
+			status.PID,
+			autostartStr,
+			valuePlain(status.ConnectionStatus, "starting"),
+			status.ActiveCount,
+			status.CapturedEvents,
+			status.SentEvents,
 			filepath.Join(stateDir(), "background.log"),
 		)
 	}
-	return "Cliks: stopped\n"
+	return fmt.Sprintf("Cliks: stopped\nAutostart: %s\n", autostartStr)
 }
 
 func stateDir() string {

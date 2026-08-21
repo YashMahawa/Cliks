@@ -271,7 +271,7 @@ func runModeFromEnv() string {
 	}
 }
 
-func activeSession() (ActiveSessionState, bool) {
+func activeSessionPassive() (ActiveSessionState, bool) {
 	if lock, ok := readSessionFile(sessionLockPath()); ok {
 		if processLooksAlive(lock.PID) {
 			state, _ := readSessionFile(sessionStatePath())
@@ -291,7 +291,7 @@ func activeSession() (ActiveSessionState, bool) {
 			state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(lock.PID))
 			return state, true
 		}
-		cleanupStaleSession()
+		// Passive status check: do NOT perform automatic file cleanup.
 	}
 	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
@@ -318,6 +318,17 @@ func activeSession() (ActiveSessionState, bool) {
 			state.DuplicateLocalPIDs = siblingPIDs(siblings[1:])
 		}
 		return state, true
+	}
+	return ActiveSessionState{}, false
+}
+
+func activeSession() (ActiveSessionState, bool) {
+	state, ok := activeSessionPassive()
+	if ok {
+		return state, true
+	}
+	if lock, readOK := readSessionFile(sessionLockPath()); readOK && !processLooksAlive(lock.PID) {
+		cleanupStaleSession()
 	}
 	return ActiveSessionState{}, false
 }
@@ -393,6 +404,59 @@ func readSessionFile(path string) (ActiveSessionState, bool) {
 	return state, true
 }
 
+type PassiveRuntimeStatus struct {
+	IsRunning        bool   `json:"isRunning"`
+	PID              int    `json:"pid"`
+	Mode             string `json:"mode"`
+	ExecutionMode    string `json:"executionMode"`
+	TeamCode         string `json:"teamCode"`
+	TeamName         string `json:"teamName"`
+	ConnectionStatus string `json:"connectionStatus"`
+	ConnectionState  string `json:"connectionState"`
+	ActiveCount      int    `json:"activeCount"`
+	CapturedEvents   int    `json:"capturedEvents"`
+	SentEvents       int    `json:"sentEvents"`
+	AutostartEnabled bool   `json:"autostartEnabled"`
+}
+
+func getPassiveRuntimeStatus() PassiveRuntimeStatus {
+	cfg := loadConfig()
+	autostart := autostartEnabled()
+	active, ok := activeSessionPassive()
+	if !ok {
+		return PassiveRuntimeStatus{
+			IsRunning:        false,
+			PID:              0,
+			Mode:             "none",
+			ExecutionMode:    "none",
+			TeamCode:         cfg.CurrentTeamCode,
+			TeamName:         teamNameForCode(cfg, cfg.CurrentTeamCode),
+			ConnectionStatus: "stopped",
+			ConnectionState:  "stopped",
+			ActiveCount:      0,
+			CapturedEvents:   0,
+			SentEvents:       0,
+			AutostartEnabled: autostart,
+		}
+	}
+	execMode := modeLabel(active.Mode)
+	connStatus := valuePlain(active.ConnectionStatus, "running")
+	return PassiveRuntimeStatus{
+		IsRunning:        true,
+		PID:              active.PID,
+		Mode:             execMode,
+		ExecutionMode:    execMode,
+		TeamCode:         valuePlain(active.TeamCode, cfg.CurrentTeamCode),
+		TeamName:         valuePlain(active.TeamName, teamNameForCode(cfg, active.TeamCode)),
+		ConnectionStatus: connStatus,
+		ConnectionState:  connStatus,
+		ActiveCount:      active.ActiveCount,
+		CapturedEvents:   active.LocalCapturedEvents,
+		SentEvents:       active.LocalSentEvents,
+		AutostartEnabled: autostart,
+	}
+}
+
 func modeLabel(mode string) string {
 	switch mode {
 	case runModeBackground:
@@ -400,7 +464,7 @@ func modeLabel(mode string) string {
 	case runModeBoot:
 		return "launch at login"
 	case runModeForeground:
-		return "live terminal"
+		return "interactive foreground"
 	case runModeExisting:
 		return "existing session"
 	default:
