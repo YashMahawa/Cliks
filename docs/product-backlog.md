@@ -35,7 +35,7 @@ meeting-software clutter.
 - [x] Background session ownership, attachable live view, no duplicate local
   WebSocket peers, saved team switching, and Linux/macOS/Windows autostart.
 - [x] Public-backend 500 ms batching lock, easy self-hosted server override,
-  configurable room cap for self-hosters, 48-hour inactive room expiry, and
+  configurable room cap for self-hosters, 120-hour inactive room expiry, and
   release archives for Linux, macOS, and Windows.
 
 ## Current quality pass

@@ -121,7 +121,7 @@ func (s *apiServer) expireInactiveTeams() {
 		return
 	}
 	for _, code := range codes {
-		s.hub.closeRoom(code, "This team expired after 48 hours without a connection.")
+		s.hub.closeRoom(code, "This team expired after 120 hours without a connection.")
 	}
 }
 
