@@ -3,7 +3,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"io"
 	"log"
 	"net"
@@ -23,6 +26,65 @@ const (
 	btnLeft  = 0x110
 	btnRight = 0x111
 )
+
+type tokenManager struct {
+	sync.RWMutex
+	token     string
+	tokenFile string
+	targetUID int
+	peers     *clients
+}
+
+func newTokenManager(tokenFile string, targetUID int, peers *clients) (*tokenManager, error) {
+	tm := &tokenManager{
+		tokenFile: tokenFile,
+		targetUID: targetUID,
+		peers:     peers,
+	}
+	if err := tm.Regenerate(); err != nil {
+		return nil, err
+	}
+	return tm, nil
+}
+
+func (tm *tokenManager) Regenerate() error {
+	tm.Lock()
+	defer tm.Unlock()
+
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	newToken := hex.EncodeToString(b)
+	tm.token = newToken
+
+	dir := filepath.Dir(tm.tokenFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(tm.tokenFile, []byte(newToken+"\n"), 0o600); err != nil {
+		return err
+	}
+
+	_ = os.Chown(tm.tokenFile, tm.targetUID, -1)
+	_ = os.Chmod(tm.tokenFile, 0o600)
+
+	if tm.peers != nil {
+		tm.peers.closeAll()
+	}
+
+	return nil
+}
+
+func (tm *tokenManager) ValidToken(presented string) bool {
+	tm.RLock()
+	defer tm.RUnlock()
+	if tm.token == "" || presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(tm.token)) == 1
+}
 
 type clients struct {
 	sync.Mutex
@@ -54,6 +116,15 @@ func (c *clients) remove(client *verifiedClient) {
 		client.close()
 	}
 	c.Unlock()
+}
+
+func (c *clients) closeAll() {
+	c.Lock()
+	defer c.Unlock()
+	for client := range c.items {
+		delete(c.items, client)
+		client.close()
+	}
 }
 
 func (c *clients) add(client *verifiedClient) {
@@ -97,11 +168,32 @@ func (c *clients) send(token string) {
 	}
 }
 
+func readTokenLine(conn net.Conn) (string, error) {
+	var buf []byte
+	oneByte := make([]byte, 1)
+	for len(buf) < 256 {
+		n, err := conn.Read(oneByte)
+		if err != nil || n == 0 {
+			return "", err
+		}
+		if oneByte[0] == '\n' {
+			break
+		}
+		buf = append(buf, oneByte[0])
+	}
+	return strings.TrimSpace(string(buf)), nil
+}
+
 func main() {
 	socket := "/run/cliks/capture.sock"
 	if value := os.Getenv("CLIKS_CAPTURE_SOCKET"); value != "" {
 		socket = value
 	}
+	tokenFile := filepath.Join(filepath.Dir(socket), "token")
+	if value := os.Getenv("CLIKS_CAPTURE_TOKEN_FILE"); value != "" {
+		tokenFile = value
+	}
+
 	if err := os.MkdirAll(filepath.Dir(socket), 0o755); err != nil {
 		log.Fatal(err)
 	}
@@ -111,6 +203,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+
 	targetUID, err := configuredUID()
 	if err != nil {
 		log.Fatal(err)
@@ -121,7 +214,22 @@ func main() {
 	if err := os.Chmod(socket, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	peers := &clients{items: map[*verifiedClient]struct{}{}, seatGate: &activeSeatGate{targetUID: targetUID}}
+
+	peers := &clients{items: map[*verifiedClient]struct{}{}}
+	tokenMgr, err := newTokenManager(tokenFile, targetUID, peers)
+	if err != nil {
+		log.Fatal(err)
+	}
+	peers.seatGate = &activeSeatGate{targetUID: targetUID, tokenMgr: tokenMgr}
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = peers.seatGate.allowed()
+		}
+	}()
+
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -133,14 +241,32 @@ func main() {
 				_ = conn.Close()
 				continue
 			}
+
+			_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			presentedToken, err := readTokenLine(conn)
+			if err != nil || !tokenMgr.ValidToken(presentedToken) {
+				_ = conn.Close()
+				if client.pidfd >= 0 {
+					_ = unix.Close(client.pidfd)
+				}
+				continue
+			}
+			_ = conn.SetReadDeadline(time.Time{})
+
 			_ = conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
 			if _, err := io.WriteString(conn, "ready\n"); err != nil {
 				_ = conn.Close()
+				if client.pidfd >= 0 {
+					_ = unix.Close(client.pidfd)
+				}
 				continue
 			}
+			_ = conn.SetWriteDeadline(time.Time{})
+
 			peers.add(client)
 		}
 	}()
+
 	opened := map[string]bool{}
 	var openedMu sync.Mutex
 	for {
@@ -184,21 +310,12 @@ func verifyClient(conn net.Conn) (*verifiedClient, bool) {
 	if err := raw.Control(func(fd uintptr) {
 		credential, socketErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 		if socketErr == nil {
-			// Linux 6.5+ returns a race-free reference to the exact process that
-			// connected. Older kernels fall back to pidfd_open below.
 			pidfd, _ = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PEERPIDFD)
 		}
 	}); err != nil || socketErr != nil || credential == nil {
 		return nil, false
 	}
-	if int(credential.Uid) != want {
-		if pidfd >= 0 {
-			_ = unix.Close(pidfd)
-		}
-		return nil, false
-	}
-	wantExecutable := strings.TrimSpace(os.Getenv("CLIKS_CAPTURE_CLIENT_EXE"))
-	if wantExecutable == "" || credential.Pid <= 0 {
+	if int(credential.Uid) != want || credential.Pid <= 0 {
 		if pidfd >= 0 {
 			_ = unix.Close(pidfd)
 		}
@@ -212,18 +329,6 @@ func verifyClient(conn net.Conn) (*verifiedClient, bool) {
 	}
 	unix.CloseOnExec(pidfd)
 	if !pidfdAlive(pidfd) {
-		_ = unix.Close(pidfd)
-		return nil, false
-	}
-	gotExecutable, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(int(credential.Pid)), "exe"))
-	if err != nil {
-		_ = unix.Close(pidfd)
-		return nil, false
-	}
-	// The installer stores a canonical path. Do not resolve it again here:
-	// ProtectHome=true intentionally prevents this root service from traversing
-	// the user's home, while /proc/PID/exe still exposes the canonical target.
-	if filepath.Clean(gotExecutable) != filepath.Clean(wantExecutable) || !pidfdAlive(pidfd) {
 		_ = unix.Close(pidfd)
 		return nil, false
 	}
@@ -241,9 +346,12 @@ func configuredUID() (int, error) {
 
 type activeSeatGate struct {
 	sync.Mutex
-	targetUID int
-	checkedAt time.Time
-	active    bool
+	targetUID     int
+	checkedAt     time.Time
+	active        bool
+	initialized   bool
+	lastSessionID string
+	tokenMgr      *tokenManager
 }
 
 func (g *activeSeatGate) allowed() bool {
@@ -253,14 +361,22 @@ func (g *activeSeatGate) allowed() bool {
 		return g.active
 	}
 	g.checkedAt = time.Now()
-	g.active = targetOwnsActiveSeat(g.targetUID)
+	active, sessionID := activeSeatInfo(g.targetUID)
+	if g.initialized && (sessionID != g.lastSessionID || active != g.active) {
+		if g.tokenMgr != nil {
+			_ = g.tokenMgr.Regenerate()
+		}
+	}
+	g.initialized = true
+	g.active = active
+	g.lastSessionID = sessionID
 	return g.active
 }
 
-func targetOwnsActiveSeat(targetUID int) bool {
+func activeSeatInfo(targetUID int) (bool, string) {
 	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
 	if err != nil {
-		return false
+		return false, ""
 	}
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(line)
@@ -268,15 +384,19 @@ func targetOwnsActiveSeat(targetUID int) bool {
 			continue
 		}
 		session, err := exec.Command("loginctl", "show-seat", fields[0], "-p", "ActiveSession", "--value").Output()
-		if err != nil || strings.TrimSpace(string(session)) == "" {
+		if err != nil {
 			continue
 		}
-		uid, err := exec.Command("loginctl", "show-session", strings.TrimSpace(string(session)), "-p", "User", "--value").Output()
+		sessID := strings.TrimSpace(string(session))
+		if sessID == "" {
+			continue
+		}
+		uid, err := exec.Command("loginctl", "show-session", sessID, "-p", "User", "--value").Output()
 		if err == nil && strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
-			return true
+			return true, sessID
 		}
 	}
-	return false
+	return false, ""
 }
 
 func readDevice(file *os.File, peers *clients, done func()) {
@@ -305,7 +425,6 @@ func readDevice(file *os.File, peers *clients, done func()) {
 			case btnRight:
 				peers.send("r")
 			default:
-				// Mouse/touch buttons outside the explicit allowlist are ignored.
 				if code < 0x100 {
 					peers.send("k")
 				}
