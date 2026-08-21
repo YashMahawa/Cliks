@@ -103,55 +103,73 @@ type shortcutHelp struct {
 	description string
 }
 
-func shortcutEntries(context string) []shortcutHelp {
+func shortcutEntries(context string, cfg CliksConfig) []shortcutHelp {
+	upDown := formatKeyDisplay(getBinding(cfg, "up")) + ", " + formatKeyDisplay(getBinding(cfg, "down"))
+	leftRight := formatKeyDisplay(getBinding(cfg, "left")) + ", " + formatKeyDisplay(getBinding(cfg, "right"))
+	selectKey := formatKeyDisplay(getBinding(cfg, "select"))
+	backKey := formatKeyDisplay(getBinding(cfg, "back"))
+	helpKey := formatKeyDisplay(getBinding(cfg, "help"))
+
 	switch context {
 	case "preferences", "live-preferences":
 		return []shortcutHelp{
-			{"Up/k, Down/j", "move between preferences"},
-			{"Left/h, Right/l", "adjust the selected preference"},
-			{"Enter/Space", "toggle the selected preference"},
-			{"Tab/Esc/q", "return to the previous screen"},
-			{"?", "close this shortcut guide"},
+			{upDown, "move between preferences"},
+			{leftRight, "adjust the selected preference"},
+			{selectKey, "toggle the selected preference"},
+			{formatKeyDisplay(getBinding(cfg, "livePreferences")) + "/" + backKey, "return to the previous screen"},
+			{helpKey, "close this shortcut guide"},
 		}
 	case "live":
+		signals := fmt.Sprintf("%s / %s / %s / %s / %s",
+			formatKeyDisplay(getBinding(cfg, "signal1")),
+			formatKeyDisplay(getBinding(cfg, "signal2")),
+			formatKeyDisplay(getBinding(cfg, "signal3")),
+			formatKeyDisplay(getBinding(cfg, "signal4")),
+			formatKeyDisplay(getBinding(cfg, "signal5")))
+		vol := formatKeyDisplay(getBinding(cfg, "volumeUp")) + ", " + formatKeyDisplay(getBinding(cfg, "volumeDown"))
+		dens := formatKeyDisplay(getBinding(cfg, "densityUp")) + ", " + formatKeyDisplay(getBinding(cfg, "densityDown"))
+		toggles := fmt.Sprintf("%s / %s / %s",
+			formatKeyDisplay(getBinding(cfg, "toggleMute")),
+			formatKeyDisplay(getBinding(cfg, "toggleSpatial")),
+			formatKeyDisplay(getBinding(cfg, "toggleFatigue")))
 		return []shortcutHelp{
-			{"1 / 2 / 3 / 4 / 5", "wave, nice, coffee, celebrate, or suggest a break"},
-			{"p", "cycle available, focus, break, and do not disturb"},
-			{"Up/+, Down/-", "raise or lower volume"},
-			{"Right/], Left/[", "raise or lower sound density"},
-			{"m / s / f", "toggle mute, spatial audio, or fatigue fade"},
-			{"Tab/Shift+S", "open live preferences"},
-			{"Esc/q/b", "return to the main control screen"},
-			{"x/Ctrl+C", "stop and disconnect this session"},
+			{signals, "wave, nice, coffee, celebrate, or suggest a break"},
+			{formatKeyDisplay(getBinding(cfg, "presence")), "cycle available, focus, break, and do not disturb"},
+			{vol, "raise or lower volume"},
+			{dens, "raise or lower sound density"},
+			{toggles, "toggle mute, spatial audio, or fatigue fade"},
+			{formatKeyDisplay(getBinding(cfg, "livePreferences")), "open live preferences"},
+			{backKey, "return to the main control screen"},
+			{formatKeyDisplay(getBinding(cfg, "stop")), "stop and disconnect this session"},
 			{"Mouse wheel", "adjust volume"},
-			{"?", "close this shortcut guide"},
+			{helpKey, "close this shortcut guide"},
 		}
 	case "doctor-report":
 		return []shortcutHelp{
-			{"Up/k, Down/j", "scroll through the setup report"},
+			{upDown, "scroll through the setup report"},
 			{"PageUp/PageDown", "scroll one report page"},
 			{"r", "run every setup check again"},
-			{"Esc/q/b", "return to Diagnostics"},
+			{backKey, "return to Diagnostics"},
 			{"Mouse wheel", "scroll the report"},
-			{"?", "close this shortcut guide"},
+			{helpKey, "close this shortcut guide"},
 		}
 	default:
 		return []shortcutHelp{
-			{"Up/k, Down/j", "move between actions"},
-			{"Enter/Space", "run the highlighted action"},
-			{"Esc/q", "go back or close the control screen"},
+			{upDown, "move between actions"},
+			{selectKey, "run the highlighted action"},
+			{backKey, "go back or close the control screen"},
 			{"Mouse", "hover and click an action"},
-			{"?", "close this shortcut guide"},
+			{helpKey, "close this shortcut guide"},
 		}
 	}
 }
 
-func shortcutHelpView(context string, width int) string {
+func shortcutHelpView(context string, width int, cfg CliksConfig) string {
 	lines := []string{styleAccent.Render("Keyboard & mouse"), ""}
-	for _, entry := range shortcutEntries(context) {
+	for _, entry := range shortcutEntries(context, cfg) {
 		lines = append(lines, fmt.Sprintf("%-18s %s", entry.keys, entry.description))
 	}
-	lines = append(lines, "", styleDim.Render("Press ? or Esc to return."))
+	lines = append(lines, "", styleDim.Render(fmt.Sprintf("Press %s or %s to return.", formatKeyDisplay(getBinding(cfg, "help")), formatKeyDisplay(getBinding(cfg, "back")))))
 	return stylePanel.Width(panelWidth(width)).Render(strings.Join(lines, "\n"))
 }
 
@@ -198,6 +216,7 @@ type homeModel struct {
 	audioDeviceValue      string
 	batchWindowValue      string
 	backendURLValue       string
+	form                  *DeclarativeForm
 	busy                  bool
 	width                 int
 	height                int
@@ -216,6 +235,108 @@ type homeModel struct {
 	onboardingStep        int
 	onboardingQuip        int
 	onboardingSuggestion  string
+}
+
+func (m *homeModel) initDeclarativeForm(mode string) {
+	initialValues := map[string]string{
+		"name":     m.createName,
+		"password": m.createPassword,
+		"code":     m.joinCode,
+		"nickname": m.nicknameValue,
+		"device":   m.audioDeviceValue,
+		"window":   m.batchWindowValue,
+		"url":      m.backendURLValue,
+	}
+	if mode == "delete" {
+		initialValues["code"] = m.deleteCode
+		initialValues["password"] = m.deletePassword
+	}
+	m.form = newDeclarativeForm(mode, initialValues)
+	if m.form != nil {
+		m.formCursor = m.form.FocusedIdx
+	}
+}
+
+func (m *homeModel) ensureForm() {
+	if isFormMode(m.mode) {
+		if m.form == nil || m.form.Mode != m.mode {
+			m.initDeclarativeForm(m.mode)
+		} else {
+			m.syncToForm()
+		}
+	} else {
+		m.form = nil
+	}
+}
+
+func (m *homeModel) syncToForm() {
+	if m.form == nil {
+		return
+	}
+	switch m.form.Mode {
+	case "create":
+		if m.form.Value("name") != m.createName {
+			m.form.SetValue("name", m.createName)
+		}
+		if m.form.Value("password") != m.createPassword {
+			m.form.SetValue("password", m.createPassword)
+		}
+	case "join":
+		if m.form.Value("code") != m.joinCode {
+			m.form.SetValue("code", m.joinCode)
+		}
+	case "delete":
+		if m.form.Value("code") != m.deleteCode {
+			m.form.SetValue("code", m.deleteCode)
+		}
+		if m.form.Value("password") != m.deletePassword {
+			m.form.SetValue("password", m.deletePassword)
+		}
+	case "nickname":
+		if m.form.Value("nickname") != m.nicknameValue {
+			m.form.SetValue("nickname", m.nicknameValue)
+		}
+	case "audio-device":
+		if m.form.Value("device") != m.audioDeviceValue {
+			m.form.SetValue("device", m.audioDeviceValue)
+		}
+	case "batch-window":
+		if m.form.Value("window") != m.batchWindowValue {
+			m.form.SetValue("window", m.batchWindowValue)
+		}
+	case "backend-url":
+		if m.form.Value("url") != m.backendURLValue {
+			m.form.SetValue("url", m.backendURLValue)
+		}
+	}
+}
+
+func (m *homeModel) syncFromForm() {
+	if m.form == nil {
+		return
+	}
+	switch m.form.Mode {
+	case "create":
+		m.createName = m.form.Value("name")
+		m.createPassword = m.form.Value("password")
+	case "join":
+		m.joinCode = m.form.Value("code")
+	case "delete":
+		m.deleteCode = m.form.Value("code")
+		m.deletePassword = m.form.Value("password")
+	case "nickname":
+		m.nicknameValue = m.form.Value("nickname")
+	case "audio-device":
+		m.audioDeviceValue = m.form.Value("device")
+	case "batch-window":
+		m.batchWindowValue = m.form.Value("window")
+	case "backend-url":
+		m.backendURLValue = m.form.Value("url")
+	}
+	m.formCursor = m.form.FocusedIdx
+	if m.form.FocusedIdx >= 0 && m.form.FocusedIdx < len(m.form.Fields) {
+		m.formTextCursor = len([]rune(m.form.Fields[m.form.FocusedIdx].Input.Value()))
+	}
 }
 
 func runHomeTUI(cfg CliksConfig) error {
@@ -358,6 +479,7 @@ func (m *homeModel) finishLaunch() {
 type onboardingPermissionMsg struct{ message string }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.ensureForm()
 	switch msg := msg.(type) {
 	case launchTickMsg:
 		if time.Now().Before(m.launchUntil) {
@@ -462,8 +584,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isFormMode(m.mode) {
 			if msg.Type == tea.MouseLeft {
 				if index := m.formHit(msg.X, msg.Y); index >= 0 {
+					if m.form != nil {
+						m.form.FocusField(index)
+						m.syncFromForm()
+					}
 					m.formCursor = index
-					m.moveFormTextCursorToEnd()
 				}
 			}
 			return m, nil
@@ -503,27 +628,27 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case tea.KeyMsg:
+		key := msg.String()
 		if time.Now().Before(m.launchUntil) {
-			switch msg.String() {
-			case "ctrl+c":
+			if key == "ctrl+c" {
 				return m, tea.Quit
-			case "enter", " ", "esc":
+			}
+			if key == "enter" || key == " " || key == "esc" {
 				m.finishLaunch()
 			}
 			return m, nil
 		}
 		if m.helpOpen {
-			switch msg.String() {
-			case "?", "esc", "q":
+			if keyMatches(key, getBinding(m.cfg, "help")) || keyMatches(key, getBinding(m.cfg, "back")) || key == "esc" {
 				m.helpOpen = false
 			}
 			return m, nil
 		}
 		if m.mode == "first-setup" {
-			switch msg.String() {
-			case "ctrl+c", "q":
+			if key == "ctrl+c" || key == "q" {
 				return m, tea.Quit
-			case "esc", "left", "h", "backspace":
+			}
+			if keyMatches(key, getBinding(m.cfg, "back")) || keyMatches(key, getBinding(m.cfg, "left")) || key == "backspace" {
 				if m.onboardingStep > 0 {
 					m.onboardingStep--
 					m.cfg.OnboardingStep = m.onboardingStep
@@ -541,62 +666,68 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		}
 		if m.mode == "doctor-report" {
-			switch msg.String() {
-			case "ctrl+c":
+			if key == "ctrl+c" {
 				return m, tea.Quit
-			case "up", "k":
+			}
+			if keyMatches(key, getBinding(m.cfg, "up")) {
 				m.scrollDoctor(-1)
-			case "down", "j":
+			} else if keyMatches(key, getBinding(m.cfg, "down")) {
 				m.scrollDoctor(1)
-			case "pgup":
+			} else if key == "pgup" {
 				m.scrollDoctor(-m.doctorVisibleCount())
-			case "pgdown":
+			} else if key == "pgdown" {
 				m.scrollDoctor(m.doctorVisibleCount())
-			case "r":
+			} else if key == "r" {
 				m.busy = true
 				m.message = "Checking setup..."
 				return m, doctorSummaryCmd()
-			case "esc", "q", "b":
+			} else if keyMatches(key, getBinding(m.cfg, "back")) {
 				m.back()
-			case "?":
+			} else if keyMatches(key, getBinding(m.cfg, "help")) {
 				m.helpOpen = true
 			}
 			return m, nil
 		}
-		switch msg.String() {
-		case "?":
+
+		if keyMatches(key, getBinding(m.cfg, "help")) {
 			m.helpOpen = true
 			return m, nil
-		case "ctrl+c", "q":
+		}
+		if key == "ctrl+c" {
 			if m.mode != "home" {
 				m.back()
 				return m, nil
 			}
 			return m, tea.Quit
-		case "esc":
+		}
+		if keyMatches(key, getBinding(m.cfg, "back")) {
 			if m.mode != "home" {
 				m.back()
 			} else {
+				if key == "q" {
+					return m, tea.Quit
+				}
 				m.message = "Cliks is still open. Choose Quit when you actually want to close it."
 			}
 			return m, nil
-		case "up", "k":
+		}
+		if keyMatches(key, getBinding(m.cfg, "up")) {
 			m.move(-1)
 			m.mouseOver = false
-		case "down", "j":
+		} else if keyMatches(key, getBinding(m.cfg, "down")) {
 			m.move(1)
 			m.mouseOver = false
-		case "left", "h":
+		} else if keyMatches(key, getBinding(m.cfg, "left")) {
 			if m.mode == "preferences" {
 				m.changeSetting(-1)
 			}
-		case "right", "l":
+		} else if keyMatches(key, getBinding(m.cfg, "right")) {
 			if m.mode == "preferences" {
 				m.changeSetting(1)
 			}
-		case "enter", " ":
+		} else if keyMatches(key, getBinding(m.cfg, "select")) {
 			return m.activate()
-		case "s":
+		} else if key == "s" {
 			if m.mode == "preferences" {
 				if err := saveConfig(m.cfg); err != nil {
 					m.message = err.Error()
@@ -610,6 +741,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) View() string {
+	m.ensureForm()
 	if time.Now().Before(m.launchUntil) {
 		return m.launchView()
 	}
@@ -619,7 +751,7 @@ func (m homeModel) View() string {
 		if context != "preferences" && context != "doctor-report" {
 			context = "home"
 		}
-		body = shortcutHelpView(context, m.width)
+		body = shortcutHelpView(context, m.width, m.cfg)
 	} else if m.mode == "first-setup" {
 		body = m.itemView()
 		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks  /  first light"), body)
@@ -855,12 +987,11 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			returnMode = "team"
 		}
 		m.mode = "create"
-		m.formCursor = 0
 		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.createName = ""
 		m.createPassword = ""
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("create")
 		m.message = "Name the room and set a delete password."
 	case "join":
 		returnMode := m.mode
@@ -868,20 +999,18 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			returnMode = "team"
 		}
 		m.mode = "join"
-		m.formCursor = 0
 		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.joinCode = ""
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("join")
 		m.message = "Paste or type a team code. Join opens live automatically."
 	case "delete":
 		m.mode = "delete"
-		m.formCursor = 0
 		m.formReturnMode = "team"
 		m.mouseOver = false
 		m.deleteCode = m.cfg.CurrentTeamCode
 		m.deletePassword = ""
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("delete")
 		m.message = "Delete closes the live room for everyone using this code."
 	case "nickname":
 		returnMode := m.mode
@@ -889,11 +1018,10 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			returnMode = "team"
 		}
 		m.mode = "nickname"
-		m.formCursor = 0
 		m.formReturnMode = returnMode
 		m.mouseOver = false
 		m.nicknameValue = m.cfg.Nickname
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("nickname")
 		m.message = "Set the short name teammates see in the live room. Max 10 characters."
 	case "onboarding-random-name":
 		m.cfg.Nickname = m.onboardingSuggestion
@@ -959,10 +1087,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		m.message = "Less common local controls. Backend overrides stay in cliks set --list."
 	case "audio-device":
 		m.mode = "audio-device"
-		m.formCursor = 0
 		m.formReturnMode = "advanced"
 		m.audioDeviceValue = valuePlain(m.cfg.Listening.AudioDevice, "default")
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("audio-device")
 		m.message = "Use default, or an output name supported by mpv/PulseAudio/PipeWire."
 	case "batch-window":
 		if usesPublicBackend(m.cfg) {
@@ -970,10 +1097,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode = "batch-window"
-		m.formCursor = 0
 		m.formReturnMode = "advanced"
 		m.batchWindowValue = fmt.Sprintf("%d", m.cfg.BatchWindowMs)
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("batch-window")
 		m.message = "100-2000 ms. The default 500 ms balances latency and network use."
 	case "backend-url":
 		returnMode := m.mode
@@ -981,10 +1107,9 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 			returnMode = "advanced"
 		}
 		m.mode = "backend-url"
-		m.formCursor = 0
 		m.formReturnMode = returnMode
 		m.backendURLValue = m.cfg.APIURL
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("backend-url")
 		m.message = "Use public/default, or paste your self-hosted http(s) server. WebSocket is derived automatically."
 	case "factory-reset":
 		m.mode = "factory-reset"
@@ -1100,7 +1225,7 @@ func (m *homeModel) changeSetting(delta int) {
 		m.formCursor = 0
 		m.formReturnMode = "preferences"
 		m.backendURLValue = m.cfg.APIURL
-		m.moveFormTextCursorToEnd()
+		m.initDeclarativeForm("backend-url")
 		m.message = "Paste a self-hosted http(s) URL, or type public."
 		return
 	}
@@ -2104,60 +2229,66 @@ func (m homeModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	switch msg.String() {
-	case "ctrl+c":
+
+	key := msg.String()
+	if key == "ctrl+c" {
 		return m, tea.Quit
-	case "esc":
+	}
+
+	if keyMatches(key, getBinding(m.cfg, "formCancel")) {
 		m.mode = valuePlain(m.formReturnMode, "home")
 		m.cursor = 0
 		m.mouseOver = false
 		m.message = "Cancelled."
+		m.form = nil
 		return m, nil
-	case "up", "shift+tab":
-		m.formCursor = clampInt(m.formCursor-1, 0, m.formFieldCount()-1)
-		m.moveFormTextCursorToEnd()
+	}
+
+	if keyMatches(key, getBinding(m.cfg, "formPrev")) {
+		if m.form != nil {
+			m.form.FocusPrev()
+			m.syncFromForm()
+		}
 		return m, nil
-	case "down", "tab":
-		m.formCursor = clampInt(m.formCursor+1, 0, m.formFieldCount()-1)
-		m.moveFormTextCursorToEnd()
+	}
+
+	if keyMatches(key, getBinding(m.cfg, "formNext")) {
+		if m.form != nil {
+			m.form.FocusNext()
+			m.syncFromForm()
+		}
 		return m, nil
-	case "left", "ctrl+b":
-		m.formTextCursor = clampInt(m.formTextCursor-1, 0, len([]rune(m.formValue())))
-		return m, nil
-	case "right", "ctrl+f":
-		m.formTextCursor = clampInt(m.formTextCursor+1, 0, len([]rune(m.formValue())))
-		return m, nil
-	case "home", "ctrl+a":
-		m.formTextCursor = 0
-		return m, nil
-	case "end", "ctrl+e":
-		m.moveFormTextCursorToEnd()
-		return m, nil
-	case "enter":
-		if m.formCursor < m.formFieldCount()-1 {
-			m.formCursor++
-			m.moveFormTextCursorToEnd()
-			return m, nil
+	}
+
+	if keyMatches(key, getBinding(m.cfg, "formSubmit")) {
+		if m.form != nil {
+			if m.form.FocusedIdx < len(m.form.Fields)-1 {
+				m.form.FocusNext()
+				m.syncFromForm()
+				return m, nil
+			}
 		}
 		return m.submitForm()
-	case "backspace", "ctrl+h":
-		m.trimFormValue()
-		return m, nil
-	case "delete":
-		m.deleteFormValueAtCursor()
-		return m, nil
-	case "ctrl+u":
-		m.setFormValue("")
-		m.formTextCursor = 0
-		return m, nil
 	}
-	if msg.Type == tea.KeyRunes {
-		m.insertFormRunes(msg.Runes)
+
+	if m.form != nil {
+		m.form.Update(msg)
+		m.syncFromForm()
 	}
+
 	return m, nil
 }
 
 func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
+	if m.form != nil {
+		m.syncToForm()
+		m.syncFromForm()
+		if err := m.form.ValidateAll(); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+	}
+
 	if m.mode == "backend-url" {
 		backend, err := normalizeBackendURL(m.backendURLValue)
 		if err != nil {
@@ -2176,6 +2307,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		m.mode = valuePlain(m.formReturnMode, "advanced")
 		m.cursor = 0
 		m.message = "Server saved. " + backendSummary(m.cfg) + ". Reconnect Live to use it."
+		m.form = nil
 		return m, nil
 	}
 	if m.mode == "nickname" {
@@ -2193,6 +2325,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		if returnMode == "first-setup" {
 			m.advanceOnboarding(m.message)
 		}
+		m.form = nil
 		return m, nil
 	}
 	if m.mode == "audio-device" {
@@ -2208,6 +2341,7 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		m.mode = "advanced"
 		m.cursor = 2
 		m.message = fmt.Sprintf("Audio output set to %s.", valuePlain(device, "default"))
+		m.form = nil
 		return m, nil
 	}
 	if m.mode == "batch-window" {
@@ -2228,13 +2362,16 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		m.mode = "advanced"
 		m.cursor = 3
 		m.message = fmt.Sprintf("Batch window set to %d ms.", window)
+		m.form = nil
 		return m, nil
 	}
 	if m.mode == "join" {
 		code := strings.ToUpper(strings.TrimSpace(m.joinCode))
 		if code == "" {
 			m.message = "Team code is required."
-			m.formCursor = 0
+			if m.form != nil {
+				m.form.FocusField(0)
+			}
 			return m, nil
 		}
 		m.busy = true
@@ -2249,7 +2386,9 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		password := strings.TrimSpace(m.createPassword)
 		if len(password) < 6 {
 			m.message = "Delete password must be at least 6 characters."
-			m.formCursor = 1
+			if m.form != nil {
+				m.form.FocusField(1)
+			}
 			return m, nil
 		}
 		m.busy = true
@@ -2259,13 +2398,17 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 	code := strings.ToUpper(strings.TrimSpace(m.deleteCode))
 	if code == "" {
 		m.message = "Team code is required."
-		m.formCursor = 0
+		if m.form != nil {
+			m.form.FocusField(0)
+		}
 		return m, nil
 	}
 	password := strings.TrimSpace(m.deletePassword)
 	if password == "" {
 		m.message = "Delete password is required."
-		m.formCursor = 1
+		if m.form != nil {
+			m.form.FocusField(1)
+		}
 		return m, nil
 	}
 	m.busy = true
@@ -2274,101 +2417,13 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func (m homeModel) formFieldCount() int {
+	if m.form != nil {
+		return len(m.form.Fields)
+	}
 	if m.mode == "nickname" || m.mode == "join" || m.mode == "audio-device" || m.mode == "batch-window" || m.mode == "backend-url" {
 		return 1
 	}
 	return 2
-}
-
-func (m homeModel) formValue() string {
-	switch m.mode {
-	case "create":
-		if m.formCursor == 0 {
-			return m.createName
-		}
-		return m.createPassword
-	case "join":
-		return m.joinCode
-	case "delete":
-		if m.formCursor == 0 {
-			return m.deleteCode
-		}
-		return m.deletePassword
-	case "nickname":
-		return m.nicknameValue
-	case "audio-device":
-		return m.audioDeviceValue
-	case "batch-window":
-		return m.batchWindowValue
-	case "backend-url":
-		return m.backendURLValue
-	default:
-		return ""
-	}
-}
-
-func (m *homeModel) setFormValue(value string) {
-	switch m.mode {
-	case "create":
-		if m.formCursor == 0 {
-			m.createName = value
-		} else {
-			m.createPassword = value
-		}
-	case "join":
-		m.joinCode = strings.ToUpper(value)
-	case "delete":
-		if m.formCursor == 0 {
-			m.deleteCode = strings.ToUpper(value)
-		} else {
-			m.deletePassword = value
-		}
-	case "nickname":
-		m.nicknameValue = value
-	case "audio-device":
-		m.audioDeviceValue = value
-	case "batch-window":
-		m.batchWindowValue = value
-	case "backend-url":
-		m.backendURLValue = value
-	}
-}
-
-func (m *homeModel) trimFormValue() {
-	value := []rune(m.formValue())
-	if len(value) == 0 || m.formTextCursor == 0 {
-		return
-	}
-	index := clampInt(m.formTextCursor, 0, len(value))
-	value = append(value[:index-1], value[index:]...)
-	m.setFormValue(string(value))
-	m.formTextCursor = index - 1
-}
-
-func (m *homeModel) insertFormRunes(inserted []rune) {
-	value := []rune(m.formValue())
-	index := clampInt(m.formTextCursor, 0, len(value))
-	next := make([]rune, 0, len(value)+len(inserted))
-	next = append(next, value[:index]...)
-	next = append(next, inserted...)
-	next = append(next, value[index:]...)
-	m.setFormValue(string(next))
-	m.formTextCursor = clampInt(index+len(inserted), 0, len([]rune(m.formValue())))
-}
-
-func (m *homeModel) deleteFormValueAtCursor() {
-	value := []rune(m.formValue())
-	index := clampInt(m.formTextCursor, 0, len(value))
-	if index >= len(value) {
-		return
-	}
-	value = append(value[:index], value[index+1:]...)
-	m.setFormValue(string(value))
-	m.formTextCursor = clampInt(index, 0, len([]rune(m.formValue())))
-}
-
-func (m *homeModel) moveFormTextCursorToEnd() {
-	m.formTextCursor = len([]rune(m.formValue()))
 }
 
 func (m homeModel) formHit(x int, y int) int {
@@ -2400,79 +2455,26 @@ func parseBatchWindow(value string) (int, error) {
 }
 
 func (m homeModel) formView() string {
-	var title string
-	var rows []string
-	if m.mode == "create" {
-		title = "Create Team"
-		rows = []string{
-			formLine("Team name", m.createName, "Cliks Room", m.formCursor == 0, m.formTextCursor, false),
-			formLine("Delete password", m.createPassword, "not set", m.formCursor == 1, m.formTextCursor, true),
-		}
-	} else if m.mode == "join" {
-		title = "Join Team"
-		rows = []string{
-			formLine("Team code", m.joinCode, "CLIK-XXXXXX", true, m.formTextCursor, false),
-		}
-	} else if m.mode == "delete" {
-		title = "Delete Team"
-		rows = []string{
-			formLine("Team code", m.deleteCode, "CLIK-XXXXXX", m.formCursor == 0, m.formTextCursor, false),
-			formLine("Delete password", m.deletePassword, "not set", m.formCursor == 1, m.formTextCursor, true),
-		}
-	} else if m.mode == "audio-device" {
-		title = "Audio Output"
-		rows = []string{
-			formLine("Device", m.audioDeviceValue, "default", true, m.formTextCursor, false),
-		}
-	} else if m.mode == "batch-window" {
-		title = "Batch Window"
-		rows = []string{
-			formLine("Milliseconds", m.batchWindowValue, "500", true, m.formTextCursor, false),
-		}
-	} else if m.mode == "backend-url" {
-		title = "Server"
-		rows = []string{
-			formLine("HTTP URL", m.backendURLValue, productionAPIURL, true, m.formTextCursor, false),
-			styleDim.Render("Type public to restore Cliks. Self-hosting unlocks larger room limits and 100-2000 ms batching."),
-		}
-	} else {
-		title = "Nickname"
-		rows = []string{
-			formLine("Display name", m.nicknameValue, "anonymous", true, m.formTextCursor, false),
-		}
+	if m.form == nil {
+		return ""
 	}
-	lines := []string{styleAccent.Render(title), ""}
-	lines = append(lines, rows...)
+	lines := []string{styleAccent.Render(m.form.Title), ""}
+	lines = append(lines, m.form.View()...)
 	footerLines := []string{}
 	if m.busy {
 		footerLines = append(footerLines, styleAccent.Render(m.message))
 	} else {
-		footerLines = append(footerLines, styleDim.Render("Left/right edits at the cursor. Enter submits. Tab changes fields. Esc cancels."))
+		nextKey := formatKeyDisplay(getBinding(m.cfg, "formNext"))
+		prevKey := formatKeyDisplay(getBinding(m.cfg, "formPrev"))
+		submitKey := formatKeyDisplay(getBinding(m.cfg, "formSubmit"))
+		cancelKey := formatKeyDisplay(getBinding(m.cfg, "formCancel"))
+		footerLines = append(footerLines, styleDim.Render(fmt.Sprintf("Left/right edits at the cursor. %s submits. %s/%s changes fields. %s cancels.", submitKey, nextKey, prevKey, cancelKey)))
 		if m.message != "" {
 			footerLines = append(footerLines, styleDim.Render(m.message))
 		}
 	}
 	lines = verticalSections(lines, footerLines, m.fullPanelContentHeight(), 1)
 	return m.fullPanel().Render(strings.Join(lines, "\n"))
-}
-
-func formLine(label string, value string, placeholder string, selected bool, cursor int, secret bool) string {
-	display := value
-	if secret {
-		display = strings.Repeat("*", len([]rune(value)))
-	}
-	if selected {
-		runes := []rune(display)
-		cursor = clampInt(cursor, 0, len(runes))
-		display = string(runes[:cursor]) + "|" + string(runes[cursor:])
-	} else if display == "" {
-		display = placeholder
-	}
-	line := fmt.Sprintf("%-18s %s", label, display)
-	if selected {
-		return styleSelected.Render(" " + line + " ")
-	}
-	return line
 }
 
 func createTeamCmd(name string, password string) tea.Cmd {
@@ -2792,88 +2794,83 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyMsg:
+		key := msg.String()
+		cfg := m.controller.cfg
 		if m.helpOpen {
-			switch msg.String() {
-			case "?", "esc", "q":
+			if keyMatches(key, getBinding(cfg, "help")) || keyMatches(key, getBinding(cfg, "back")) || key == "esc" {
 				m.helpOpen = false
 			}
 			return m, nil
 		}
-		if msg.String() == "?" {
+		if keyMatches(key, getBinding(cfg, "help")) {
 			m.helpOpen = true
 			return m, nil
 		}
 		if m.mode == "control" {
-			switch msg.String() {
-			case "up", "k":
+			if keyMatches(key, getBinding(cfg, "up")) {
 				m.controlCursor = clampInt(m.controlCursor-1, 0, len(m.controlItems())-1)
 				m.controlHover = false
-			case "down", "j":
+			} else if keyMatches(key, getBinding(cfg, "down")) {
 				m.controlCursor = clampInt(m.controlCursor+1, 0, len(m.controlItems())-1)
 				m.controlHover = false
-			case "enter", " ":
+			} else if keyMatches(key, getBinding(cfg, "select")) {
 				return m.activateControl()
-			case "esc", "b", "q":
+			} else if keyMatches(key, getBinding(cfg, "back")) {
 				m.message = "Cliks is still running. Choose Resume Live, Quit App, or Stop."
-			case "?":
-				m.helpOpen = true
 			}
 			return m, nil
 		}
 		if m.mode == "settings" {
-			switch msg.String() {
-			case "esc", "tab", "q", "S":
+			if keyMatches(key, getBinding(cfg, "livePreferences")) || keyMatches(key, getBinding(cfg, "back")) {
 				m.mode = m.settingsReturnMode
-			case "up", "k":
+			} else if keyMatches(key, getBinding(cfg, "up")) {
 				m.settingsCursor = clampInt(m.settingsCursor-1, 0, len(settingsRows(m.controller.cfg))-1)
-			case "down", "j":
+			} else if keyMatches(key, getBinding(cfg, "down")) {
 				m.settingsCursor = clampInt(m.settingsCursor+1, 0, len(settingsRows(m.controller.cfg))-1)
-			case "left", "h":
+			} else if keyMatches(key, getBinding(cfg, "left")) {
 				m.applyLiveSetting(-1)
-			case "right", "l", "enter", " ":
+			} else if keyMatches(key, getBinding(cfg, "right")) || keyMatches(key, getBinding(cfg, "select")) {
 				m.applyLiveSetting(1)
 			}
 			return m, nil
 		}
-		switch msg.String() {
-		case "ctrl+c":
+
+		if key == "ctrl+c" || keyMatches(key, getBinding(cfg, "stop")) {
 			m.exit = sessionExitStop
 			return m, tea.Quit
-		case "q", "esc", "b":
+		}
+		if keyMatches(key, getBinding(cfg, "back")) {
 			m.mode = "control"
 			m.controlCursor = 0
 			m.controlHover = false
 			m.message = "The live connection stays exactly where it is."
-		case "x":
-			m.exit = sessionExitStop
-			return m, tea.Quit
-		case "up", "+":
+		} else if keyMatches(key, getBinding(cfg, "volumeUp")) {
 			m.controller.adjustVolume(0.05)
-		case "down", "-":
+		} else if keyMatches(key, getBinding(cfg, "volumeDown")) {
 			m.controller.adjustVolume(-0.05)
-		case "right", "]":
+		} else if keyMatches(key, getBinding(cfg, "densityUp")) {
 			m.controller.adjustDensity(0.1)
-		case "left", "[":
+		} else if keyMatches(key, getBinding(cfg, "densityDown")) {
 			m.controller.adjustDensity(-0.1)
-		case "m":
+		} else if keyMatches(key, getBinding(cfg, "toggleMute")) {
 			m.controller.toggle("muted")
-		case "s":
+		} else if keyMatches(key, getBinding(cfg, "toggleSpatial")) {
 			m.controller.toggle("spatial")
-		case "f":
+		} else if keyMatches(key, getBinding(cfg, "toggleFatigue")) {
 			m.controller.toggle("fade")
-		case "1":
+		} else if keyMatches(key, getBinding(cfg, "signal1")) {
 			m.sendLiveReaction("wave")
-		case "2":
+		} else if keyMatches(key, getBinding(cfg, "signal2")) {
 			m.sendLiveReaction("nice")
-		case "3":
+		} else if keyMatches(key, getBinding(cfg, "signal3")) {
 			m.sendLiveReaction("coffee")
-		case "4":
+		} else if keyMatches(key, getBinding(cfg, "signal4")) {
 			m.sendLiveReaction("celebrate")
-		case "5":
+		} else if keyMatches(key, getBinding(cfg, "signal5")) {
 			m.sendLiveReaction("break")
-		case "p":
+		} else if keyMatches(key, getBinding(cfg, "presence")) {
 			m.controller.cyclePresence()
-		case "tab", "S":
+		} else if keyMatches(key, getBinding(cfg, "livePreferences")) {
 			m.settingsReturnMode = ""
 			m.mode = "settings"
 		}
@@ -2890,7 +2887,7 @@ func (m sessionModel) View() string {
 		if m.mode == "settings" {
 			context = "live-preferences"
 		}
-		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks Shortcuts"), shortcutHelpView(context, m.width))
+		return lipgloss.JoinVertical(lipgloss.Left, styleTitle.Render("Cliks Shortcuts"), shortcutHelpView(context, m.width, m.controller.cfg))
 	}
 	if m.mode == "settings" {
 		return m.sessionSettingsView()
