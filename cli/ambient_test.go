@@ -17,3 +17,15 @@ func TestBundledAmbientTracksDecodeAndProduceValidWAV(t *testing.T) {
 		}
 	}
 }
+
+func TestAmbientLabelAndNextAmbient(t *testing.T) {
+	if label := ambientLabel("rain"); label != "rain window" {
+		t.Fatalf("ambientLabel(rain) = %q, want rain window", label)
+	}
+	if label := ambientLabel("unknown"); label != "off" {
+		t.Fatalf("ambientLabel(unknown) = %q, want off", label)
+	}
+	if next := nextAmbient("rain", 1); next != "fire" {
+		t.Fatalf("nextAmbient(rain, 1) = %q, want fire", next)
+	}
+}
