@@ -32,21 +32,25 @@ func (r *loopingPCMReader) Read(target []byte) (int, error) {
 	vol := clamp(r.volume, 0, 1)
 	written := 0
 	targetLen := len(target)
-	dataLen := len(r.data)
+	dataLen := len(r.data) - (len(r.data) % 2)
+	if dataLen == 0 {
+		r.mu.Unlock()
+		return 0, io.EOF
+	}
 	for written < targetLen {
 		availData := dataLen - r.offset
 		toCopy := targetLen - written
 		if toCopy > availData {
 			toCopy = availData
 		}
-		i := 0
-		for ; i+1 < toCopy; i += 2 {
+		toCopy -= toCopy % 2
+		if toCopy == 0 {
+			break
+		}
+		for i := 0; i < toCopy; i += 2 {
 			sample := int16(binary.LittleEndian.Uint16(r.data[r.offset+i : r.offset+i+2]))
 			scaled := int16(math.Round(clamp(float64(sample)*vol, -32768, 32767)))
 			binary.LittleEndian.PutUint16(target[written+i:written+i+2], uint16(scaled))
-		}
-		if i < toCopy {
-			target[written+i] = r.data[r.offset+i]
 		}
 		written += toCopy
 		r.offset = (r.offset + toCopy) % dataLen
