@@ -10,7 +10,20 @@ import (
 )
 
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
-	if helper := macCaptureHelperPath(); helper != "" {
+	helper := macCaptureHelperPath()
+	if overrideWarn := getMacHelperOverrideWarning(); overrideWarn != "" {
+		report.checks = append(report.checks, doctorCheck{"Custom capture helper override", "rejected"})
+		report.issues = append(report.issues, doctorIssue{
+			title:  "Custom capture helper override rejected",
+			detail: overrideWarn,
+			commands: []string{
+				"Unset CLIKS_CAPTURE_HELPER to use the standard installed bundle",
+				"Ensure custom builds are signed and match bundle identifier io.cliks.capture",
+			},
+		})
+	}
+
+	if helper != "" {
 		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "installed"})
 	} else {
 		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "missing"})
