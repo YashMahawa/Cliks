@@ -54,13 +54,19 @@ func startBackgroundForTeam(code string) (string, error) {
 		return fmt.Sprintf("Cliks is already running for %s (%s, pid %d).", valuePlain(current.TeamCode, code), modeLabel(current.Mode), current.PID), nil
 	}
 	dir := stateDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	_ = os.Chmod(dir, 0o700)
 	logPath := filepath.Join(dir, "background.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return "", err
+	}
+	_ = os.Chmod(logPath, 0o600)
+	if permErr := validatePermissions(logPath, 0o600); permErr != nil {
+		_ = logFile.Close()
+		return "", permErr
 	}
 	cmd := exec.Command(currentExecutable(), "start")
 	cmd.Env = append(os.Environ(), "CLIKS_AUTOSTART_TEAM="+code, "CLIKS_RUN_MODE="+runModeBackground)
@@ -197,8 +203,9 @@ func readBackgroundPID() (int, bool) {
 }
 
 func writeBackgroundPID(pid int) error {
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	return atomicWriteFile(backgroundPIDPath(), []byte(strconv.Itoa(pid)+"\n"), 0o644)
+	_ = os.Chmod(stateDir(), 0o700)
+	return atomicWriteFile(backgroundPIDPath(), []byte(strconv.Itoa(pid)+"\n"), 0o600)
 }
