@@ -137,15 +137,18 @@ func TestWindowsWatchdogStateTransitions(t *testing.T) {
 		capture:  capture,
 	}
 
-	// Simulate handleHookDetachment sequence
-	session.handleHookDetachment(capture.ctx, capture, 0, session.sharing, 1)
+	// Simulate handleHookDetachment recovery transition (cancel context to skip backoff sleep)
+	testCtx, testCancel := context.WithCancel(capture.ctx)
+	testCancel()
+	session.handleHookDetachment(testCtx, capture, 0, session.sharing)
 
 	if len(stateHistory) == 0 || stateHistory[len(stateHistory)-1].Mode != "recovering" {
 		t.Fatalf("expected state mode 'recovering', got %#v", stateHistory)
 	}
 
 	// Simulate max failures exceeded
-	session.handleHookDetachment(capture.ctx, capture, 0, session.sharing, maxRehookAttempts)
+	session.rehookFailures = maxRehookAttempts
+	session.handleHookDetachment(capture.ctx, capture, 0, session.sharing)
 
 	if len(stateHistory) < 2 || stateHistory[len(stateHistory)-1].Mode != "off" {
 		t.Fatalf("expected state mode 'off' after max attempts, got %#v", stateHistory)

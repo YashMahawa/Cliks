@@ -331,7 +331,6 @@ func (s *windowsCaptureSession) checkHealthAndProbing(ctx context.Context) {
 	capture := s.capture
 	threadID := s.threadID
 	uipiWasPaused := s.uipiPaused
-	rehookFailures := s.rehookFailures
 	windowsNativeCaptureLock.Unlock()
 
 	// 1. Check UIPI Foreground Window state
@@ -379,7 +378,7 @@ func (s *windowsCaptureSession) checkHealthAndProbing(ctx context.Context) {
 		newNano := atomic.LoadInt64(&s.lastCallbackNano)
 		if newNano == lastNano {
 			// Hook did not receive probe -> DETACHED!
-			s.handleHookDetachment(ctx, capture, threadID, sharing, rehookFailures)
+			s.handleHookDetachment(ctx, capture, threadID, sharing)
 			return
 		}
 	}
@@ -399,7 +398,7 @@ func (s *windowsCaptureSession) checkHealthAndProbing(ctx context.Context) {
 	windowsNativeCaptureLock.Unlock()
 }
 
-func (s *windowsCaptureSession) handleHookDetachment(ctx context.Context, capture *ActivityCapture, threadID uint32, sharing SharingConfig, failures int) {
+func (s *windowsCaptureSession) handleHookDetachment(ctx context.Context, capture *ActivityCapture, threadID uint32, sharing SharingConfig) {
 	windowsNativeCaptureLock.Lock()
 	s.isRecovering = true
 	s.rehookFailures++
