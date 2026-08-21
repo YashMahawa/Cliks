@@ -28,6 +28,29 @@ func newBuiltInAudioPlayer() *audioPlayer {
 	}
 }
 
+func probeBuiltInAudioBackend() ProbeResult {
+	ctx, err := builtInAudioContext()
+	if err != nil || ctx == nil {
+		if err == nil {
+			err = fmt.Errorf("built-in audio device is unavailable")
+		}
+		return ProbeResult{
+			Name:           "built-in",
+			Available:      false,
+			State:          DriverStateFailed,
+			Mode:           "built-in",
+			PermissionHint: "Built-in native PCM audio unavailable: " + err.Error(),
+			Err:            err,
+		}
+	}
+	return ProbeResult{
+		Name:      "built-in",
+		Available: true,
+		State:     DriverStateActive,
+		Mode:      "built-in",
+	}
+}
+
 func builtInAudioContext() (*oto.Context, error) {
 	builtInAudioOnce.Do(func() {
 		ctx, ready, err := oto.NewContext(&oto.NewContextOptions{
