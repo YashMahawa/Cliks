@@ -3698,6 +3698,10 @@ func clampInt(value, min, max int) int {
 	return value
 }
 
-func isInteractiveTerminal() bool {
+var interactiveTerminalChecker = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func isInteractiveTerminal() bool {
+	return interactiveTerminalChecker()
 }
