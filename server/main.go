@@ -310,6 +310,22 @@ func normalizeNickname(value string) string {
 	return value
 }
 
+func normalizeStatusText(value string) string {
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return -1
+		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	runes := []rune(value)
+	if len(runes) > 60 {
+		value = string(runes[:60])
+	}
+	return value
+}
+
 func boolFeature(features []string, target string) bool {
 	for _, feature := range features {
 		if feature == target {

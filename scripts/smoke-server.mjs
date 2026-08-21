@@ -152,7 +152,7 @@ async function websocketRelaySmoke(url, teamCode) {
   c.send(JSON.stringify({ type: "join", teamCode, nickname: "c", client: { name: "cliks", version: "test", features: ["compact-v1"] } }));
 
   await sleep(250);
-  a.send(JSON.stringify({ type: "profile", nickname: "\u001b[31mAlice\u001b[0m\u001b]0;owned\u0007 Long Name" }));
+  a.send(JSON.stringify({ type: "profile", nickname: "\u001b[31mAlice\u001b[0m\u001b]0;owned\u0007 Long Name", statusText: "\x1b[33mCoding\x1b[0m \x00feature" }));
   await sleep(250);
   a.send(
     JSON.stringify({
@@ -192,6 +192,12 @@ async function websocketRelaySmoke(url, teamCode) {
   });
   if (!sawNamedPresence) {
     throw new Error(`Expected named presence for both peers, got ${JSON.stringify(presences)}`);
+  }
+  const sawStatusText = presences.some((message) => {
+    return (message.peers ?? []).some((peer) => peer.nickname === "Alice Long" && peer.statusText === "Coding feature");
+  });
+  if (!sawStatusText) {
+    throw new Error(`Expected statusText "Coding feature" in presence, got ${JSON.stringify(presences)}`);
   }
 
   return {

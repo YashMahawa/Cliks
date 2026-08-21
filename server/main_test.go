@@ -20,6 +20,15 @@ func TestNormalizeNicknameRemovesControlAndFormatCharacters(t *testing.T) {
 	}
 }
 
+func TestNormalizeStatusTextStripsTerminalSequencesAndTruncates(t *testing.T) {
+	input := "\x1b[31mReviewing\x1b[0m\x1b]0;hack\x07 PR #104 with \x00control \u202efiltered text and a very long note that exceeds sixty characters in total length"
+	got := normalizeStatusText(input)
+	want := "Reviewing PR #104 with control filtered text and a very long"
+	if got != want {
+		t.Fatalf("statusText = %q (len %d), want %q (len %d)", got, len([]rune(got)), want, len([]rune(want)))
+	}
+}
+
 func TestTeamLookupRateLimit(t *testing.T) {
 	srv := &apiServer{
 		store:             NewMemoryTeamStore(),

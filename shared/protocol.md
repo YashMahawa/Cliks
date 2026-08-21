@@ -14,6 +14,7 @@ Incoming WebSocket messages are capped at 8 KiB and each connection has a local 
   "teamCode": "CLIK-842KQ9",
   "nickname": "local optional name",
   "status": "available",
+  "statusText": "Reviewing PR #104",
   "client": {
     "name": "cliks",
     "version": "0.3.0",
@@ -22,7 +23,7 @@ Incoming WebSocket messages are capped at 8 KiB and each connection has a local 
 }
 ```
 
-`nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `status` is one of `available`, `focus`, `break`, or `dnd`; missing and unknown values become `available`. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
+`nickname` is an explicit optional display name, capped at 10 Unicode characters by clients and the relay. ANSI escape sequences, control characters, and Unicode formatting controls are stripped before whitespace normalization and truncation. Empty or whitespace-only names are treated as anonymous. Clients must not infer a name from typed text, OS users, hostnames, app names, or window titles. `status` is one of `available`, `focus`, `break`, or `dnd`; missing and unknown values become `available`. `statusText` is an optional working context note capped at 60 Unicode characters, stripped of ANSI escape sequences, control characters, and Unicode formatting controls before whitespace normalization. `features` is optional; new CLIs send `compact-v1` to receive compact peer-activity frames.
 
 A WebSocket connection has exactly one current room. Sending another valid `join` migrates that connection to the new room and emits updated presence to both rooms; activity is routed only to the new room. Failed joins are limited per source IP. After 20 failed attempts in five minutes, the relay sends the following error and closes the socket so the client reconnect loop backs off:
 
@@ -76,7 +77,8 @@ Used after join when a running CLI notices the local nickname or presence state 
 {
   "type": "profile",
   "nickname": "Mira",
-  "status": "focus"
+  "status": "focus",
+  "statusText": "Reviewing PR #104"
 }
 ```
 
@@ -117,7 +119,7 @@ Every reaction is a room-wide signal delivered to the sender and all currently c
   "teamCode": "CLIK-842KQ9",
   "activeCount": 4,
   "peers": [
-    { "peerId": "peer_abc123", "nickname": "Mira", "joinedAt": 1780000000000, "status": "focus" }
+    { "peerId": "peer_abc123", "nickname": "Mira", "joinedAt": 1780000000000, "status": "focus", "statusText": "Reviewing PR #104" }
   ]
 }
 ```

@@ -593,13 +593,12 @@ func (s *sessionController) configLoop() {
 		case <-ticker.C:
 			cfg := loadConfig()
 			nickname := sanitizeNickname(cfg.Nickname)
-			if nickname != sanitizeNickname(s.cfg.Nickname) {
+			statusText := sanitizeStatusText(cfg.StatusText)
+			if nickname != sanitizeNickname(s.cfg.Nickname) || cfg.PresenceStatus != s.cfg.PresenceStatus || statusText != sanitizeStatusText(s.cfg.StatusText) {
 				s.cfg.Nickname = nickname
-				s.sendProfile(nickname, cfg.PresenceStatus)
-			}
-			if cfg.PresenceStatus != s.cfg.PresenceStatus {
 				s.cfg.PresenceStatus = cfg.PresenceStatus
-				s.sendProfile(nickname, cfg.PresenceStatus)
+				s.cfg.StatusText = statusText
+				s.sendProfile(nickname, cfg.PresenceStatus, statusText)
 			}
 			s.cfg.Notifications = cfg.Notifications
 			if cfg.Listening != s.cfg.Listening {
@@ -646,14 +645,15 @@ func (s *sessionController) commandLoop() {
 	}
 }
 
-func (s *sessionController) sendProfile(nickname string, status string) {
+func (s *sessionController) sendProfile(nickname string, status string, statusText string) {
 	s.wsMu.Lock()
 	conn := s.ws
 	if conn != nil {
 		_ = conn.WriteJSON(map[string]any{
-			"type":     "profile",
-			"nickname": nickname,
-			"status":   status,
+			"type":       "profile",
+			"nickname":   nickname,
+			"status":     status,
+			"statusText": statusText,
 		})
 	}
 	s.wsMu.Unlock()
@@ -681,7 +681,7 @@ func (s *sessionController) cyclePresence() {
 	s.cfg.PresenceStatus = nextPresence(s.cfg.PresenceStatus, 1)
 	_ = saveConfig(s.cfg)
 	if !s.attached {
-		s.sendProfile(sanitizeNickname(s.cfg.Nickname), s.cfg.PresenceStatus)
+		s.sendProfile(sanitizeNickname(s.cfg.Nickname), s.cfg.PresenceStatus, sanitizeStatusText(s.cfg.StatusText))
 	}
 }
 
@@ -743,10 +743,11 @@ func (s *sessionController) connectLoop() {
 			return conn.SetReadDeadline(time.Now().Add(clientWebSocketReadTimeout))
 		})
 		err = conn.WriteJSON(map[string]any{
-			"type":     "join",
-			"teamCode": s.cfg.CurrentTeamCode,
-			"nickname": sanitizeNickname(s.cfg.Nickname),
-			"status":   s.cfg.PresenceStatus,
+			"type":       "join",
+			"teamCode":   s.cfg.CurrentTeamCode,
+			"nickname":   sanitizeNickname(s.cfg.Nickname),
+			"status":     s.cfg.PresenceStatus,
+			"statusText": sanitizeStatusText(s.cfg.StatusText),
 			"client": map[string]any{
 				"name":     "cliks",
 				"version":  version,

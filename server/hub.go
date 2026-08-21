@@ -37,10 +37,11 @@ type ActivityEvent struct {
 }
 
 type PeerPresence struct {
-	PeerID   string `json:"peerId"`
-	Nickname string `json:"nickname,omitempty"`
-	JoinedAt int64  `json:"joinedAt"`
-	Status   string `json:"status,omitempty"`
+	PeerID     string `json:"peerId"`
+	Nickname   string `json:"nickname,omitempty"`
+	JoinedAt   int64  `json:"joinedAt"`
+	Status     string `json:"status,omitempty"`
+	StatusText string `json:"statusText,omitempty"`
 }
 
 type clientConn struct {
@@ -71,6 +72,7 @@ type peer struct {
 	lastSeen            int64
 	compactV1           bool
 	status              string
+	statusText          string
 	reactionWindowStart time.Time
 	reactionCount       int
 }
@@ -182,10 +184,11 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 	switch header.Type {
 	case "join":
 		var message struct {
-			TeamCode string `json:"teamCode"`
-			Nickname string `json:"nickname"`
-			Status   string `json:"status"`
-			Client   struct {
+			TeamCode   string `json:"teamCode"`
+			Nickname   string `json:"nickname"`
+			Status     string `json:"status"`
+			StatusText string `json:"statusText"`
+			Client     struct {
 				Name     string   `json:"name"`
 				Version  string   `json:"version"`
 				Features []string `json:"features"`
@@ -195,17 +198,18 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 			conn.sendJSON(serverError("Invalid join message."))
 			return
 		}
-		h.join(ctx, conn, normalizeTeamCode(message.TeamCode), normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status), boolFeature(message.Client.Features, compactFeatureV1))
+		h.join(ctx, conn, normalizeTeamCode(message.TeamCode), normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status), normalizeStatusText(message.StatusText), boolFeature(message.Client.Features, compactFeatureV1))
 	case "profile":
 		var message struct {
-			Nickname string `json:"nickname"`
-			Status   string `json:"status"`
+			Nickname   string `json:"nickname"`
+			Status     string `json:"status"`
+			StatusText string `json:"statusText"`
 		}
 		if json.Unmarshal(data, &message) != nil {
 			conn.sendJSON(serverError("Invalid profile message."))
 			return
 		}
-		h.updatePeerProfile(conn.id, normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status))
+		h.updatePeerProfile(conn.id, normalizeNickname(message.Nickname), normalizePresenceStatus(message.Status), normalizeStatusText(message.StatusText))
 	case "reaction":
 		var message struct {
 			Reaction     string `json:"reaction"`
@@ -232,7 +236,7 @@ func (h *RoomHub) handleMessage(ctx context.Context, conn *clientConn, data []by
 	}
 }
 
-func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, nickname string, status string, compactV1 bool) {
+func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, nickname string, status string, statusText string, compactV1 bool) {
 	if h.joinRate.Blocked(conn.rateLimitKey) {
 		conn.sendJSONAndClose(joinRateLimitedPayload())
 		return
@@ -266,14 +270,15 @@ func (h *RoomHub) join(ctx context.Context, conn *clientConn, teamCode string, n
 
 	joinedAt := time.Now().UnixMilli()
 	p := &peer{
-		id:        conn.id,
-		nickname:  nickname,
-		conn:      conn,
-		team:      *team,
-		joinedAt:  joinedAt,
-		lastSeen:  joinedAt,
-		compactV1: compactV1,
-		status:    status,
+		id:         conn.id,
+		nickname:   nickname,
+		conn:       conn,
+		team:       *team,
+		joinedAt:   joinedAt,
+		lastSeen:   joinedAt,
+		compactV1:  compactV1,
+		status:     status,
+		statusText: statusText,
 	}
 
 	var previousPayload any
@@ -323,7 +328,7 @@ func (h *RoomHub) rejectUnavailableJoin(conn *clientConn, teamCode string) {
 	}
 }
 
-func (h *RoomHub) updatePeerProfile(peerID string, nickname string, status string) {
+func (h *RoomHub) updatePeerProfile(peerID string, nickname string, status string, statusText string) {
 	var payload any
 	var peers []*peer
 	h.mu.Lock()
@@ -333,6 +338,7 @@ func (h *RoomHub) updatePeerProfile(peerID string, nickname string, status strin
 			if p := currentRoom.peers[peerID]; p != nil {
 				p.nickname = nickname
 				p.status = status
+				p.statusText = statusText
 				p.lastSeen = time.Now().UnixMilli()
 				payload, peers = presenceLocked(currentRoom)
 			}
@@ -693,10 +699,11 @@ func presenceLocked(room *room) (any, []*peer) {
 	for _, p := range room.peers {
 		peers = append(peers, p)
 		presence = append(presence, PeerPresence{
-			PeerID:   p.id,
-			Nickname: p.nickname,
-			JoinedAt: p.joinedAt,
-			Status:   p.status,
+			PeerID:     p.id,
+			Nickname:   p.nickname,
+			JoinedAt:   p.joinedAt,
+			Status:     p.status,
+			StatusText: p.statusText,
 		})
 	}
 	return map[string]any{

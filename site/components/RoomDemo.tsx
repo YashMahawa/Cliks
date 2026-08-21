@@ -5,12 +5,12 @@ import { useAcoustic } from "./AcousticProvider";
 
 /** Six peers scattered across near / mid / far rings — angles offset so they don't clump. */
 const PEERS = [
-  { name: "Mira", role: "design", seat: "near" as const, angle: 28, ring: 0 },
-  { name: "Jules", role: "backend", seat: "mid" as const, angle: 97, ring: 1 },
-  { name: "Ken", role: "mobile", seat: "far" as const, angle: 151, ring: 2 },
-  { name: "Ava", role: "product", seat: "mid" as const, angle: 203, ring: 1 },
-  { name: "Rio", role: "infra", seat: "far" as const, angle: 268, ring: 2 },
-  { name: "Sam", role: "research", seat: "near" as const, angle: 331, ring: 0 },
+  { name: "Mira", role: "design", seat: "near" as const, angle: 28, ring: 0, statusText: "Reviewing PR #104" },
+  { name: "Jules", role: "backend", seat: "mid" as const, angle: 97, ring: 1, statusText: "Refactoring WebSocket hub" },
+  { name: "Ken", role: "mobile", seat: "far" as const, angle: 151, ring: 2, statusText: "" },
+  { name: "Ava", role: "product", seat: "mid" as const, angle: 203, ring: 1, statusText: "Sprint planning" },
+  { name: "Rio", role: "infra", seat: "far" as const, angle: 268, ring: 2, statusText: "Scaling relay cluster" },
+  { name: "Sam", role: "research", seat: "near" as const, angle: 331, ring: 0, statusText: "" },
 ];
 
 /** Distance from center as % of stage — keeps clear air around YOU. */
@@ -243,6 +243,7 @@ export function RoomDemo() {
             <strong>{PEERS[tip].name}</strong>
             <span>
               {PEERS[tip].role} · {PEERS[tip].seat}
+              {PEERS[tip].statusText ? ` · ${PEERS[tip].statusText}` : ""}
             </span>
           </div>
         ) : null}
