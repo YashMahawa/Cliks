@@ -105,7 +105,7 @@ export function RoomForm() {
           />
         </div>
 		<p className="mt-3 text-xs leading-relaxed text-mute">
-			Rooms automatically expire after 48 hours without a live connection. Reconnecting refreshes the clock.
+			Rooms automatically expire after 120 hours (5 days) without a live connection. Reconnecting refreshes the clock.
 		</p>
 
         <div className="mt-6 space-y-4">

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestMemoryStoreExpiresTeamsAfterFortyEightHoursWithoutConnection(t *testing.T) {
+func TestMemoryStoreExpiresTeamsAfterOneHundredTwentyHoursWithoutConnection(t *testing.T) {
 	store := NewMemoryTeamStore()
 	team, err := store.CreateTeam(context.Background(), CreateTeamInput{Name: "Quiet room", DeletePassword: "secret1"})
 	if err != nil {
@@ -46,7 +46,7 @@ func TestMemoryStoreConnectionRefreshesExpiry(t *testing.T) {
 		t.Fatalf("GetTeamByCode() = %#v, %v", got, err)
 	}
 	expires, err := time.Parse(time.RFC3339Nano, got.ExpiresAt)
-	if err != nil || time.Until(expires) < 47*time.Hour {
+	if err != nil || time.Until(expires) < 119*time.Hour {
 		t.Fatalf("expiry was not refreshed: %q (%v)", got.ExpiresAt, err)
 	}
 }

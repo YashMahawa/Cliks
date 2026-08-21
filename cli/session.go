@@ -1006,17 +1006,12 @@ func (s *sessionController) handleTeamUnavailable(teamCode string, message strin
 	if teamCode == "" {
 		teamCode = s.cfg.CurrentTeamCode
 	}
-	cfg, err := forgetTeam(teamCode)
-	if err == nil {
-		s.cfg = cfg
-	}
-	_, _ = autostartAction([]string{"disable"})
 	if message == "" {
 		message = "Team code was not found or was deleted."
 	}
 	s.set(func(state *SessionViewState) {
 		state.ConnectionStatus = "stopped: team unavailable"
-		state.Notice = message + " Removed it from this device."
+		state.Notice = message
 		state.ActiveCount = 0
 	})
 }

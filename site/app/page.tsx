@@ -62,7 +62,7 @@ const faqs = [
   },
   {
     q: "What gets stored?",
-    a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 48 hours without a live connection; reconnecting refreshes the clock.",
+    a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 120 hours (5 days) without a live connection; reconnecting refreshes the clock.",
   },
   {
     q: "Does my terminal get input permission?",
@@ -226,7 +226,7 @@ export default function HomePage() {
                 CLI.
               </p>
 			  <p className="mt-3 max-w-[42ch] font-mono text-xs leading-relaxed text-mute">
-				Unused rooms clean themselves up after 48 hours. Any live connection refreshes the clock.
+				Unused rooms clean themselves up after 120 hours (5 days). Any live connection refreshes the clock.
 			  </p>
             </div>
             <div className="py-14 lg:col-span-7 lg:py-20 lg:pl-10">

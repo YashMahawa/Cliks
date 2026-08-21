@@ -24,7 +24,7 @@ import (
 const (
 	codeAlphabet            = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	dummyDeletePasswordHash = "$2b$12$mMCOaGsqrw5HVe4PboZEdeKqkZZSrer3p4/KmwcbXB0YraVftIwf."
-	teamIdleTTL             = 48 * time.Hour
+	teamIdleTTL             = 120 * time.Hour
 )
 
 var errTeamUnavailable = errors.New("team unavailable")
@@ -158,7 +158,7 @@ func (s *PostgresTeamStore) GetTeamByCode(ctx context.Context, code string) (*Te
 	err := s.db.QueryRowContext(ctx,
 		`select id, code, name, created_at, last_connected_at
 		 from cliks_teams
-		 where code = $1 and deleted_at is null and last_connected_at > now() - interval '48 hours'
+		 where code = $1 and deleted_at is null and last_connected_at > now() - interval '120 hours'
 		 limit 1`,
 		normalizeTeamCode(code),
 	).Scan(&row.ID, &row.Code, &row.Name, &row.CreatedAt, &row.LastConnectedAt)
