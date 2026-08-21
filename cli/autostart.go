@@ -106,40 +106,69 @@ func xmlText(value string) string {
 	return replacer.Replace(value)
 }
 
+func isSystemdUserAvailable() bool {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	return exec.Command("systemctl", "--user", "show-environment").Run() == nil
+}
+
 func linuxAutostart(action, code string) (string, error) {
 	home, _ := os.UserHomeDir()
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		base = filepath.Join(home, ".config")
 	}
-	dir := filepath.Join(base, "systemd", "user")
-	path := filepath.Join(dir, serviceName+".service")
+	systemdDir := filepath.Join(base, "systemd", "user")
+	systemdPath := filepath.Join(systemdDir, serviceName+".service")
+
+	xdgDir := filepath.Join(base, "autostart")
+	xdgPath := filepath.Join(xdgDir, serviceName+".desktop")
+
 	switch action {
 	case "status":
-		runtimeState := "not running"
-		if exec.Command("systemctl", "--user", "is-active", "--quiet", serviceName+".service").Run() == nil {
-			runtimeState = "running now"
+		if _, err := os.Stat(systemdPath); err == nil {
+			runtimeState := "not running"
+			if isSystemdUserAvailable() && exec.Command("systemctl", "--user", "is-active", "--quiet", serviceName+".service").Run() == nil {
+				runtimeState = "running now"
+			}
+			return autostartStatusText(systemdPath, "systemd user service", runtimeState), nil
 		}
-		return autostartStatusText(path, "systemd user service", runtimeState), nil
+		if _, err := os.Stat(xdgPath); err == nil {
+			runtimeState := "not running"
+			if active, ok := activeSession(); ok && active.ConnectionStatus != "stopped" {
+				runtimeState = "running now"
+			}
+			return autostartStatusText(xdgPath, "XDG desktop autostart entry", runtimeState), nil
+		}
+		if isSystemdUserAvailable() {
+			return autostartStatusText(systemdPath, "systemd user service", "not running"), nil
+		}
+		return autostartStatusText(xdgPath, "XDG desktop autostart entry", "not running"), nil
+
 	case "disable":
-		_ = exec.Command("systemctl", "--user", "disable", "--now", serviceName+".service").Run()
-		_ = os.Remove(path)
-		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+		if isSystemdUserAvailable() {
+			_ = exec.Command("systemctl", "--user", "disable", "--now", serviceName+".service").Run()
+		}
+		_ = os.Remove(systemdPath)
+		if isSystemdUserAvailable() {
+			_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+		}
+		_ = os.Remove(xdgPath)
 		return "Cliks autostart disabled.", nil
+
 	case "enable":
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		code, err := normalizeTeamCode(code)
+		if err != nil {
 			return "", err
 		}
 		exe := stableServiceExecutable()
-		quotedExe, err := systemdQuote(exe)
-		if err != nil {
-			return "", err
-		}
-		code, err = normalizeTeamCode(code)
-		if err != nil {
-			return "", err
-		}
-		body := fmt.Sprintf(`[Unit]
+
+		if isSystemdUserAvailable() {
+			if err := os.MkdirAll(systemdDir, 0o755); err == nil {
+				quotedExe, err := systemdQuote(exe)
+				if err == nil {
+					body := fmt.Sprintf(`[Unit]
 Description=Cliks ambient coworking
 After=network-online.target
 
@@ -154,15 +183,42 @@ Environment=CLIKS_RUN_MODE=%s
 [Install]
 WantedBy=default.target
 `, quotedExe, code, runModeBoot)
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					if err := os.WriteFile(systemdPath, []byte(body), 0o644); err == nil {
+						reload := exec.Command("systemctl", "--user", "daemon-reload").Run()
+						enable := exec.Command("systemctl", "--user", "enable", "--now", serviceName+".service").Run()
+						if reload == nil && enable == nil {
+							_ = os.Remove(xdgPath)
+							return fmt.Sprintf("Cliks autostart enabled for %s.", code), nil
+						}
+					}
+				}
+			}
+		}
+
+		if err := os.MkdirAll(xdgDir, 0o755); err != nil {
 			return "", err
 		}
-		reload := exec.Command("systemctl", "--user", "daemon-reload").Run()
-		enable := exec.Command("systemctl", "--user", "enable", "--now", serviceName+".service").Run()
-		if reload != nil || enable != nil {
-			return fmt.Sprintf("Service file written for %s. Run: systemctl --user enable --now %s.service", code, serviceName), nil
+		if err := validateLauncherValue("executable path", exe); err != nil {
+			return "", err
+		}
+		quotedExe := exe
+		if strings.Contains(quotedExe, " ") {
+			quotedExe = `"` + strings.ReplaceAll(quotedExe, `"`, `\"`) + `"`
+		}
+		desktopBody := fmt.Sprintf(`[Desktop Entry]
+Type=Application
+Name=Cliks
+Comment=Cliks ambient coworking
+Exec=env CLIKS_AUTOSTART_TEAM=%s CLIKS_RUN_MODE=%s %s start
+Terminal=false
+X-GNOME-Autostart-enabled=true
+`, code, runModeBoot, quotedExe)
+
+		if err := os.WriteFile(xdgPath, []byte(desktopBody), 0o644); err != nil {
+			return "", err
 		}
 		return fmt.Sprintf("Cliks autostart enabled for %s.", code), nil
+
 	default:
 		return "", fmt.Errorf("unknown autostart action: %s", action)
 	}

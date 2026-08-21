@@ -27,3 +27,7 @@ func platformCaptureSetup() []setupStep {
 	})
 	return steps
 }
+
+func userInGroup(username, groupName string) (bool, error) {
+	return false, nil
+}

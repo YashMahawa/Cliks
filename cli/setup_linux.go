@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -60,19 +62,96 @@ func currentUsername() string {
 }
 
 func userInGroup(username, groupName string) (bool, error) {
-	data, err := os.ReadFile("/etc/group")
-	if err != nil {
-		return false, err
+	username = strings.TrimSpace(username)
+	groupName = strings.TrimSpace(groupName)
+	if groupName == "" {
+		return false, nil
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		parts := strings.Split(line, ":")
-		if len(parts) >= 4 && parts[0] == groupName {
-			for _, member := range strings.Split(parts[3], ",") {
-				if strings.TrimSpace(member) == username {
+	if username == "" {
+		username = currentUsername()
+	}
+
+	// 1. Resolve via system Name Service Switch runtime APIs
+	if u, err := user.Lookup(username); err == nil {
+		if g, err := user.LookupGroup(groupName); err == nil {
+			if u.Gid == g.Gid {
+				return true, nil
+			}
+			if gids, err := u.GroupIds(); err == nil {
+				for _, gid := range gids {
+					if gid == g.Gid {
+						return true, nil
+					}
+				}
+			}
+		} else if gids, err := u.GroupIds(); err == nil {
+			for _, gid := range gids {
+				if grp, err := user.LookupGroupId(gid); err == nil && grp.Name == groupName {
 					return true, nil
 				}
 			}
 		}
+	} else if u, err := user.Current(); err == nil && (username == "" || u.Username == username) {
+		if g, err := user.LookupGroup(groupName); err == nil {
+			if u.Gid == g.Gid {
+				return true, nil
+			}
+			if gids, err := u.GroupIds(); err == nil {
+				for _, gid := range gids {
+					if gid == g.Gid {
+						return true, nil
+					}
+				}
+			}
+		}
 	}
+
+	// Also check process active groups (os.Getgroups)
+	if processGids, err := os.Getgroups(); err == nil {
+		if g, err := user.LookupGroup(groupName); err == nil {
+			if targetGid, err := strconv.Atoi(g.Gid); err == nil {
+				for _, pg := range processGids {
+					if pg == targetGid {
+						return true, nil
+					}
+				}
+			}
+		}
+		for _, pg := range processGids {
+			if grp, err := user.LookupGroupId(strconv.Itoa(pg)); err == nil && grp.Name == groupName {
+				return true, nil
+			}
+		}
+	}
+
+	// 2. Fall back to command-line user lookup utilities
+	var idCmd *exec.Cmd
+	if username != "" {
+		idCmd = exec.Command("id", "-Gn", username)
+	} else {
+		idCmd = exec.Command("id", "-Gn")
+	}
+	if out, err := idCmd.Output(); err == nil {
+		for _, g := range strings.Fields(string(out)) {
+			if g == groupName {
+				return true, nil
+			}
+		}
+	}
+
+	if out, err := exec.Command("getent", "group", groupName).Output(); err == nil {
+		line := strings.TrimSpace(string(out))
+		parts := strings.Split(line, ":")
+		if len(parts) >= 4 && parts[0] == groupName {
+			if username != "" {
+				for _, member := range strings.Split(parts[3], ",") {
+					if strings.TrimSpace(member) == username {
+						return true, nil
+					}
+				}
+			}
+		}
+	}
+
 	return false, nil
 }

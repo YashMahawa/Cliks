@@ -61,3 +61,7 @@ func openMacInputMonitoringSettings() bool {
 	}
 	return false
 }
+
+func userInGroup(username, groupName string) (bool, error) {
+	return false, nil
+}
