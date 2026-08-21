@@ -10,41 +10,74 @@ import (
 )
 
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
-	if helper := macCaptureHelperPath(); helper != "" {
-		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "installed"})
+	helper := macCaptureHelperPath()
+	if helper != "" {
+		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "installed (" + helper + ")"})
 	} else {
-		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "missing"})
+		report.checks = append(report.checks, doctorCheck{"Isolated capture app", "missing / unlinked"})
 		report.issues = append(report.issues, doctorIssue{
-			title:  "Install isolated macOS capture",
-			detail: "Reinstall Cliks, then grant Input Monitoring only to Cliks Capture.app. Do not grant it to your terminal unless you explicitly choose compatibility mode.",
+			title:  "Install isolated macOS capture helper bundle",
+			detail: "Cliks Capture.app helper bundle is missing or unlinked. Run cliks setup or reinstall Cliks.",
 			commands: []string{
-				"Re-run the Cliks installer",
-				"Open System Settings > Privacy & Security > Input Monitoring > Cliks Capture",
-				"cliks capture-test",
+				"cliks setup",
+				"Re-run the Cliks curl installer",
+				"Open System Settings → Privacy & Security → Input Monitoring (x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent)",
 			},
 		})
 	}
 
+	trusted, reason := macInputMonitoringTrusted()
+	if trusted {
+		report.checks = append(report.checks, doctorCheck{"Input Monitoring trust", "granted (" + reason + ")"})
+	} else {
+		report.checks = append(report.checks, doctorCheck{"Input Monitoring trust", "denied or uninitialized (" + reason + ")"})
+		if helper != "" {
+			report.issues = append(report.issues, doctorIssue{
+				title:  "Grant Input Monitoring permission to Cliks Capture.app",
+				detail: "Input Monitoring is required for Cliks Capture.app. Grant permission to the helper bundle in System Settings.",
+				commands: []string{
+					"Open System Settings → Privacy & Security → Input Monitoring (x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent)",
+					"cliks setup",
+					"cliks capture-test",
+				},
+			})
+		}
+	}
+
 	if thorough {
 		// Self-test only for explicit doctor runs — never block session startup.
-		probe := probeGlobalCapture(1500 * time.Millisecond)
+		probe := probeGlobalCapture(2500 * time.Millisecond)
 		report.checks = append(report.checks, doctorCheck{"Capture backend probe", probe})
 		if strings.Contains(probe, "off") || strings.Contains(probe, "failed") {
-			report.issues = append(report.issues, doctorIssue{
-				title:    "Global capture probe did not stay active",
-				detail:   "The native Event Tap did not report a healthy capture mode. Grant Input Monitoring, restart Cliks, then re-test.",
-				commands: []string{"cliks capture-test", "cliks start --terminal --self"},
-			})
+			if helper == "" {
+				report.issues = append(report.issues, doctorIssue{
+					title:  "Capture backend probe failed: helper bundle missing",
+					detail: "The capture probe failed because Cliks Capture.app is missing. Reinstall Cliks or run cliks setup.",
+					commands: []string{"cliks setup", "Re-run the Cliks curl installer"},
+				})
+			} else if !trusted {
+				// Covered by Input Monitoring issue
+			} else {
+				report.issues = append(report.issues, doctorIssue{
+					title:    "Global capture probe did not stay active",
+					detail:   "The native Event Tap did not report a healthy capture mode. Grant Input Monitoring, restart Cliks, then re-test.",
+					commands: []string{"cliks capture-test", "cliks start --terminal --self"},
+				})
+			}
 		}
 	}
 	report.recommendation = []string{"Recommended run command:", "cliks start"}
 }
 
 func macInputMonitoringTrusted() (bool, string) {
-	if macListenEventAccessAllowed() {
-		return true, "CoreGraphics preflight"
+	helper := macCaptureHelperPath()
+	if helper == "" {
+		return false, "Cliks Capture.app helper bundle missing"
 	}
-	return false, "CoreGraphics preflight"
+	if macCaptureHelperReady() {
+		return true, "Cliks Capture.app helper bundle"
+	}
+	return false, "Cliks Capture.app helper bundle"
 }
 
 func probeGlobalCapture(timeout time.Duration) string {
