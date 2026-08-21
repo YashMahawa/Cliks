@@ -402,11 +402,11 @@ func (a *AudioEngine) enqueueScaled(event RemoteActivityEvent, placement peerPla
 	job := playbackJob{
 		File:   samples[rand.Intn(len(samples))],
 		Gain:   clamp(listening.Volume*sourceGain*(1/placement.Distance)*fatigueGain, 0, 1),
-		Pan:    0,
+		Pan:    clamp(listening.Balance, -0.95, 0.95),
 		Device: listening.AudioDevice,
 	}
 	if listening.Spatial {
-		job.Pan = placement.Pan
+		job.Pan = clamp(placement.Pan+listening.Balance, -0.95, 0.95)
 	}
 	select {
 	case <-a.ctx.Done():

@@ -64,6 +64,32 @@ func TestSetPersistsZeroMasterVolume(t *testing.T) {
 	}
 }
 
+func TestSetVolumeStepAndBalance(t *testing.T) {
+	isolateSetConfig(t)
+	if err := cmdSet([]string{"volume.step", "0.02", "balance", "-0.40"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadConfig()
+	if cfg.Listening.VolumeStep != 0.02 {
+		t.Fatalf("volume.step = %v, want 0.02", cfg.Listening.VolumeStep)
+	}
+	if cfg.Listening.Balance != -0.40 {
+		t.Fatalf("balance = %v, want -0.40", cfg.Listening.Balance)
+	}
+
+	// Test alias and bounds clamping
+	if err := cmdSet([]string{"stereo.balance", "1.5", "volume.step", "0.50"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg = loadConfig()
+	if cfg.Listening.VolumeStep != 0.25 {
+		t.Fatalf("volume.step clamped = %v, want 0.25", cfg.Listening.VolumeStep)
+	}
+	if cfg.Listening.Balance != 0.95 {
+		t.Fatalf("stereo.balance clamped = %v, want 0.95", cfg.Listening.Balance)
+	}
+}
+
 func TestSetEndpointQueuesRunningSessionReconnect(t *testing.T) {
 	isolateSetConfig(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

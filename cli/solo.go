@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -224,6 +225,15 @@ func (m *soloModel) setPeople(count int) {
 }
 
 func (m *soloModel) adjustVolume(delta float64) {
+	step := m.cfg.Listening.VolumeStep
+	if step <= 0 {
+		step = 0.05
+	}
+	if delta > 0 {
+		delta = step
+	} else if delta < 0 {
+		delta = -step
+	}
 	m.cfg.Listening.Volume = clamp(m.cfg.Listening.Volume+delta, 0, 1)
 	m.applyListening()
 }
@@ -242,11 +252,15 @@ func (m *soloModel) adjustSoloVolume(kind string, delta float64) {
 		m.cfg.Listening.AmbientVolume = clamp(m.cfg.Listening.AmbientVolume+delta, 0.05, 1)
 		m.applyListening()
 		return
+	case "balance":
+		m.cfg.Listening.Balance = clamp(m.cfg.Listening.Balance+delta, -0.95, 0.95)
+		m.applyListening()
+		return
 	}
 	m.persist()
 }
 
-var soloSliderActions = []string{"master-slider", "keyboard-slider", "mouse-slider", "ambient-slider"}
+var soloSliderActions = []string{"master-slider", "balance-slider", "keyboard-slider", "mouse-slider", "ambient-slider"}
 
 func isSoloSlider(action string) bool {
 	for _, candidate := range soloSliderActions {
@@ -281,6 +295,8 @@ func (m *soloModel) adjustActiveSlider(delta float64) {
 		m.adjustSoloVolume("mouse", delta)
 	case "ambient-slider":
 		m.adjustSoloVolume("ambient", delta)
+	case "balance-slider":
+		m.adjustSoloVolume("balance", delta)
 	default:
 		m.adjustVolume(delta)
 	}
@@ -290,6 +306,9 @@ func (m *soloModel) setSliderFromPointer(region liveHitRegion, x int) {
 	trackWidth := maxInt(1, region.width-2)
 	value := clamp(float64(x-region.x-1)/float64(trackWidth-1), 0, 1)
 	switch region.action {
+	case "balance-slider":
+		m.cfg.Listening.Balance = clamp(-0.95+value*1.9, -0.95, 0.95)
+		m.applyListening()
 	case "keyboard-slider":
 		m.cfg.Solo.KeyboardVolume = value
 		m.persist()
@@ -396,6 +415,7 @@ func (m soloModel) controlView(width int, height int, compact bool) string {
 			styleAccent.Render("SOLO MIX"),
 			"Coworkers    " + m.button("less", "−") + "  " + styleSecond.Render(fmt.Sprintf("%2d", m.cfg.Solo.People)) + "  " + m.button("more", "+"),
 			m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
+			m.sliderLine("balance-slider", "Balance", m.cfg.Listening.Balance, width),
 			m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
 			m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
 			m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
@@ -413,6 +433,7 @@ func (m soloModel) controlView(width int, height int, compact bool) string {
 			"",
 			styleSecond.Render("SOUND MIX"),
 			m.sliderLine("master-slider", "Master", m.cfg.Listening.Volume, width),
+			m.sliderLine("balance-slider", "Balance", m.cfg.Listening.Balance, width),
 			m.button("keyboard", "Keyboard  "+onOff(m.cfg.Solo.Keyboard)),
 			m.sliderLine("keyboard-slider", "Keyboard", m.cfg.Solo.KeyboardVolume, width),
 			m.button("mouse", "Clicks    "+onOff(m.cfg.Solo.Mouse)),
@@ -439,12 +460,30 @@ func (m soloModel) controlView(width int, height int, compact bool) string {
 
 func (m soloModel) sliderLine(action string, label string, value float64, width int) string {
 	trackWidth := clampInt(width-20, 10, 24)
-	filled := clampInt(int(value*float64(trackWidth)+.5), 0, trackWidth)
-	track := "[" + styleAccent.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", trackWidth-filled)) + "]"
 	prefix := "  "
 	if action == m.activeSlider() {
 		prefix = styleSecond.Render("› ")
 	}
+	if action == "balance-slider" {
+		norm := (value - (-0.95)) / 1.9
+		filled := clampInt(int(norm*float64(trackWidth)+.5), 0, trackWidth)
+		track := "[" + styleAccent.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", trackWidth-filled)) + "]"
+		valStr := " Center"
+		if math.Abs(value) < 0.01 {
+			valStr = " Center"
+		} else if value < 0 {
+			valStr = fmt.Sprintf(" L %.2f", -value)
+		} else {
+			valStr = fmt.Sprintf(" R %.2f", value)
+		}
+		line := prefix + fmt.Sprintf("%-11s", label) + track + fmt.Sprintf("%7s", valStr)
+		if m.hoverAction == action {
+			return styleSelected.Render(ansi.Strip(line))
+		}
+		return line
+	}
+	filled := clampInt(int(value*float64(trackWidth)+.5), 0, trackWidth)
+	track := "[" + styleAccent.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", trackWidth-filled)) + "]"
 	line := prefix + fmt.Sprintf("%-11s", label) + track + fmt.Sprintf(" %3.0f%%", value*100)
 	if m.hoverAction == action {
 		return styleSelected.Render(ansi.Strip(line))
@@ -512,7 +551,7 @@ func (m soloModel) hitRegions() []liveHitRegion {
 		}
 	nextTarget:
 	}
-	for index, label := range []string{"Master", "Keyboard", "Clicks", "Room level"} {
+	for index, label := range []string{"Master", "Balance", "Keyboard", "Clicks", "Room level"} {
 		action := soloSliderActions[index]
 		for y, styledLine := range strings.Split(rendered, "\n") {
 			line := ansi.Strip(styledLine)

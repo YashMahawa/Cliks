@@ -732,3 +732,65 @@ func TestNewUsersGetDynamicCircleByDefault(t *testing.T) {
 		t.Fatal("DynamicPlacement = false, want true for new configurations")
 	}
 }
+
+func TestNonFormMuteShortcutTogglesMuteState(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.Listening.Muted = false
+
+	model := homeModel{cfg: cfg, mode: "home"}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got := updated.(homeModel)
+
+	if !got.cfg.Listening.Muted {
+		t.Fatalf("muted = false after 'm' keypress in home view, want true")
+	}
+	if got.message != "Muted." {
+		t.Fatalf("message = %q, want Muted.", got.message)
+	}
+
+	// Toggling 'm' again should unmute
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got = updated.(homeModel)
+	if got.cfg.Listening.Muted {
+		t.Fatalf("muted = true after second 'm' keypress in home view, want false")
+	}
+	if got.message != "Unmuted." {
+		t.Fatalf("message = %q, want Unmuted.", got.message)
+	}
+}
+
+func TestFormMuteShortcutInputsCharMWithoutMuting(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.Listening.Muted = false
+
+	model := homeModel{cfg: cfg, mode: "nickname", nicknameValue: "Sa", formTextCursor: 2}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got := updated.(homeModel)
+
+	if got.cfg.Listening.Muted {
+		t.Fatalf("muted = true after 'm' keypress in nickname form, want false")
+	}
+	if got.nicknameValue != "Sam" {
+		t.Fatalf("nicknameValue = %q, want Sam", got.nicknameValue)
+	}
+}
+
+func TestVolumeStepInPreferencesAndLiveSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.Listening.Volume = 0.50
+	cfg.Listening.VolumeStep = 0.02
+
+	controller := newSessionController(cfg, StartOptions{}, nil)
+	model := newSessionModel(controller)
+
+	// Up key in live session
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
+	_ = updated.(sessionModel)
+
+	if got := controller.cfg.Listening.Volume; got < 0.519 || got > 0.521 {
+		t.Fatalf("volume after step = %v, want 0.52", got)
+	}
+}

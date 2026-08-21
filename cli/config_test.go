@@ -215,6 +215,37 @@ func TestDefaultRoomToneVolumeIsFiftyPercent(t *testing.T) {
 	}
 }
 
+func TestVolumeStepAndBalanceDefaultsAndBounds(t *testing.T) {
+	def := defaultConfig()
+	if def.Listening.VolumeStep != 0.05 {
+		t.Fatalf("default volume step = %v, want 0.05", def.Listening.VolumeStep)
+	}
+	if def.Listening.Balance != 0.0 {
+		t.Fatalf("default balance = %v, want 0.0", def.Listening.Balance)
+	}
+
+	cfg := def
+	cfg.Listening.VolumeStep = 0.50
+	cfg.Listening.Balance = 1.5
+	normalizeConfig(&cfg)
+	if cfg.Listening.VolumeStep != 0.25 {
+		t.Fatalf("normalized upper volume step = %v, want 0.25", cfg.Listening.VolumeStep)
+	}
+	if cfg.Listening.Balance != 0.95 {
+		t.Fatalf("normalized upper balance = %v, want 0.95", cfg.Listening.Balance)
+	}
+
+	cfg.Listening.VolumeStep = 0.001
+	cfg.Listening.Balance = -1.5
+	normalizeConfig(&cfg)
+	if cfg.Listening.VolumeStep != 0.01 {
+		t.Fatalf("normalized lower volume step = %v, want 0.01", cfg.Listening.VolumeStep)
+	}
+	if cfg.Listening.Balance != -0.95 {
+		t.Fatalf("normalized lower balance = %v, want -0.95", cfg.Listening.Balance)
+	}
+}
+
 func TestSystemdQuoteHandlesSpaces(t *testing.T) {
 	got, err := systemdQuote(`/home/user/My Apps/cliks`)
 	if err != nil {

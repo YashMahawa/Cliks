@@ -4,7 +4,7 @@ import "testing"
 
 func TestSettingCatalogCoversUserFacingKeys(t *testing.T) {
 	required := []string{
-		"autostart", "keep.running", "nickname", "name", "volume", "density",
+		"autostart", "keep.running", "nickname", "name", "volume", "volume.step", "balance", "stereo.balance", "density",
 		"hear.muted", "hear.spatial", "hear.fade", "hear.keyboard", "hear.mouse", "hear.self",
 		"share.keyboard", "share.mouse", "spatial.dynamic", "spatial.shuffleMinutes",
 		"solo.keyboardVolume", "solo.mouseVolume",
