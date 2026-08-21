@@ -39,11 +39,14 @@ cliks setup                 # grant access / check readiness
 
 The installer runs a small root-owned hardened helper. Its socket is owned by
 the configured desktop user with mode `0600`; connections must also come from
-the installed Cliks executable as that UID. The helper emits only while that
-user owns an active local logind seat, preventing activity from another signed-
-in desktop session from entering the room. The client receives only `k`, `l`,
-or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically grants
-the desktop user raw input ACLs or adds that user to `input`.
+the installed Cliks executable as that UID. Prior to opening input device handles,
+the helper inspects udev seat attributes (`ID_SEAT`) and opens only devices
+assigned to active seats owned by the target user (defaulting untagged devices to
+`seat0`), re-evaluating seat rules during each periodic discovery pass. The helper
+emits only while that user owns an active local logind seat, preventing activity
+from another signed-in desktop session from entering the room. The client receives
+only `k`, `l`, or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically
+grants the desktop user raw input ACLs or adds that user to `input`.
 
 Authorization is tied to the exact connecting process, not only its numeric
 PID. The helper obtains and retains a Linux pidfd, checks that identity around
