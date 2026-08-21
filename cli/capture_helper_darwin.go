@@ -4,11 +4,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,27 +21,52 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 	}
 	helper := macCaptureHelperPath()
 	if helper == "" {
-		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture.app is missing. Run cliks setup or reinstall. You can temporarily opt into the less-safe terminal permission with: cliks set capture.mode direct"}
+		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture.app helper bundle is missing or unlinked. Run cliks setup or reinstall Cliks. Direct mode is available: cliks set capture.mode direct"}
 	}
 	cmd := exec.CommandContext(ctx, helper, "--stdio")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return CaptureState{Mode: "off", PermissionHint: "Could not open Cliks Capture.app output. Run cliks setup."}
+		return CaptureState{Mode: "off", PermissionHint: "Could not create stdout pipe for Cliks Capture.app: " + err.Error()}
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return CaptureState{Mode: "off", PermissionHint: "Could not create stderr pipe for Cliks Capture.app: " + err.Error()}
 	}
 	if err := cmd.Start(); err != nil {
-		return CaptureState{Mode: "off", PermissionHint: "Could not start Cliks Capture.app. Run cliks setup; direct compatibility mode remains available in Capture safety."}
+		return CaptureState{Mode: "off", PermissionHint: "Could not start Cliks Capture.app: " + err.Error()}
 	}
-	scanner := bufio.NewScanner(stdout)
-	ready := make(chan bool, 1)
+
+	var stderrBuf bytes.Buffer
+	var stderrMu sync.Mutex
 	go func() {
-		defer cmd.Wait()
-		if !scanner.Scan() || scanner.Text() != "ready" {
-			ready <- false
-			return
-		}
-		ready <- true
+		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			switch scanner.Text() {
+			line := scanner.Text()
+			stderrMu.Lock()
+			if stderrBuf.Len() > 0 {
+				stderrBuf.WriteString("\n")
+			}
+			stderrBuf.WriteString(line)
+			stderrMu.Unlock()
+		}
+	}()
+
+	readyChan := make(chan struct{})
+	cmdDone := make(chan error, 1)
+
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		firstLine := true
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if firstLine {
+				firstLine = false
+				if line == "ready" {
+					close(readyChan)
+					continue
+				}
+			}
+			switch line {
 			case "k":
 				if sharing.Keyboard {
 					c.emit(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
@@ -54,19 +82,43 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 			}
 		}
 	}()
+	go func() {
+		cmdDone <- cmd.Wait()
+	}()
+
+	launchTimeout := 3 * time.Second
 	select {
-	case ok := <-ready:
-		if !ok {
-			return CaptureState{Mode: "off", PermissionHint: "Cliks Capture could not start its input tap. Allow Cliks Capture.app in Input Monitoring, then restart Cliks."}
+	case <-readyChan:
+		return CaptureState{Mode: "macos-isolated-app", PermissionHint: "Input Monitoring belongs to Cliks Capture.app, not your terminal. Remove it later in System Settings at any time."}
+	case err := <-cmdDone:
+		stderrMu.Lock()
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		stderrMu.Unlock()
+		if stderrStr == "" {
+			if err != nil {
+				stderrStr = fmt.Sprintf("Cliks Capture helper process exited unexpectedly (%v).", err)
+			} else {
+				stderrStr = "Cliks Capture helper process exited without emitting ready token."
+			}
 		}
-	case <-time.After(2 * time.Second):
-		_ = cmd.Process.Kill()
-		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture is waiting for Input Monitoring. Approve the macOS prompt, then restart Cliks."}
+		return CaptureState{Mode: "off", PermissionHint: stderrStr}
+	case <-time.After(launchTimeout):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		stderrMu.Lock()
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		stderrMu.Unlock()
+		if stderrStr == "" {
+			stderrStr = "Cliks Capture initialization timed out waiting for ready token."
+		}
+		return CaptureState{Mode: "off", PermissionHint: stderrStr}
 	case <-ctx.Done():
-		_ = cmd.Process.Kill()
-		return CaptureState{Mode: "off", PermissionHint: "Capture stopped."}
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return CaptureState{Mode: "off", PermissionHint: "Capture cancelled during startup."}
 	}
-	return CaptureState{Mode: "macos-isolated-app", PermissionHint: "Input Monitoring belongs to Cliks Capture.app, not your terminal. Remove it later in System Settings at any time."}
 }
 
 func macCaptureHelperPath() string {
@@ -102,19 +154,23 @@ func macCaptureHelperReady() bool {
 	if err := cmd.Start(); err != nil {
 		return false
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
-	ready := make(chan bool, 1)
+	readyChan := make(chan struct{})
 	go func() {
 		scanner := bufio.NewScanner(stdout)
-		ready <- scanner.Scan() && scanner.Text() == "ready"
+		if scanner.Scan() {
+			if strings.TrimSpace(scanner.Text()) == "ready" {
+				close(readyChan)
+			}
+		}
 	}()
 	select {
-	case ok := <-ready:
-		return ok
+	case <-readyChan:
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return true
 	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return false
 	}
 }
