@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,8 +15,13 @@ import (
 func setupMockAudioPlayer(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	mpvPath := filepath.Join(dir, "mpv")
-	_ = os.WriteFile(mpvPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	if runtime.GOOS == "windows" {
+		_ = os.WriteFile(filepath.Join(dir, "mpv.bat"), []byte("@echo off\r\nexit /b 0\r\n"), 0755)
+		_ = os.WriteFile(filepath.Join(dir, "mpv.cmd"), []byte("@echo off\r\nexit /b 0\r\n"), 0755)
+		_ = os.WriteFile(filepath.Join(dir, "mpv.exe"), []byte(""), 0755)
+	} else {
+		_ = os.WriteFile(filepath.Join(dir, "mpv"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
