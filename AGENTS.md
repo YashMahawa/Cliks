@@ -195,6 +195,7 @@ cliks set hear.self off
 cliks set autostart on
 cliks set audio.device default
 cliks preset deep
+cliks status
 cliks background status
 cliks autostart status
 ```
