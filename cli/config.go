@@ -118,6 +118,35 @@ type CaptureConfig struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+type KeymapConfig struct {
+	Up              string `json:"up,omitempty"`
+	Down            string `json:"down,omitempty"`
+	Left            string `json:"left,omitempty"`
+	Right           string `json:"right,omitempty"`
+	Select          string `json:"select,omitempty"`
+	Back            string `json:"back,omitempty"`
+	Help            string `json:"help,omitempty"`
+	Signal1         string `json:"signal1,omitempty"`
+	Signal2         string `json:"signal2,omitempty"`
+	Signal3         string `json:"signal3,omitempty"`
+	Signal4         string `json:"signal4,omitempty"`
+	Signal5         string `json:"signal5,omitempty"`
+	Presence        string `json:"presence,omitempty"`
+	VolumeUp        string `json:"volumeUp,omitempty"`
+	VolumeDown      string `json:"volumeDown,omitempty"`
+	DensityUp       string `json:"densityUp,omitempty"`
+	DensityDown     string `json:"densityDown,omitempty"`
+	ToggleMute      string `json:"toggleMute,omitempty"`
+	ToggleSpatial   string `json:"toggleSpatial,omitempty"`
+	ToggleFatigue   string `json:"toggleFatigue,omitempty"`
+	LivePreferences string `json:"livePreferences,omitempty"`
+	Stop            string `json:"stop,omitempty"`
+	FormNext        string `json:"formNext,omitempty"`
+	FormPrev        string `json:"formPrev,omitempty"`
+	FormSubmit      string `json:"formSubmit,omitempty"`
+	FormCancel      string `json:"formCancel,omitempty"`
+}
+
 type CliksConfig struct {
 	APIURL          string             `json:"apiUrl"`
 	WSURL           string             `json:"wsUrl"`
@@ -138,6 +167,7 @@ type CliksConfig struct {
 	Capture         CaptureConfig      `json:"capture"`
 	Solo            SoloConfig         `json:"solo"`
 	BatchWindowMs   int                `json:"batchWindowMs"`
+	Keymap          KeymapConfig       `json:"keymap,omitempty"`
 }
 
 func defaultConfig() CliksConfig {
@@ -500,4 +530,180 @@ func clamp(value, min, max float64) float64 {
 		return max
 	}
 	return value
+}
+
+func getBinding(cfg CliksConfig, action string) string {
+	var userBinding string
+	switch action {
+	case "up":
+		userBinding = cfg.Keymap.Up
+	case "down":
+		userBinding = cfg.Keymap.Down
+	case "left":
+		userBinding = cfg.Keymap.Left
+	case "right":
+		userBinding = cfg.Keymap.Right
+	case "select":
+		userBinding = cfg.Keymap.Select
+	case "back":
+		userBinding = cfg.Keymap.Back
+	case "help":
+		userBinding = cfg.Keymap.Help
+	case "signal1":
+		userBinding = cfg.Keymap.Signal1
+	case "signal2":
+		userBinding = cfg.Keymap.Signal2
+	case "signal3":
+		userBinding = cfg.Keymap.Signal3
+	case "signal4":
+		userBinding = cfg.Keymap.Signal4
+	case "signal5":
+		userBinding = cfg.Keymap.Signal5
+	case "presence":
+		userBinding = cfg.Keymap.Presence
+	case "volumeUp":
+		userBinding = cfg.Keymap.VolumeUp
+	case "volumeDown":
+		userBinding = cfg.Keymap.VolumeDown
+	case "densityUp":
+		userBinding = cfg.Keymap.DensityUp
+	case "densityDown":
+		userBinding = cfg.Keymap.DensityDown
+	case "toggleMute":
+		userBinding = cfg.Keymap.ToggleMute
+	case "toggleSpatial":
+		userBinding = cfg.Keymap.ToggleSpatial
+	case "toggleFatigue":
+		userBinding = cfg.Keymap.ToggleFatigue
+	case "livePreferences":
+		userBinding = cfg.Keymap.LivePreferences
+	case "stop":
+		userBinding = cfg.Keymap.Stop
+	case "formNext":
+		userBinding = cfg.Keymap.FormNext
+	case "formPrev":
+		userBinding = cfg.Keymap.FormPrev
+	case "formSubmit":
+		userBinding = cfg.Keymap.FormSubmit
+	case "formCancel":
+		userBinding = cfg.Keymap.FormCancel
+	}
+
+	userBinding = strings.TrimSpace(userBinding)
+	if userBinding != "" {
+		return userBinding
+	}
+
+	switch action {
+	case "up":
+		return "up, k"
+	case "down":
+		return "down, j"
+	case "left":
+		return "left, h"
+	case "right":
+		return "right, l"
+	case "select":
+		return "enter, space"
+	case "back":
+		return "esc, q"
+	case "help":
+		return "?"
+	case "signal1":
+		return "1"
+	case "signal2":
+		return "2"
+	case "signal3":
+		return "3"
+	case "signal4":
+		return "4"
+	case "signal5":
+		return "5"
+	case "presence":
+		return "p"
+	case "volumeUp":
+		return "up, +"
+	case "volumeDown":
+		return "down, -"
+	case "densityUp":
+		return "right, ]"
+	case "densityDown":
+		return "left, ["
+	case "toggleMute":
+		return "m"
+	case "toggleSpatial":
+		return "s"
+	case "toggleFatigue":
+		return "f"
+	case "livePreferences":
+		return "tab, shift+s"
+	case "stop":
+		return "x, ctrl+c"
+	case "formNext":
+		return "tab, down"
+	case "formPrev":
+		return "shift+tab, up"
+	case "formSubmit":
+		return "enter"
+	case "formCancel":
+		return "esc"
+	default:
+		return ""
+	}
+}
+
+func keyMatches(msgKey string, binding string) bool {
+	if binding == "" || msgKey == "" {
+		return false
+	}
+	parts := strings.Split(binding, ",")
+	msgKeyLower := strings.ToLower(strings.TrimSpace(msgKey))
+	for _, part := range parts {
+		p := strings.ToLower(strings.TrimSpace(part))
+		if p == msgKeyLower {
+			return true
+		}
+	}
+	return false
+}
+
+func formatKeyDisplay(binding string) string {
+	parts := strings.Split(binding, ",")
+	var formatted []string
+	for _, p := range parts {
+		item := strings.TrimSpace(p)
+		if item == "" {
+			continue
+		}
+		switch strings.ToLower(item) {
+		case "up":
+			formatted = append(formatted, "Up")
+		case "down":
+			formatted = append(formatted, "Down")
+		case "left":
+			formatted = append(formatted, "Left")
+		case "right":
+			formatted = append(formatted, "Right")
+		case "enter":
+			formatted = append(formatted, "Enter")
+		case "space":
+			formatted = append(formatted, "Space")
+		case "esc":
+			formatted = append(formatted, "Esc")
+		case "tab":
+			formatted = append(formatted, "Tab")
+		case "shift+tab":
+			formatted = append(formatted, "Shift+Tab")
+		case "shift+s":
+			formatted = append(formatted, "Shift+S")
+		case "ctrl+c":
+			formatted = append(formatted, "Ctrl+C")
+		default:
+			formatted = append(formatted, item)
+		}
+	}
+	if len(formatted) == 0 {
+		return binding
+	}
+	return strings.Join(formatted, "/")
 }

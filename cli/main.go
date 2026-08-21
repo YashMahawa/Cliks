@@ -726,6 +726,66 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 	case "nickname", "name":
 		cfg.Nickname = sanitizeNickname(value)
 	default:
+		if strings.HasPrefix(key, "keymap.") {
+			action := strings.TrimPrefix(key, "keymap.")
+			switch action {
+			case "up":
+				cfg.Keymap.Up = value
+			case "down":
+				cfg.Keymap.Down = value
+			case "left":
+				cfg.Keymap.Left = value
+			case "right":
+				cfg.Keymap.Right = value
+			case "select":
+				cfg.Keymap.Select = value
+			case "back":
+				cfg.Keymap.Back = value
+			case "help":
+				cfg.Keymap.Help = value
+			case "signal1":
+				cfg.Keymap.Signal1 = value
+			case "signal2":
+				cfg.Keymap.Signal2 = value
+			case "signal3":
+				cfg.Keymap.Signal3 = value
+			case "signal4":
+				cfg.Keymap.Signal4 = value
+			case "signal5":
+				cfg.Keymap.Signal5 = value
+			case "presence":
+				cfg.Keymap.Presence = value
+			case "volumeUp":
+				cfg.Keymap.VolumeUp = value
+			case "volumeDown":
+				cfg.Keymap.VolumeDown = value
+			case "densityUp":
+				cfg.Keymap.DensityUp = value
+			case "densityDown":
+				cfg.Keymap.DensityDown = value
+			case "toggleMute":
+				cfg.Keymap.ToggleMute = value
+			case "toggleSpatial":
+				cfg.Keymap.ToggleSpatial = value
+			case "toggleFatigue":
+				cfg.Keymap.ToggleFatigue = value
+			case "livePreferences":
+				cfg.Keymap.LivePreferences = value
+			case "stop":
+				cfg.Keymap.Stop = value
+			case "formNext":
+				cfg.Keymap.FormNext = value
+			case "formPrev":
+				cfg.Keymap.FormPrev = value
+			case "formSubmit":
+				cfg.Keymap.FormSubmit = value
+			case "formCancel":
+				cfg.Keymap.FormCancel = value
+			default:
+				return false, fmt.Errorf("unknown setting: %s", key)
+			}
+			return false, nil
+		}
 		return false, fmt.Errorf("unknown setting: %s", key)
 	}
 	return false, nil
