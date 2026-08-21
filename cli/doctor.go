@@ -65,9 +65,18 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 		report.issues = append(report.issues, doctorIssue{"Install an audio playback tool", hint, append(commands, "cliks sound-test")})
 	}
 
+	status := getPassiveRuntimeStatus()
+	processLivenessStr := "stopped"
+	connStatusStr := "stopped"
+	if status.IsRunning {
+		processLivenessStr = fmt.Sprintf("running (pid %d, %s)", status.PID, status.ExecutionMode)
+		connStatusStr = status.ConnectionStatus
+	}
 	report.checks = append(report.checks,
 		doctorCheck{"Platform", runtime.GOOS},
 		doctorCheck{"Current team", valuePlain(cfg.CurrentTeamCode, "not joined")},
+		doctorCheck{"Process liveness", processLivenessStr},
+		doctorCheck{"Connection status", connStatusStr},
 		doctorCheck{"Sharing keyboard", yesNo(cfg.Sharing.Keyboard)},
 		doctorCheck{"Sharing mouse", yesNo(cfg.Sharing.Mouse)},
 	)

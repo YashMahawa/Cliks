@@ -395,14 +395,31 @@ func cmdSwitch(args []string) error {
 func printConfig() error {
 	type configSummary struct {
 		CliksConfig
-		AutostartEnabled bool `json:"autostartEnabled"`
+		AutostartEnabled bool   `json:"autostartEnabled"`
+		ProcessID        int    `json:"processId"`
+		PID              int    `json:"pid"`
+		ExecutionMode    string `json:"executionMode"`
+		Mode             string `json:"mode"`
+		ConnectionStatus string `json:"connectionStatus"`
+		ConnectionState  string `json:"connectionState"`
 	}
 	cfg := loadConfig()
+	status := getPassiveRuntimeStatus()
 	if warning := lastConfigLoadWarning(); warning != "" {
 		// Always surface on `cliks config` even if the once-flag already fired.
 		fmt.Fprintln(os.Stderr, "Warning:", warning)
 	}
-	data, err := json.MarshalIndent(configSummary{CliksConfig: cfg, AutostartEnabled: autostartEnabled()}, "", "  ")
+	summary := configSummary{
+		CliksConfig:      cfg,
+		AutostartEnabled: status.AutostartEnabled,
+		ProcessID:        status.PID,
+		PID:              status.PID,
+		ExecutionMode:    status.ExecutionMode,
+		Mode:             status.ExecutionMode,
+		ConnectionStatus: status.ConnectionStatus,
+		ConnectionState:  status.ConnectionStatus,
+	}
+	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return err
 	}
