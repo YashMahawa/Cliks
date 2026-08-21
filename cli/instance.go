@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -175,6 +177,60 @@ const (
 	lockStale
 )
 
+var (
+	handoffPIDMu     sync.Mutex
+	cachedHandoffPID int
+)
+
+const handoffParentPIDEnv = "CLIKS_HANDOFF_PARENT_PID"
+
+var handoffParentPIDEnvKeys = []string{
+	handoffParentPIDEnv,
+	"CLIKS_PARENT_PID",
+	"CLIKS_HANDOFF_PID",
+}
+
+func getHandoffParentPID() int {
+	handoffPIDMu.Lock()
+	defer handoffPIDMu.Unlock()
+
+	for _, key := range handoffParentPIDEnvKeys {
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+			if pid, err := strconv.Atoi(val); err == nil && pid > 0 {
+				cachedHandoffPID = pid
+				break
+			}
+		}
+	}
+	for _, key := range handoffParentPIDEnvKeys {
+		_ = os.Unsetenv(key)
+	}
+	return cachedHandoffPID
+}
+
+func setHandoffParentPIDForTest(pid int) {
+	handoffPIDMu.Lock()
+	defer handoffPIDMu.Unlock()
+	cachedHandoffPID = pid
+}
+
+func filterHandoffEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, item := range env {
+		skip := false
+		for _, key := range handoffParentPIDEnvKeys {
+			if strings.HasPrefix(item, key+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
 // classifySessionLock decides whether an existing session.lock is held by a live
 // process, still being written, or safe to remove.
 func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
@@ -194,7 +250,8 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 	var state ActiveSessionState
 	parseOK := json.Unmarshal(data, &state) == nil && state.PID > 0
 	if parseOK {
-		if processLooksAlive(state.PID) {
+		handoffPID := getHandoffParentPID()
+		if (handoffPID == 0 || state.PID != handoffPID) && processLooksAlive(state.PID) {
 			// Prefer richer session.json metadata when available.
 			if richer, ok := readSessionFile(sessionStatePath()); ok && richer.PID == state.PID {
 				richer.PID = state.PID
@@ -272,8 +329,9 @@ func runModeFromEnv() string {
 }
 
 func activeSession() (ActiveSessionState, bool) {
+	handoffPID := getHandoffParentPID()
 	if lock, ok := readSessionFile(sessionLockPath()); ok {
-		if processLooksAlive(lock.PID) {
+		if (handoffPID == 0 || lock.PID != handoffPID) && processLooksAlive(lock.PID) {
 			state, _ := readSessionFile(sessionStatePath())
 			if state.PID == 0 {
 				state = lock
@@ -293,7 +351,7 @@ func activeSession() (ActiveSessionState, bool) {
 		}
 		cleanupStaleSession()
 	}
-	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
+	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && pid != handoffPID && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
 		state.PID = pid
 		if state.Mode == "" {
