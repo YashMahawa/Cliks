@@ -129,10 +129,10 @@ func TestInvalidConfigSurfacesWarningInsteadOfSilentDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	path := filepath.Join(dir, "cliks", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_ = loadConfig()
@@ -160,7 +160,7 @@ func TestInvalidConfigRecoversLastKnownGoodTeamHistory(t *testing.T) {
 	if err := saveConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath(), []byte("{broken"), 0o644); err != nil {
+	if err := os.WriteFile(configPath(), []byte("{broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	recovered := loadConfig()

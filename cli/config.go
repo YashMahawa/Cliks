@@ -203,6 +203,7 @@ func legacyConfigPath() string {
 }
 
 func loadConfig() CliksConfig {
+	remediatePermissions()
 	cfg := defaultConfig()
 	path := configPath()
 	data, err := os.ReadFile(path)
@@ -213,8 +214,8 @@ func loadConfig() CliksConfig {
 				data = legacyData
 				err = nil
 				// Best-effort migrate so the next load uses the native path.
-				_ = os.MkdirAll(filepath.Dir(path), 0o755)
-				if writeErr := atomicWriteFile(path, legacyData, 0o644); writeErr == nil {
+				_ = os.MkdirAll(filepath.Dir(path), 0o700)
+				if writeErr := atomicWriteFile(path, legacyData, 0o600); writeErr == nil {
 					// Keep a tiny marker note in doctor only if migration happened.
 					setConfigLoadWarning("")
 				}
@@ -229,7 +230,7 @@ func loadConfig() CliksConfig {
 		backup, backupErr := os.ReadFile(configBackupPath())
 		if backupErr == nil && json.Unmarshal(backup, &cfg) == nil {
 			setConfigLoadWarning(fmt.Sprintf("Recovered settings and team history from the last-known-good backup (%s).", configBackupPath()))
-			_ = atomicWriteFile(path, backup, 0o644)
+			_ = atomicWriteFile(path, backup, 0o600)
 		} else {
 			setConfigLoadWarning(fmt.Sprintf("Config file has invalid JSON (%s), and no valid backup was available. Using safe defaults until you save settings again.", path))
 			cfg = defaultConfig()
@@ -262,15 +263,16 @@ func applyEnvURLOverrides(cfg CliksConfig) CliksConfig {
 func saveConfig(cfg CliksConfig) error {
 	normalizeConfig(&cfg)
 	path := configPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	_ = os.Chmod(filepath.Dir(path), 0o700)
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	if err := atomicWriteFile(path, data, 0o644); err != nil {
+	if err := atomicWriteFile(path, data, 0o600); err != nil {
 		return err
 	}
 	if err := atomicWriteFile(configBackupPath(), data, 0o600); err != nil {

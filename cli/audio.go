@@ -895,11 +895,12 @@ func extractedBundledSoundsRoot() (string, error) {
 			if stat, statErr := os.Stat(destination); statErr == nil && stat.Size() == int64(len(data)) {
 				continue
 			}
-			if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); mkdirErr != nil {
+			if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o700); mkdirErr != nil {
 				bundledSoundErr = mkdirErr
 				return
 			}
-			if writeErr := atomicWriteFile(destination, data, 0o644); writeErr != nil {
+			_ = os.Chmod(filepath.Dir(destination), 0o700)
+			if writeErr := atomicWriteFile(destination, data, 0o600); writeErr != nil {
 				bundledSoundErr = writeErr
 				return
 			}
