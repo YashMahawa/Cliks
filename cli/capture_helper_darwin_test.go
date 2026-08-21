@@ -133,7 +133,23 @@ func TestParseBundleIdentifierFromInfoPlist(t *testing.T) {
 }
 
 func TestAppendPlatformCaptureChecks_OverrideRejected(t *testing.T) {
-	setMacHelperOverrideWarning("CLIKS_CAPTURE_HELPER override \"/usr/local/bin/bad\" rejected: code signature invalid")
+	tempDir := t.TempDir()
+	overridePath := filepath.Join(tempDir, "bad-cliks-capture")
+	if err := os.WriteFile(overridePath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("failed to create bad override file: %v", err)
+	}
+
+	t.Setenv("CLIKS_CAPTURE_HELPER", overridePath)
+
+	origVerifier := macCodeSignatureVerifier
+	defer func() { macCodeSignatureVerifier = origVerifier }()
+
+	macCodeSignatureVerifier = func(path string) error {
+		if path == overridePath {
+			return fmt.Errorf("code signature invalid")
+		}
+		return nil
+	}
 
 	report := doctorReport{}
 	appendPlatformCaptureChecks(&report, false)
