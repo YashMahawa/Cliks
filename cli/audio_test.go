@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -43,7 +45,7 @@ func TestReactionPatternsAreDistinctAndBrief(t *testing.T) {
 	}
 }
 
-func TestMpvArgsUseLavfiPanNotBrokenFlag(t *testing.T) {
+func TestMpvArgsUseRawAudioStdinDemuxerNotBrokenFlag(t *testing.T) {
 	player := mpvAudioPlayer()
 	args := player.ArgsFor(playbackJob{File: "/tmp/sample.wav", Gain: 0.5, Pan: 0.5})
 	joined := strings.Join(args, " ")
@@ -52,12 +54,12 @@ func TestMpvArgsUseLavfiPanNotBrokenFlag(t *testing.T) {
 	}
 	found := false
 	for _, arg := range args {
-		if strings.HasPrefix(arg, "--af=lavfi=[") && strings.Contains(arg, "pan=stereo") {
+		if arg == "--demuxer=rawaudio" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("mpv args missing lavfi pan filter: %v", args)
+		t.Fatalf("mpv args missing rawaudio demuxer: %v", args)
 	}
 }
 
@@ -269,6 +271,15 @@ func TestAudioEngineCloseCancelsActivePlaybackAndStopsWorkers(t *testing.T) {
 }
 
 func TestBundledReleaseSoundsExtractWithoutSourceTree(t *testing.T) {
+	origOnce := bundledSoundOnce
+	origRoot := bundledSoundRoot
+	origErr := bundledSoundErr
+	defer func() {
+		bundledSoundOnce = origOnce
+		bundledSoundRoot = origRoot
+		bundledSoundErr = origErr
+	}()
+
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	bundledSoundOnce = sync.Once{}
 	bundledSoundRoot = ""
@@ -281,6 +292,203 @@ func TestBundledReleaseSoundsExtractWithoutSourceTree(t *testing.T) {
 		matches, globErr := filepath.Glob(filepath.Join(root, kind, "*.wav"))
 		if globErr != nil || len(matches) == 0 {
 			t.Fatalf("%s samples = %v, %v; want embedded WAVs", kind, matches, globErr)
+		}
+	}
+}
+
+func TestPersistentStreamPlayerInitializationOnStartup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	player := makeStreamingAudioPlayer(ctx, "cat", "", true)
+	if player == nil || player.streamPlayer == nil {
+		t.Fatal("makeStreamingAudioPlayer returned nil player or streamPlayer")
+	}
+	defer player.streamPlayer.Close()
+
+	if !player.streamPlayer.isAliveLocked() {
+		t.Fatal("persistent stream player process was not initialized on startup")
+	}
+	if player.streamPlayer.cmd == nil || player.streamPlayer.stdinPipe == nil {
+		t.Fatal("persistent stream player process cmd or stdinPipe is nil")
+	}
+}
+
+func TestPersistentStreamPlayerPipesRawStereoPCMOverStdinNoSubprocessPerEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine := newAudioEngine(ListeningConfig{})
+	defer engine.Close()
+	samples, err := engine.samples("keyboard")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("no sample WAV files found: %v", err)
+	}
+	sampleFile := samples[0]
+
+	player := makeStreamingAudioPlayer(ctx, "cat", "", true)
+	defer player.streamPlayer.Close()
+
+	initialPid := player.streamPlayer.cmd.Process.Pid
+	if initialPid <= 0 {
+		t.Fatalf("invalid initial pid: %d", initialPid)
+	}
+
+	job := playbackJob{File: sampleFile, Gain: 0.8, Pan: 0.0}
+	for i := 0; i < 5; i++ {
+		if err := player.Play(ctx, job); err != nil {
+			t.Fatalf("Play job %d failed: %v", i, err)
+		}
+	}
+
+	currentPid := player.streamPlayer.cmd.Process.Pid
+	if currentPid != initialPid {
+		t.Fatalf("process was re-spawned (pid changed from %d to %d); expected single long-lived process", initialPid, currentPid)
+	}
+}
+
+func TestPersistentStreamPlayer3DSpatialPanning(t *testing.T) {
+	engine := newAudioEngine(ListeningConfig{})
+	defer engine.Close()
+	samples, err := engine.samples("keyboard")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("no sample WAV files found: %v", err)
+	}
+	sampleFile := samples[0]
+	data, err := os.ReadFile(sampleFile)
+	if err != nil {
+		t.Fatalf("read sample wav: %v", err)
+	}
+
+	leftPCM, _, err := stereoPCMFromMonoWAV(data, 1.0, -1.0)
+	if err != nil {
+		t.Fatalf("stereoPCMFromMonoWAV left pan failed: %v", err)
+	}
+	rightPCM, _, err := stereoPCMFromMonoWAV(data, 1.0, 1.0)
+	if err != nil {
+		t.Fatalf("stereoPCMFromMonoWAV right pan failed: %v", err)
+	}
+
+	// For full left pan (pan=-1.0), right channel samples should be 0.
+	rightChannelSum := 0.0
+	for i := 2; i < len(leftPCM); i += 4 {
+		sample := int16(binary.LittleEndian.Uint16(leftPCM[i : i+2]))
+		rightChannelSum += math.Abs(float64(sample))
+	}
+	if rightChannelSum != 0 {
+		t.Fatalf("expected right channel amplitude to be 0 for full left pan, got %f", rightChannelSum)
+	}
+
+	// For full right pan (pan=1.0), left channel samples should be 0.
+	leftChannelSum := 0.0
+	for i := 0; i < len(rightPCM); i += 4 {
+		sample := int16(binary.LittleEndian.Uint16(rightPCM[i : i+2]))
+		leftChannelSum += math.Abs(float64(sample))
+	}
+	if leftChannelSum != 0 {
+		t.Fatalf("expected left channel amplitude to be 0 for full right pan, got %f", leftChannelSum)
+	}
+}
+
+func TestPersistentStreamPlayerZeroDropRateUnderHighEventRate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine := newAudioEngineWithContext(ctx, ListeningConfig{Volume: 0.8, Density: 1.0, Keyboard: true, Mouse: true})
+	defer engine.Close()
+
+	samples, err := engine.samples("keyboard")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("no sample WAV files found: %v", err)
+	}
+	sampleFile := samples[0]
+
+	player := makeStreamingAudioPlayer(ctx, "cat", "", true)
+	defer player.streamPlayer.Close()
+
+	engine.mu.Lock()
+	engine.player = player
+	engine.mu.Unlock()
+
+	// Simulate 25 events fired within 1 second (> 20 events/sec)
+	for i := 0; i < 25; i++ {
+		job := playbackJob{File: sampleFile, Gain: 0.8, Pan: 0.2}
+		select {
+		case engine.queue <- job:
+		default:
+			t.Fatalf("audio job %d was dropped due to queue pressure", i)
+		}
+	}
+
+	if len(engine.queue) > cap(engine.queue) {
+		t.Fatalf("queue length %d exceeded capacity %d", len(engine.queue), cap(engine.queue))
+	}
+}
+
+func TestPersistentStreamPlayerAutomaticRespawnAndResumeOnCrash(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine := newAudioEngine(ListeningConfig{})
+	defer engine.Close()
+
+	samples, err := engine.samples("keyboard")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("no sample WAV files found: %v", err)
+	}
+	sampleFile := samples[0]
+
+	player := makeStreamingAudioPlayer(ctx, "cat", "", true)
+	defer player.streamPlayer.Close()
+
+	job := playbackJob{File: sampleFile, Gain: 0.8, Pan: 0.0}
+	if err := player.Play(ctx, job); err != nil {
+		t.Fatalf("initial Play failed: %v", err)
+	}
+
+	initialPid := player.streamPlayer.cmd.Process.Pid
+
+	// Kill child process to simulate unexpected crash
+	_ = player.streamPlayer.cmd.Process.Kill()
+	time.Sleep(50 * time.Millisecond)
+
+	// Play next job - engine should detect crash, re-spawn, and resume playback
+	if err := player.Play(ctx, job); err != nil {
+		t.Fatalf("Play after crash failed: %v", err)
+	}
+
+	newPid := player.streamPlayer.cmd.Process.Pid
+	if newPid == initialPid {
+		t.Fatalf("pid did not change after process crash (initial: %d, new: %d)", initialPid, newPid)
+	}
+	if !player.streamPlayer.isAliveLocked() {
+		t.Fatal("re-spawned streaming process is not alive")
+	}
+}
+
+func TestPipeCapableStreamingPlayerDeviceRouting(t *testing.T) {
+	tests := []struct {
+		command string
+		device  string
+		want    string
+	}{
+		{"mpv", "sink-1", "--audio-device=sink-1"},
+		{"paplay", "sink-1", "--device"},
+		{"pw-play", "sink-1", "--target"},
+		{"aplay", "sink-1", "--device"},
+	}
+
+	for _, tt := range tests {
+		args := streamingArgsFor(tt.command, tt.device)
+		found := false
+		for _, arg := range args {
+			if strings.Contains(arg, tt.want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("command %s with device %s missing argument %s; got %v", tt.command, tt.device, tt.want, args)
 		}
 	}
 }

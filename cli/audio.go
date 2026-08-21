@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"io/fs"
 	"math"
 	"math/rand"
@@ -60,6 +61,7 @@ type audioPlayer struct {
 	// When false, playWorker soft-scales the WAV before playback.
 	VolumeCapable bool
 	ArgsFor       func(playbackJob) []string
+	streamPlayer  *persistentStreamPlayer
 }
 
 type playbackJob struct {
@@ -106,7 +108,7 @@ func newAudioEngineWithContext(parent context.Context, listening ListeningConfig
 		ctx:            ctx,
 		cancel:         cancel,
 		listening:      listening,
-		player:         detectAudioPlayerForDevice(listening.AudioDevice),
+		player:         detectAudioPlayerForDeviceWithContext(ctx, listening.AudioDevice),
 		placements:     map[string]peerPlacement{},
 		activityScores: map[string]int{},
 		queue:          make(chan playbackJob, 96),
@@ -132,6 +134,11 @@ func (a *AudioEngine) Close() {
 		if a.ambient != nil {
 			a.ambient.close()
 		}
+		a.mu.Lock()
+		if a.player != nil && a.player.streamPlayer != nil {
+			a.player.streamPlayer.Close()
+		}
+		a.mu.Unlock()
 		a.cancel()
 		a.workers.Wait()
 	})
@@ -140,7 +147,10 @@ func (a *AudioEngine) Close() {
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.mu.Lock()
 	if strings.TrimSpace(listening.AudioDevice) != strings.TrimSpace(a.listening.AudioDevice) {
-		a.player = detectAudioPlayerForDevice(listening.AudioDevice)
+		if a.player != nil && a.player.streamPlayer != nil {
+			a.player.streamPlayer.Close()
+		}
+		a.player = detectAudioPlayerForDeviceWithContext(a.ctx, listening.AudioDevice)
 		a.warned = false
 	}
 	a.listening = listening
@@ -565,7 +575,212 @@ func (a *AudioEngine) warnUnavailableOnce() {
 	fmt.Fprintln(os.Stderr, "\nAudio disabled: "+audioInstallMessage())
 }
 
+type persistentStreamPlayer struct {
+	mu        sync.Mutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	command   string
+	args      []string
+	device    string
+	cmd       *exec.Cmd
+	stdinPipe io.WriteCloser
+	closed    bool
+}
+
+func newPersistentStreamPlayer(parentCtx context.Context, command string, args []string, device string) *persistentStreamPlayer {
+	ctx, cancel := context.WithCancel(parentCtx)
+	p := &persistentStreamPlayer{
+		ctx:     ctx,
+		cancel:  cancel,
+		command: command,
+		args:    args,
+		device:  device,
+	}
+	_ = p.ensureStarted()
+	return p
+}
+
+func (p *persistentStreamPlayer) ensureStarted() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ensureStartedLocked()
+}
+
+func (p *persistentStreamPlayer) ensureStartedLocked() error {
+	if p.closed {
+		return errors.New("persistent stream player closed")
+	}
+	if p.isAliveLocked() {
+		return nil
+	}
+	p.cleanupLocked()
+
+	cmd := exec.CommandContext(p.ctx, p.command, p.args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe for %s: %w", p.command, err)
+	}
+	if err := cmd.Start(); err != nil {
+		_ = pipe.Close()
+		return fmt.Errorf("failed to start streaming player %s: %w", p.command, err)
+	}
+	p.cmd = cmd
+	p.stdinPipe = pipe
+
+	go func(c *exec.Cmd) {
+		_ = c.Wait()
+	}(cmd)
+
+	return nil
+}
+
+func (p *persistentStreamPlayer) isAliveLocked() bool {
+	if p.cmd == nil || p.cmd.Process == nil || p.stdinPipe == nil {
+		return false
+	}
+	if p.cmd.ProcessState != nil {
+		return false
+	}
+	return true
+}
+
+func writeAllPCM(w io.Writer, buf []byte) error {
+	for len(buf) > 0 {
+		n, err := w.Write(buf)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrUnexpectedEOF
+		}
+		buf = buf[n:]
+	}
+	return nil
+}
+
+func (p *persistentStreamPlayer) Play(ctx context.Context, job playbackJob) error {
+	data, err := os.ReadFile(job.File)
+	if err != nil {
+		return err
+	}
+	pcm, sampleRate, err := stereoPCMFromMonoWAV(data, job.Gain, job.Pan)
+	if err != nil {
+		return err
+	}
+	if sampleRate != 44100 {
+		return fmt.Errorf("streaming audio expected 44100 Hz, got %d", sampleRate)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return errors.New("persistent stream player is closed")
+	}
+
+	if !p.isAliveLocked() {
+		p.cleanupLocked()
+		if err := p.ensureStartedLocked(); err != nil {
+			return err
+		}
+	}
+
+	err = writeAllPCM(p.stdinPipe, pcm)
+	if err != nil {
+		p.cleanupLocked()
+		if restartErr := p.ensureStartedLocked(); restartErr != nil {
+			return fmt.Errorf("write error (%v); restart failed: %w", err, restartErr)
+		}
+		err = writeAllPCM(p.stdinPipe, pcm)
+	}
+	return err
+}
+
+func (p *persistentStreamPlayer) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.closed = true
+	p.cancel()
+	p.cleanupLocked()
+}
+
+func (p *persistentStreamPlayer) cleanupLocked() {
+	if p.stdinPipe != nil {
+		_ = p.stdinPipe.Close()
+		p.stdinPipe = nil
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+		p.cmd = nil
+	}
+}
+
+func streamingArgsFor(command string, device string) []string {
+	var baseArgs []string
+	switch command {
+	case "mpv":
+		baseArgs = []string{
+			"--no-video",
+			"--really-quiet",
+			"--no-terminal",
+			"--keep-open=yes",
+			"--demuxer=rawaudio",
+			"--rawaudio-channels=2",
+			"--rawaudio-rate=44100",
+			"--rawaudio-format=s16le",
+			"-",
+		}
+	case "paplay":
+		baseArgs = []string{"--raw", "--format=s16le", "--rate=44100", "--channels=2", "--latency-msec=10", "-"}
+	case "pw-play":
+		baseArgs = []string{"--rate=44100", "--channels=2", "--format=s16", "-"}
+	case "aplay":
+		baseArgs = []string{"-t", "raw", "-f", "S16_LE", "-r", "44100", "-c", "2", "-"}
+	case "ffplay":
+		baseArgs = []string{"-f", "s16le", "-ar", "44100", "-ac", "2", "-nodisp", "-loglevel", "quiet", "-i", "pipe:0"}
+	case "sox", "play":
+		baseArgs = []string{"-t", "raw", "-r", "44100", "-c", "2", "-e", "signed-integer", "-b", "16", "-", "-d"}
+	default:
+		baseArgs = []string{"-"}
+	}
+	return withAudioDevice(command, baseArgs, device)
+}
+
+func makeStreamingAudioPlayer(ctx context.Context, command string, device string, spatial bool) *audioPlayer {
+	args := streamingArgsFor(command, device)
+	streamPlayer := newPersistentStreamPlayer(ctx, command, args, device)
+	return &audioPlayer{
+		Command:       command,
+		Spatial:       spatial,
+		DeviceRouting: deviceRoutingSupported(command),
+		VolumeCapable: true,
+		Play:          streamPlayer.Play,
+		ArgsFor: func(job playbackJob) []string {
+			return args
+		},
+		streamPlayer: streamPlayer,
+	}
+}
+
+func deviceRoutingSupported(command string) bool {
+	switch command {
+	case "mpv", "paplay", "pw-play", "aplay":
+		return true
+	default:
+		return false
+	}
+}
+
 func detectAudioPlayer() *audioPlayer {
+	return detectAudioPlayerWithContext(context.Background())
+}
+
+func detectAudioPlayerWithContext(ctx context.Context) *audioPlayer {
 	// macOS and Windows ship a built-in stereo PCM path, so ordinary installs
 	// do not need mpv, PowerShell audio, or another player.
 	if builtIn := newBuiltInAudioPlayer(); builtIn != nil {
@@ -573,17 +788,10 @@ func detectAudioPlayer() *audioPlayer {
 	}
 	// Linux/Termux prefer players that can stereo-pan teammates.
 	if _, err := exec.LookPath("mpv"); err == nil {
-		return mpvAudioPlayer()
+		return makeStreamingAudioPlayer(ctx, "mpv", "", true)
 	}
 	if _, err := exec.LookPath("ffplay"); err == nil {
-		return &audioPlayer{
-			Command:       "ffplay",
-			Spatial:       true,
-			VolumeCapable: true,
-			ArgsFor: func(job playbackJob) []string {
-				return withAudioDevice("ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", ffmpegSpatialFilter(job.Gain, job.Pan), job.File}, job.Device)
-			},
-		}
+		return makeStreamingAudioPlayer(ctx, "ffplay", "", true)
 	}
 	if runtime.GOOS == "darwin" {
 		// afplay is always present; distance via volume only (no stereo pan).
@@ -601,13 +809,19 @@ func detectAudioPlayer() *audioPlayer {
 		}
 	}
 	if _, err := exec.LookPath("paplay"); err == nil {
-		return paplayAudioPlayer()
+		return makeStreamingAudioPlayer(ctx, "paplay", "", false)
 	}
 	if _, err := exec.LookPath("pw-play"); err == nil {
-		return pipewireAudioPlayer()
+		return makeStreamingAudioPlayer(ctx, "pw-play", "", false)
 	}
 	if _, err := exec.LookPath("aplay"); err == nil {
-		return alsaAudioPlayer()
+		return makeStreamingAudioPlayer(ctx, "aplay", "", false)
+	}
+	if _, err := exec.LookPath("sox"); err == nil {
+		return makeStreamingAudioPlayer(ctx, "sox", "", false)
+	}
+	if _, err := exec.LookPath("play"); err == nil {
+		return makeStreamingAudioPlayer(ctx, "play", "", false)
 	}
 	return nil
 }
@@ -640,58 +854,44 @@ func windowsMediaPlayer() *audioPlayer {
 }
 
 func detectAudioPlayerForDevice(device string) *audioPlayer {
-	if strings.TrimSpace(device) != "" {
+	return detectAudioPlayerForDeviceWithContext(context.Background(), device)
+}
+
+func detectAudioPlayerForDeviceWithContext(ctx context.Context, device string) *audioPlayer {
+	device = strings.TrimSpace(device)
+	if device != "" && !strings.EqualFold(device, "default") {
 		if _, err := exec.LookPath("mpv"); err == nil {
-			return mpvAudioPlayer()
+			return makeStreamingAudioPlayer(ctx, "mpv", device, true)
 		}
 		if runtime.GOOS == "linux" {
 			if _, err := exec.LookPath("paplay"); err == nil {
-				return paplayAudioPlayer()
+				return makeStreamingAudioPlayer(ctx, "paplay", device, false)
 			}
 			if _, err := exec.LookPath("pw-play"); err == nil {
-				return pipewireAudioPlayer()
+				return makeStreamingAudioPlayer(ctx, "pw-play", device, false)
 			}
 			if _, err := exec.LookPath("aplay"); err == nil {
-				return alsaAudioPlayer()
+				return makeStreamingAudioPlayer(ctx, "aplay", device, false)
 			}
 		}
 	}
-	return detectAudioPlayer()
+	return detectAudioPlayerWithContext(ctx)
 }
 
 func mpvAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
-		// mpv has no --audio-pan flag; use lavfi pan (same math as ffplay) for stereo placement.
-		args := []string{
-			"--no-video",
-			"--really-quiet",
-			"--no-terminal",
-			"--keep-open=no",
-			fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)),
-			"--af=lavfi=[" + ffmpegSpatialFilter(1, job.Pan) + "]",
-			job.File,
-		}
-		return withAudioDevice("mpv", args, job.Device)
-	}}
+	return makeStreamingAudioPlayer(context.Background(), "mpv", "", true)
 }
 
 func paplayAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "paplay", DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
-		return withAudioDevice("paplay", []string{"--volume", fmt.Sprintf("%d", int(clamp(job.Gain, 0, 1)*65536)), job.File}, job.Device)
-	}}
+	return makeStreamingAudioPlayer(context.Background(), "paplay", "", false)
 }
 
 func pipewireAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "pw-play", DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
-		return withAudioDevice("pw-play", []string{"--volume", fmt.Sprintf("%.3f", clamp(job.Gain, 0, 1)), job.File}, job.Device)
-	}}
+	return makeStreamingAudioPlayer(context.Background(), "pw-play", "", false)
 }
 
 func alsaAudioPlayer() *audioPlayer {
-	// aplay has no volume flag — soft WAV gain is applied in playWorker.
-	return &audioPlayer{Command: "aplay", DeviceRouting: true, VolumeCapable: false, ArgsFor: func(job playbackJob) []string {
-		return withAudioDevice("aplay", []string{job.File}, job.Device)
-	}}
+	return makeStreamingAudioPlayer(context.Background(), "aplay", "", false)
 }
 
 func withAudioDevice(command string, args []string, device string) []string {
