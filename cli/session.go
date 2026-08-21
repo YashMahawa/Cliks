@@ -106,9 +106,24 @@ func startSession(cfg CliksConfig, opts StartOptions) error {
 }
 
 func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
+	bootDelaySec := 0
+	if runModeFromEnv() == runModeBoot {
+		bootDelaySec = applyBootModeOverrides(&cfg, &opts)
+	}
 	instance, err := acquireSessionInstance(cfg.CurrentTeamCode, runModeFromEnv())
 	if err != nil {
 		return sessionExitStop, err
+	}
+	if bootDelaySec > 0 {
+		signals := append([]os.Signal{os.Interrupt}, tuiExitSignals()...)
+		delayCtx, stopDelay := signal.NotifyContext(context.Background(), signals...)
+		defer stopDelay()
+		select {
+		case <-time.After(time.Duration(bootDelaySec) * time.Second):
+		case <-delayCtx.Done():
+			instance.release()
+			return sessionExitStop, nil
+		}
 	}
 	controller := newSessionController(cfg, opts, instance)
 	if err := controller.start(); err != nil {
@@ -221,6 +236,45 @@ func finishSessionForExit(controller *sessionController, keepRunning bool) (stri
 		return "", nil
 	}
 	return startBackgroundForTeam(code)
+}
+
+func applyBootModeOverrides(cfg *CliksConfig, opts *StartOptions) int {
+	delaySec := cfg.EffectiveBootDelay()
+	if delayEnv := strings.TrimSpace(os.Getenv("CLIKS_BOOT_DELAY")); delayEnv != "" {
+		if parsed, err := strconv.Atoi(delayEnv); err == nil && parsed >= 0 {
+			delaySec = parsed
+		}
+	}
+
+	capMode := cfg.EffectiveBootCaptureMode()
+	if capEnv := strings.ToLower(strings.TrimSpace(os.Getenv("CLIKS_BOOT_CAPTURE_MODE"))); capEnv != "" {
+		switch capEnv {
+		case "isolated", "direct", "terminal":
+			capMode = capEnv
+		}
+	}
+	cfg.Capture.Mode = capMode
+	opts.CaptureMode = capMode
+
+	audioDev := cfg.EffectiveBootAudioDevice()
+	if devEnv := strings.TrimSpace(os.Getenv("CLIKS_BOOT_AUDIO_DEVICE")); devEnv != "" {
+		audioDev = devEnv
+	}
+	if strings.EqualFold(audioDev, "default") {
+		audioDev = ""
+	}
+	cfg.Listening.AudioDevice = audioDev
+
+	vol := cfg.EffectiveBootVolume()
+	if volEnv := strings.TrimSpace(os.Getenv("CLIKS_BOOT_VOLUME")); volEnv != "" {
+		if parsed, err := strconv.ParseFloat(volEnv, 64); err == nil {
+			vol = clamp(parsed, 0, 1)
+		}
+	}
+	cfg.Listening.Volume = vol
+	cfg.Listening.VolumeConfigured = true
+
+	return delaySec
 }
 
 func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionInstance) *sessionController {

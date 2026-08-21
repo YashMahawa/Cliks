@@ -118,6 +118,14 @@ type CaptureConfig struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+type BootConfig struct {
+	DelaySec         int     `json:"delaySec,omitempty"`
+	CaptureMode      string  `json:"captureMode,omitempty"`
+	AudioDevice      string  `json:"audioDevice,omitempty"`
+	Volume           float64 `json:"volume,omitempty"`
+	VolumeConfigured bool    `json:"volumeConfigured,omitempty"`
+}
+
 type CliksConfig struct {
 	APIURL          string             `json:"apiUrl"`
 	WSURL           string             `json:"wsUrl"`
@@ -136,6 +144,7 @@ type CliksConfig struct {
 	Listening       ListeningConfig    `json:"listening"`
 	Notifications   NotificationConfig `json:"notifications"`
 	Capture         CaptureConfig      `json:"capture"`
+	Boot            BootConfig         `json:"boot,omitempty"`
 	Solo            SoloConfig         `json:"solo"`
 	BatchWindowMs   int                `json:"batchWindowMs"`
 }
@@ -150,6 +159,7 @@ func defaultConfig() CliksConfig {
 		Theme:          "ember",
 		Notifications:  NotificationConfig{Sound: true, Configured: true},
 		Capture:        CaptureConfig{Mode: "isolated"},
+		Boot:           BootConfig{DelaySec: 0, CaptureMode: "", AudioDevice: "", Volume: 0.7},
 		Teams:          []TeamConfig{},
 		Sharing: SharingConfig{
 			Keyboard: true,
@@ -277,6 +287,7 @@ func saveConfig(cfg CliksConfig) error {
 		return fmt.Errorf("save config backup: %w", err)
 	}
 	setConfigLoadWarning("")
+	syncLauncherIfAutostartEnabled(cfg)
 	return nil
 }
 
@@ -452,6 +463,56 @@ func normalizeConfig(cfg *CliksConfig) {
 	cfg.Solo.MouseVolume = clamp(cfg.Solo.MouseVolume, 0.05, 1)
 	cfg.Nickname = sanitizeNickname(cfg.Nickname)
 	cfg.Listening.AudioDevice = strings.TrimSpace(cfg.Listening.AudioDevice)
+	if cfg.Boot.DelaySec < 0 {
+		cfg.Boot.DelaySec = 0
+	}
+	switch cfg.Boot.CaptureMode {
+	case "isolated", "direct", "terminal":
+	default:
+		cfg.Boot.CaptureMode = ""
+	}
+	cfg.Boot.AudioDevice = strings.TrimSpace(cfg.Boot.AudioDevice)
+	if cfg.Boot.VolumeConfigured {
+		cfg.Boot.Volume = clamp(cfg.Boot.Volume, 0, 1)
+	}
+}
+
+func (cfg CliksConfig) EffectiveBootDelay() int {
+	if cfg.Boot.DelaySec < 0 {
+		return 0
+	}
+	return cfg.Boot.DelaySec
+}
+
+func (cfg CliksConfig) EffectiveBootCaptureMode() string {
+	switch cfg.Boot.CaptureMode {
+	case "isolated", "direct", "terminal":
+		return cfg.Boot.CaptureMode
+	default:
+		if cfg.Capture.Mode != "" {
+			return cfg.Capture.Mode
+		}
+		return "isolated"
+	}
+}
+
+func (cfg CliksConfig) EffectiveBootAudioDevice() string {
+	dev := strings.TrimSpace(cfg.Boot.AudioDevice)
+	if dev != "" {
+		return dev
+	}
+	dev = strings.TrimSpace(cfg.Listening.AudioDevice)
+	if dev != "" {
+		return dev
+	}
+	return "default"
+}
+
+func (cfg CliksConfig) EffectiveBootVolume() float64 {
+	if cfg.Boot.VolumeConfigured {
+		return clamp(cfg.Boot.Volume, 0, 1)
+	}
+	return clamp(cfg.Listening.Volume, 0, 1)
 }
 
 func sanitizeNickname(value string) string {
