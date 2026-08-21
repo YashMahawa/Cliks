@@ -56,6 +56,7 @@ type audioPlayer struct {
 	Spatial       bool
 	DeviceRouting bool
 	Play          func(context.Context, playbackJob) error
+	Close         func()
 	// VolumeCapable is true when ArgsFor applies job.Gain natively.
 	// When false, playWorker soft-scales the WAV before playback.
 	VolumeCapable bool
@@ -134,12 +135,22 @@ func (a *AudioEngine) Close() {
 		}
 		a.cancel()
 		a.workers.Wait()
+		a.mu.Lock()
+		if a.player != nil && a.player.Close != nil {
+			a.player.Close()
+			a.player = nil
+		}
+		a.mu.Unlock()
 	})
 }
 
 func (a *AudioEngine) updateListening(listening ListeningConfig) {
 	a.mu.Lock()
 	if strings.TrimSpace(listening.AudioDevice) != strings.TrimSpace(a.listening.AudioDevice) {
+		if a.player != nil && a.player.Close != nil {
+			a.player.Close()
+			a.player = nil
+		}
 		a.player = detectAudioPlayerForDevice(listening.AudioDevice)
 		a.warned = false
 	}
@@ -642,7 +653,7 @@ func windowsMediaPlayer() *audioPlayer {
 func detectAudioPlayerForDevice(device string) *audioPlayer {
 	if strings.TrimSpace(device) != "" {
 		if _, err := exec.LookPath("mpv"); err == nil {
-			return mpvAudioPlayer()
+			return mpvAudioPlayer(device)
 		}
 		if runtime.GOOS == "linux" {
 			if _, err := exec.LookPath("paplay"); err == nil {
@@ -659,20 +670,36 @@ func detectAudioPlayerForDevice(device string) *audioPlayer {
 	return detectAudioPlayer()
 }
 
-func mpvAudioPlayer() *audioPlayer {
-	return &audioPlayer{Command: "mpv", Spatial: true, DeviceRouting: true, VolumeCapable: true, ArgsFor: func(job playbackJob) []string {
-		// mpv has no --audio-pan flag; use lavfi pan (same math as ffplay) for stereo placement.
-		args := []string{
-			"--no-video",
-			"--really-quiet",
-			"--no-terminal",
-			"--keep-open=no",
-			fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)),
-			"--af=lavfi=[" + ffmpegSpatialFilter(1, job.Pan) + "]",
-			job.File,
-		}
-		return withAudioDevice("mpv", args, job.Device)
-	}}
+func mpvAudioPlayer(device ...string) *audioPlayer {
+	dev := ""
+	if len(device) > 0 {
+		dev = strings.TrimSpace(device[0])
+	}
+	player := &audioPlayer{
+		Command:       "mpv",
+		Spatial:       true,
+		DeviceRouting: true,
+		VolumeCapable: true,
+		ArgsFor: func(job playbackJob) []string {
+			// mpv has no --audio-pan flag; use lavfi pan (same math as ffplay) for stereo placement.
+			args := []string{
+				"--no-video",
+				"--really-quiet",
+				"--no-terminal",
+				"--keep-open=no",
+				fmt.Sprintf("--volume=%d", int(clamp(job.Gain, 0, 1)*100)),
+				"--af=lavfi=[" + ffmpegSpatialFilter(1, job.Pan) + "]",
+				job.File,
+			}
+			return withAudioDevice("mpv", args, job.Device)
+		},
+	}
+	pool, err := newMPVPlayerPool(dev)
+	if err == nil && pool != nil {
+		player.Play = pool.Play
+		player.Close = pool.Close
+	}
+	return player
 }
 
 func paplayAudioPlayer() *audioPlayer {
@@ -797,6 +824,9 @@ func getAudioPlayerStatus(device ...string) (player string, spatial bool, hint s
 	detected := detectAudioPlayerForDevice(configuredDevice)
 	if detected == nil {
 		return "", false, audioInstallHint(), audioInstallCommands()
+	}
+	if detected.Close != nil {
+		defer detected.Close()
 	}
 	if configuredDevice != "" && !detected.DeviceRouting {
 		return detected.Command, detected.Spatial, fmt.Sprintf("%s cannot select an output device; install mpv or clear audio.device", detected.Command), nil
