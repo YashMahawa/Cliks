@@ -316,12 +316,12 @@ func (s *windowsCaptureSession) runWatchdog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.checkHealthAndProbing()
+			s.checkHealthAndProbing(ctx)
 		}
 	}
 }
 
-func (s *windowsCaptureSession) checkHealthAndProbing() {
+func (s *windowsCaptureSession) checkHealthAndProbing(ctx context.Context) {
 	windowsNativeCaptureLock.Lock()
 	if windowsNativeCapture != s {
 		windowsNativeCaptureLock.Unlock()
@@ -367,13 +367,19 @@ func (s *windowsCaptureSession) checkHealthAndProbing() {
 
 	// If no activity in the last 2 seconds, send a probe input
 	if time.Since(lastAt) > 2*time.Second {
-		sendHookProbeInput(sharing.Keyboard, sharing.Mouse)
-		time.Sleep(250 * time.Millisecond)
+		if !sendHookProbeInput(sharing.Keyboard, sharing.Mouse) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
 
 		newNano := atomic.LoadInt64(&s.lastCallbackNano)
 		if newNano == lastNano {
 			// Hook did not receive probe -> DETACHED!
-			s.handleHookDetachment(capture, threadID, sharing, rehookFailures)
+			s.handleHookDetachment(ctx, capture, threadID, sharing, rehookFailures)
 			return
 		}
 	}
@@ -393,7 +399,7 @@ func (s *windowsCaptureSession) checkHealthAndProbing() {
 	windowsNativeCaptureLock.Unlock()
 }
 
-func (s *windowsCaptureSession) handleHookDetachment(capture *ActivityCapture, threadID uint32, sharing SharingConfig, failures int) {
+func (s *windowsCaptureSession) handleHookDetachment(ctx context.Context, capture *ActivityCapture, threadID uint32, sharing SharingConfig, failures int) {
 	windowsNativeCaptureLock.Lock()
 	s.isRecovering = true
 	s.rehookFailures++
@@ -419,7 +425,11 @@ func (s *windowsCaptureSession) handleHookDetachment(capture *ActivityCapture, t
 
 	// Calculate exponential backoff delay before posting re-hook message
 	backoff := exponentialBackoffDelay(currentFailures)
-	time.Sleep(backoff)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(backoff):
+	}
 
 	// Post message to OS thread to re-register hooks
 	procPostThreadMessageW.Call(uintptr(threadID), wmUserRehook, 0, 0)
@@ -436,7 +446,7 @@ func exponentialBackoffDelay(attempt int) time.Duration {
 	return delay
 }
 
-func sendHookProbeInput(keyboard bool, mouse bool) {
+func sendHookProbeInput(keyboard bool, mouse bool) bool {
 	if keyboard {
 		if unsafe.Sizeof(uintptr(0)) == 8 {
 			var inp [40]byte
@@ -444,14 +454,16 @@ func sendHookProbeInput(keyboard bool, mouse bool) {
 			*(*uint16)(unsafe.Pointer(&inp[8])) = 0        // wVk = 0
 			*(*uint32)(unsafe.Pointer(&inp[12])) = 0x0002 // KEYEVENTF_KEYUP
 			*(*uintptr)(unsafe.Pointer(&inp[24])) = hookProbeMagic
-			procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			ret, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			return ret > 0
 		} else {
 			var inp [28]byte
 			*(*uint32)(unsafe.Pointer(&inp[0])) = 1        // INPUT_KEYBOARD
 			*(*uint16)(unsafe.Pointer(&inp[4])) = 0        // wVk = 0
 			*(*uint32)(unsafe.Pointer(&inp[8])) = 0x0002  // KEYEVENTF_KEYUP
-			*(*uintptr)(unsafe.Pointer(&inp[20])) = hookProbeMagic
-			procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			*(*uintptr)(unsafe.Pointer(&inp[16])) = hookProbeMagic
+			ret, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			return ret > 0
 		}
 	} else if mouse {
 		if unsafe.Sizeof(uintptr(0)) == 8 {
@@ -459,15 +471,18 @@ func sendHookProbeInput(keyboard bool, mouse bool) {
 			*(*uint32)(unsafe.Pointer(&inp[0])) = 0        // INPUT_MOUSE
 			*(*uint32)(unsafe.Pointer(&inp[20])) = 0x0001 // MOUSEEVENTF_MOVE
 			*(*uintptr)(unsafe.Pointer(&inp[32])) = hookProbeMagic
-			procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			ret, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			return ret > 0
 		} else {
 			var inp [28]byte
 			*(*uint32)(unsafe.Pointer(&inp[0])) = 0        // INPUT_MOUSE
-			*(*uint32)(unsafe.Pointer(&inp[12])) = 0x0001 // MOUSEEVENTF_MOVE
-			*(*uintptr)(unsafe.Pointer(&inp[20])) = hookProbeMagic
-			procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			*(*uint32)(unsafe.Pointer(&inp[16])) = 0x0001 // MOUSEEVENTF_MOVE
+			*(*uintptr)(unsafe.Pointer(&inp[24])) = hookProbeMagic
+			ret, _, _ := procSendInput.Call(1, uintptr(unsafe.Pointer(&inp[0])), uintptr(unsafe.Sizeof(inp)))
+			return ret > 0
 		}
 	}
+	return false
 }
 
 func isForegroundWindowElevated() bool {
@@ -477,7 +492,7 @@ func isForegroundWindowElevated() bool {
 	}
 	var pid uint32
 	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-	if pid == 0 || pid == uint32(os.Getpid()) {
+	if pid <= 4 || pid == uint32(os.Getpid()) {
 		return false
 	}
 	// PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
