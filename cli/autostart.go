@@ -106,6 +106,62 @@ func xmlText(value string) string {
 	return replacer.Replace(value)
 }
 
+type AutostartDetails struct {
+	Enabled      bool
+	Label        string
+	Path         string
+	RuntimeState string
+}
+
+func getAutostartDetails(cfg CliksConfig) AutostartDetails {
+	details := AutostartDetails{
+		RuntimeState: "stopped",
+	}
+	if _, ok := activeSession(); ok {
+		details.RuntimeState = "running"
+	}
+	switch runtime.GOOS {
+	case "linux":
+		home, _ := os.UserHomeDir()
+		base := os.Getenv("XDG_CONFIG_HOME")
+		if base == "" {
+			base = filepath.Join(home, ".config")
+		}
+		details.Path = filepath.Join(base, "systemd", "user", serviceName+".service")
+		details.Label = "systemd user service"
+		if exec.Command("systemctl", "--user", "is-active", "--quiet", serviceName+".service").Run() == nil {
+			details.RuntimeState = "running"
+		}
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		details.Path = filepath.Join(home, "Library", "LaunchAgents", launchAgentID+".plist")
+		details.Label = "LaunchAgent"
+		if exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), launchAgentID)).Run() == nil {
+			details.RuntimeState = "running"
+		}
+	case "windows":
+		startup := os.Getenv("APPDATA")
+		if startup != "" {
+			dir := filepath.Join(startup, "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+			vbsPath := filepath.Join(dir, "Cliks.vbs")
+			cmdPath := filepath.Join(dir, "Cliks.cmd")
+			if _, err := os.Stat(vbsPath); err == nil {
+				details.Path = vbsPath
+				details.Label = "Startup script (silent)"
+			} else {
+				details.Path = cmdPath
+				details.Label = "Startup script"
+			}
+		}
+	}
+	if details.Path != "" {
+		if _, err := os.Stat(details.Path); err == nil {
+			details.Enabled = true
+		}
+	}
+	return details
+}
+
 func linuxAutostart(action, code string) (string, error) {
 	home, _ := os.UserHomeDir()
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -116,9 +172,9 @@ func linuxAutostart(action, code string) (string, error) {
 	path := filepath.Join(dir, serviceName+".service")
 	switch action {
 	case "status":
-		runtimeState := "not running"
+		runtimeState := "stopped"
 		if exec.Command("systemctl", "--user", "is-active", "--quiet", serviceName+".service").Run() == nil {
-			runtimeState = "running now"
+			runtimeState = "running"
 		}
 		return autostartStatusText(path, "systemd user service", runtimeState), nil
 	case "disable":
@@ -174,9 +230,9 @@ func macAutostart(action, code string) (string, error) {
 	path := filepath.Join(dir, launchAgentID+".plist")
 	switch action {
 	case "status":
-		runtimeState := "not running"
+		runtimeState := "stopped"
 		if exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), launchAgentID)).Run() == nil {
-			runtimeState = "loaded by launchd"
+			runtimeState = "running"
 		}
 		return autostartStatusText(path, "LaunchAgent", runtimeState), nil
 	case "disable":
@@ -267,9 +323,9 @@ func windowsAutostart(action, code string) (string, error) {
 	cmdPath := filepath.Join(dir, "Cliks.cmd")
 	switch action {
 	case "status":
-		runtimeState := "not running"
+		runtimeState := "stopped"
 		if _, ok := activeSession(); ok {
-			runtimeState = "running now"
+			runtimeState = "running"
 		}
 		if _, err := os.Stat(vbsPath); err == nil {
 			return autostartStatusText(vbsPath, "Startup script (silent)", runtimeState), nil
