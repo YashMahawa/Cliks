@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 )
 
 const version = "0.6.15"
+
+var joinStdin io.Reader = os.Stdin
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -123,11 +126,12 @@ func cmdService(args []string) error {
 
 func cmdJoin(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
+		return errors.New("usage: cliks join [-f|--force] [--no-start] CLIK-XXXXXX")
 	}
 	nickname := ""
 	code := ""
 	autoStart := true
+	force := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-n", "--nickname":
@@ -140,6 +144,8 @@ func cmdJoin(args []string) error {
 			autoStart = false
 		case "--start":
 			autoStart = true
+		case "-f", "--force":
+			force = true
 		default:
 			if code == "" {
 				code = args[i]
@@ -147,8 +153,28 @@ func cmdJoin(args []string) error {
 		}
 	}
 	if code == "" {
-		return errors.New("usage: cliks join [--no-start] CLIK-XXXXXX")
+		return errors.New("usage: cliks join [-f|--force] [--no-start] CLIK-XXXXXX")
 	}
+
+	if active, ok := activeSession(); ok {
+		if !force {
+			if !isInteractiveTerminal() {
+				return fmt.Errorf("an active room session is running for %s; pass --force (-f) to disconnect and join %s", formatTeamLabel(active.TeamName, active.TeamCode), strings.ToUpper(code))
+			}
+			reader := bufio.NewReader(joinStdin)
+			prompt := fmt.Sprintf("An active session is running for %s. Disconnect active session and join %s? [y/N] ", formatTeamLabel(active.TeamName, active.TeamCode), strings.ToUpper(code))
+			ans, err := readPrompt(reader, prompt)
+			if err != nil {
+				return fmt.Errorf("join canceled: %w", err)
+			}
+			ans = strings.ToLower(strings.TrimSpace(ans))
+			if ans != "y" && ans != "yes" {
+				fmt.Println("Join canceled.")
+				return nil
+			}
+		}
+	}
+
 	cfg := loadConfig()
 	team, err := getTeamViaAPI(cfg, code)
 	if err != nil {
@@ -834,8 +860,9 @@ Usage:
   %[1]s                  Open the control interface
   %[1]s create           Create a team
   %[1]s delete [CODE]    Delete a team
-  %[1]s join CODE        Save, select, and start a background session
-  %[1]s join --no-start CODE
+  %[1]s join [-f|--force] CODE
+                         Save, select, and start a background session
+  %[1]s join [-f|--force] --no-start CODE
   %[1]s nickname [NAME]  Set your 10-character display name
   %[1]s start            Start coworking ambience
   %[1]s start CODE       Join/select a code and start immediately
