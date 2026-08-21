@@ -636,6 +636,78 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 		default:
 			return false, fmt.Errorf("theme must be ember, ocean, forest, sunset, aurora, or mono")
 		}
+	case "palette.accent":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Accent = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.accent must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Accent = normalizeHex(value)
+		}
+	case "palette.dim":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Dim = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.dim must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Dim = normalizeHex(value)
+		}
+	case "palette.warn":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Warn = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.warn must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Warn = normalizeHex(value)
+		}
+	case "palette.ok":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.OK = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.ok must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.OK = normalizeHex(value)
+		}
+	case "palette.panel":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Panel = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.panel must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Panel = normalizeHex(value)
+		}
+	case "palette.select":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Select = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.select must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Select = normalizeHex(value)
+		}
+	case "palette.onpick", "palette.onPick", "palette.on_pick":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.OnPick = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.onPick must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.OnPick = normalizeHex(value)
+		}
+	case "palette.second":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Second = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.second must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Second = normalizeHex(value)
+		}
+	case "palette.third":
+		if value == "" || strings.EqualFold(value, "default") || strings.EqualFold(value, "none") {
+			cfg.Palette.Third = ""
+		} else if !isValidHex(value) {
+			return false, fmt.Errorf("palette.third must be a valid hex color code (e.g. #FF0000 or #F00)")
+		} else {
+			cfg.Palette.Third = normalizeHex(value)
+		}
 	case "capture.mode":
 		mode := strings.ToLower(strings.TrimSpace(value))
 		switch mode {

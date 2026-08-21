@@ -10,24 +10,29 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
 
 var (
-	colorAccent = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
-	colorDim    = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
-	colorWarn   = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
-	colorOK     = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
-	colorPanel  = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
-	colorSelect = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
-	colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
-	colorSecond = lipgloss.AdaptiveColor{Light: "#A23B42", Dark: "#FF7A7A"}
-	colorThird  = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
+	themeMu       sync.Mutex
+	activePalette PaletteConfig
+
+	colorAccent lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
+	colorDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+	colorWarn   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+	colorOK     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
+	colorPanel  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
+	colorSelect lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#D97746"}
+	colorOnPick lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
+	colorSecond lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#A23B42", Dark: "#FF7A7A"}
+	colorThird  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
 
 	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
 	styleAccent   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
@@ -41,7 +46,36 @@ var (
 	styleThird    = lipgloss.NewStyle().Foreground(colorThird).Bold(true)
 )
 
-func applyTheme(theme string) {
+func evaluateColorProfile() termenv.Profile {
+	if os.Getenv("NO_COLOR") != "" {
+		return termenv.Ascii
+	}
+
+	clicolorForce := os.Getenv("CLICOLOR_FORCE")
+	if clicolorForce != "" && clicolorForce != "0" {
+		p := termenv.EnvColorProfile()
+		if p == termenv.Ascii {
+			return termenv.TrueColor
+		}
+		return p
+	}
+
+	clicolor := os.Getenv("CLICOLOR")
+	if clicolor == "0" {
+		return termenv.Ascii
+	}
+
+	return termenv.EnvColorProfile()
+}
+
+func applyThemeWithPalette(theme string, palette PaletteConfig) {
+	themeMu.Lock()
+	defer themeMu.Unlock()
+
+	activePalette = palette
+	profile := evaluateColorProfile()
+	lipgloss.SetColorProfile(profile)
+
 	switch theme {
 	case "ocean":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#006D7D", Dark: "#33D6E8"}
@@ -50,6 +84,9 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#071013"}
 		colorSecond = lipgloss.AdaptiveColor{Light: "#1E5AA8", Dark: "#66A8FF"}
 		colorThird = lipgloss.AdaptiveColor{Light: "#087F6B", Dark: "#64E6C4"}
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	case "forest":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#356B2F", Dark: "#82D173"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#527A3A", Dark: "#76A85A"}
@@ -57,6 +94,9 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#10150E"}
 		colorSecond = lipgloss.AdaptiveColor{Light: "#8B6508", Dark: "#E8C15A"}
 		colorThird = lipgloss.AdaptiveColor{Light: "#286C68", Dark: "#63D5CE"}
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	case "sunset":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#B84A32", Dark: "#FF8268"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#C06438", Dark: "#F28C52"}
@@ -64,6 +104,9 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#160D0E"}
 		colorSecond = lipgloss.AdaptiveColor{Light: "#9B3973", Dark: "#F087C2"}
 		colorThird = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	case "aurora":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#087F75", Dark: "#52E0C4"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#477B87", Dark: "#5EB6C8"}
@@ -71,6 +114,9 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#091016"}
 		colorSecond = lipgloss.AdaptiveColor{Light: "#7E4AA3", Dark: "#C58AF0"}
 		colorThird = lipgloss.AdaptiveColor{Light: "#A1456E", Dark: "#F17FAA"}
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	case "mono":
 		colorAccent = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#EEEEEE"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#8A8A8A"}
@@ -78,6 +124,9 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#111111"}
 		colorSecond = colorAccent
 		colorThird = colorAccent
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	default:
 		colorAccent = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#F2A65A"}
 		colorPanel = lipgloss.AdaptiveColor{Light: "#B65E2E", Dark: "#D97746"}
@@ -85,7 +134,39 @@ func applyTheme(theme string) {
 		colorOnPick = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#11100F"}
 		colorSecond = lipgloss.AdaptiveColor{Light: "#A23B42", Dark: "#FF7A7A"}
 		colorThird = lipgloss.AdaptiveColor{Light: "#9A6A00", Dark: "#FFD166"}
+		colorDim = lipgloss.AdaptiveColor{Light: "#5B5751", Dark: "#A9A39A"}
+		colorWarn = lipgloss.AdaptiveColor{Light: "#9A4D00", Dark: "#FFB454"}
+		colorOK = lipgloss.AdaptiveColor{Light: "#18743A", Dark: "#55D98B"}
 	}
+
+	if isValidHex(palette.Accent) {
+		colorAccent = lipgloss.Color(normalizeHex(palette.Accent))
+	}
+	if isValidHex(palette.Dim) {
+		colorDim = lipgloss.Color(normalizeHex(palette.Dim))
+	}
+	if isValidHex(palette.Warn) {
+		colorWarn = lipgloss.Color(normalizeHex(palette.Warn))
+	}
+	if isValidHex(palette.OK) {
+		colorOK = lipgloss.Color(normalizeHex(palette.OK))
+	}
+	if isValidHex(palette.Panel) {
+		colorPanel = lipgloss.Color(normalizeHex(palette.Panel))
+	}
+	if isValidHex(palette.Select) {
+		colorSelect = lipgloss.Color(normalizeHex(palette.Select))
+	}
+	if isValidHex(palette.OnPick) {
+		colorOnPick = lipgloss.Color(normalizeHex(palette.OnPick))
+	}
+	if isValidHex(palette.Second) {
+		colorSecond = lipgloss.Color(normalizeHex(palette.Second))
+	}
+	if isValidHex(palette.Third) {
+		colorThird = lipgloss.Color(normalizeHex(palette.Third))
+	}
+
 	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(colorOnPick).Background(colorSelect).Padding(0, 1)
 	styleAccent = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleDim = lipgloss.NewStyle().Foreground(colorDim)
@@ -96,6 +177,10 @@ func applyTheme(theme string) {
 	styleFocused = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleSecond = lipgloss.NewStyle().Foreground(colorSecond).Bold(true)
 	styleThird = lipgloss.NewStyle().Foreground(colorThird).Bold(true)
+}
+
+func applyTheme(theme string) {
+	applyThemeWithPalette(theme, activePalette)
 }
 
 type shortcutHelp struct {
