@@ -61,6 +61,10 @@ func newActivityCapture() *ActivityCapture {
 	return &ActivityCapture{Events: make(chan LocalActivityEvent, 1024), ctx: context.Background()}
 }
 
+func runCaptureHelper(args []string) error {
+	return runWindowsCaptureHelper(args)
+}
+
 func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, mode string) CaptureState {
 	ctx, cancel := context.WithCancel(parent)
 	c.ctx = ctx

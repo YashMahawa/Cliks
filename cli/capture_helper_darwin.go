@@ -71,7 +71,7 @@ func macCaptureHelperReady() bool {
 	if helper == "" {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, helper, "--stdio")
 	if err := cmd.Start(); err != nil {
@@ -82,8 +82,10 @@ func macCaptureHelperReady() bool {
 	select {
 	case <-done:
 		return false
-	case <-time.After(350 * time.Millisecond):
-		_ = cmd.Process.Kill()
+	case <-time.After(100 * time.Millisecond):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
 		return true
 	}
 }

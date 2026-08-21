@@ -70,6 +70,8 @@ func run(args []string) error {
 		return runNotificationTest()
 	case "capture-test":
 		return cmdCaptureTest(rest[1:])
+	case "capture-helper":
+		return runCaptureHelper(rest[1:])
 	case "fix-terminal":
 		repairTerminal()
 		fmt.Println("Terminal input restored. If it still looks wrong, close and reopen this terminal tab.")
