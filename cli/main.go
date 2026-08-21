@@ -451,6 +451,9 @@ func cmdPreset(args []string) error {
 }
 
 func cmdSet(args []string) error {
+	if len(args) == 0 {
+		return runSettingsWizardTUI(loadConfig())
+	}
 	if len(args) == 1 && (args[0] == "--list" || args[0] == "-l") {
 		printSettingCatalog()
 		return nil
