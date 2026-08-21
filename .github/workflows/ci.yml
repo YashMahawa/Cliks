@@ -37,7 +37,7 @@ jobs:
       - run: npm run build
 
       - name: CLI doctor smoke
-        run: ./cli/dist/cliks doctor
+        run: npm run smoke:cli
 
       - name: Server smoke
         run: npm run smoke:server

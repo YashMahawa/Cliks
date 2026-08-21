@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "go run .",
-    "build": "go build -o dist/cliks .",
+    "build": "node ../scripts/build-cli.mjs",
     "check": "go test ./..."
   }
 }
