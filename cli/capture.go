@@ -100,8 +100,10 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 	if !term.IsTerminal(fd) {
 		return fmt.Errorf("terminal capture needs an interactive terminal")
 	}
+	disableQuickEditForTerminalCapture()
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
+		restoreQuickEditConsoleMode()
 		return err
 	}
 	c.mu.Lock()
@@ -179,6 +181,7 @@ func (c *ActivityCapture) restoreTerminal() {
 		_ = term.Restore(int(os.Stdin.Fd()), c.terminalOldState)
 		c.terminalOldState = nil
 		fmt.Print("\x1b[?1000l\x1b[?1006l")
+		restoreQuickEditConsoleMode()
 	}
 }
 
@@ -324,6 +327,7 @@ func repairTerminal() {
 		// Otherwise try a platform-friendly "sane" reset when available.
 		restoreTerminalBestEffort()
 	}
+	forceRestoreQuickEditConsoleMode()
 }
 
 func restoreTerminalBestEffort() {
