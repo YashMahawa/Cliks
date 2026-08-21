@@ -286,9 +286,18 @@ if [ "$PREBUILT" = "0" ]; then
 exec "$INSTALL_DIR/cli/dist/cliks" "\$@"
 EOF
   chmod +x "$BIN_DIR/cliks"
-  if [ "$(uname -s)" = "Darwin" ] && command -v swiftc >/dev/null 2>&1; then
-    chmod +x macos-capture-helper/build.sh
-    macos-capture-helper/build.sh "$CAPTURE_APP_DIR"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    if command -v swiftc >/dev/null 2>&1; then
+      chmod +x macos-capture-helper/build.sh
+      macos-capture-helper/build.sh "$CAPTURE_APP_DIR"
+    else
+      say ""
+      say "WARNING: Swift compiler (swiftc) is missing! Cannot compile Cliks Capture.app."
+      say "  · The background capture helper requires Xcode Command Line Tools to compile from source."
+      say "  · Action required: Run 'xcode-select --install' to install developer tools, then re-run installation."
+      say "  · Interactive sessions will automatically fall back to terminal-only capture mode until built."
+      say ""
+    fi
   fi
   if [ "$(uname -s)" = "Linux" ] && ! is_termux && command -v systemctl >/dev/null 2>&1; then
     go build -o dist/cliks-capture-helper ./linux-capture-helper
