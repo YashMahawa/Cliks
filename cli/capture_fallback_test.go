@@ -4,10 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestMissingCaptureHelperReturnsOffMode(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("CLIKS_CAPTURE_HELPER is only used on macOS")
+	}
+
 	// Point helper path to non-existent location
 	t.Setenv("CLIKS_CAPTURE_HELPER", filepath.Join(t.TempDir(), "nonexistent-helper"))
 
