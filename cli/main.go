@@ -503,6 +503,13 @@ func cmdSet(args []string) error {
 }
 
 func isConfigSettingKey(key string) bool {
+	switch key {
+	case "boot.delay", "boot.delaySec", "boot.delaySeconds", "boot.startupDelay",
+		"boot.capture.mode", "boot.captureMode", "boot.capture",
+		"boot.audio.device", "boot.audioDevice", "boot.audio", "boot.device",
+		"boot.volume", "boot.startupVolume":
+		return true
+	}
 	for _, item := range configSettingCatalog {
 		if item.Key == key {
 			return true
@@ -514,6 +521,36 @@ func isConfigSettingKey(key string) bool {
 func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 	parseSwitch := func() (bool, error) { return parseOnOff(value) }
 	switch key {
+	case "boot.delay", "boot.delaySec", "boot.delaySeconds", "boot.startupDelay":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return false, fmt.Errorf("boot delay must be a number of seconds: %w", err)
+		}
+		if parsed < 0 {
+			parsed = 0
+		}
+		cfg.Boot.DelaySec = parsed
+	case "boot.capture.mode", "boot.captureMode", "boot.capture":
+		mode := strings.ToLower(strings.TrimSpace(value))
+		switch mode {
+		case "isolated", "direct", "terminal":
+			cfg.Boot.CaptureMode = mode
+		default:
+			return false, fmt.Errorf("boot capture mode must be isolated, direct, or terminal")
+		}
+	case "boot.audio.device", "boot.audioDevice", "boot.audio", "boot.device":
+		device := strings.TrimSpace(value)
+		if strings.EqualFold(device, "default") {
+			device = "default"
+		}
+		cfg.Boot.AudioDevice = device
+	case "boot.volume", "boot.startupVolume":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return false, fmt.Errorf("boot volume must be a number between 0 and 1: %w", err)
+		}
+		cfg.Boot.Volume = clamp(parsed, 0, 1)
+		cfg.Boot.VolumeConfigured = true
 	case "share.keyboard":
 		v, err := parseSwitch()
 		if err != nil {
