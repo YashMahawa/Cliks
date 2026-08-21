@@ -33,6 +33,7 @@ func main() {
 }
 
 func run(args []string) error {
+	remediatePermissions()
 	commandName := filepath.Base(args[0])
 	rest := args[1:]
 	if len(rest) == 0 {

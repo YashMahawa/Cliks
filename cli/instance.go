@@ -59,9 +59,10 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	if active, ok := activeSession(); ok {
 		return nil, alreadyRunningError{state: active}
 	}
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return nil, err
 	}
+	_ = os.Chmod(stateDir(), 0o700)
 	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	state := ActiveSessionState{
 		PID:              os.Getpid(),
@@ -83,8 +84,14 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	// young lock (another process may still be writing metadata into it).
 	const maxAttempts = 5
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
+			_ = os.Chmod(path, 0o600)
+			if permErr := validatePermissions(path, 0o600); permErr != nil {
+				_ = file.Close()
+				_ = os.Remove(path)
+				return nil, permErr
+			}
 			if _, writeErr := file.Write(payload); writeErr != nil {
 				_ = file.Close()
 				_ = os.Remove(path)
@@ -371,14 +378,15 @@ func sessionStatePath() string {
 }
 
 func writeActiveSessionState(state ActiveSessionState) error {
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
+	_ = os.Chmod(stateDir(), 0o700)
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(sessionStatePath(), append(data, '\n'), 0o644)
+	return atomicWriteFile(sessionStatePath(), append(data, '\n'), 0o600)
 }
 
 func readSessionFile(path string) (ActiveSessionState, bool) {
@@ -441,15 +449,16 @@ func scheduleDeferredStop(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
+	_ = os.Chmod(stateDir(), 0o700)
 	state := deferredStopState{PID: pid, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(deferredStopPath(), append(data, '\n'), 0o644)
+	return atomicWriteFile(deferredStopPath(), append(data, '\n'), 0o600)
 }
 
 func clearDeferredStop() error {
