@@ -60,6 +60,7 @@ Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop se
 - `cliks setup` and the installer open System Settings to the right pane
 - Unsigned community builds may need Privacy & Security → Open Anyway once. Never disable Gatekeeper.
 - Direct mode is retained only as a labeled trial/fallback. Remove the terminal's Input Monitoring permission after use.
+- Non-CGO builds (`CGO_ENABLED=0` or cross-compilation from non-macOS hosts) isolate direct CGO event tapping behind build tags and fall back to the Swift helper app (`Cliks Capture.app`).
 
 ### Windows
 
