@@ -193,6 +193,7 @@ WantedBy=default.target
 					}
 				}
 			}
+			_ = os.Remove(systemdPath)
 		}
 
 		if err := os.MkdirAll(xdgDir, 0o755); err != nil {
