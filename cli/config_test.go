@@ -109,7 +109,7 @@ func TestSavedDefaultDropletMigratesToRenderWithoutChangingCustomBackend(t *test
 	}
 }
 
-func TestSavedDropletTeamsStayOnOriginalBackendUntilExplicitSwitch(t *testing.T) {
+func TestSavedDropletTeamsMigrateWithoutLosingHistory(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()
 	cfg.APIURL = legacyProductionAPIURL
@@ -120,8 +120,24 @@ func TestSavedDropletTeamsStayOnOriginalBackendUntilExplicitSwitch(t *testing.T)
 		t.Fatal(err)
 	}
 	loaded := loadConfig()
-	if loaded.APIURL != cfg.APIURL || loaded.WSURL != cfg.WSURL || loaded.CurrentTeamCode != cfg.CurrentTeamCode || len(loaded.Teams) != 1 {
+	if loaded.APIURL != productionAPIURL || loaded.WSURL != toWSURL(productionAPIURL) || loaded.CurrentTeamCode != cfg.CurrentTeamCode || len(loaded.Teams) != 1 || loaded.Teams[0].Name != "Original room" {
 		t.Fatalf("saved room was changed during backend migration: %+v", loaded)
+	}
+	if reloaded := loadConfig(); reloaded.APIURL != productionAPIURL || len(reloaded.Teams) != 1 {
+		t.Fatalf("migration was not persisted: %+v", reloaded)
+	}
+}
+
+func TestCustomWebsocketEndpointIsNotMigrated(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = "wss://my-relay.example/ws"
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadConfig(); got.APIURL != cfg.APIURL || got.WSURL != cfg.WSURL {
+		t.Fatalf("custom websocket endpoint was changed: %+v", got)
 	}
 }
 

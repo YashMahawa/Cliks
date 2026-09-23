@@ -314,7 +314,7 @@ CLIKS_LOCAL_POSTGRES=true
 
 Supabase is optional.
 
-The public relay now runs on a free Render web service with Render Postgres. New installs and devices without saved teams use Render. Devices with saved Droplet team codes keep their old endpoint and data until you explicitly switch Server to `public`; those old codes were not copied to Render, so create a new room there. Render's free database expires on **October 23, 2026** unless it is upgraded or migrated; free services also sleep after idle periods, so the first connection can take around a minute.
+The public relay runs on a free Render web service with Render Postgres. Cliks 0.6.18+ updates the exact former public DigitalOcean URL to Render on launch, even for devices with saved rooms; custom self-hosted URLs and environment overrides remain untouched. Active team records from the old public relay were imported with their codes and delete passwords. Render's free database expires on **October 23, 2026** unless it is upgraded or migrated; free services also sleep after idle periods, so the first connection can take around a minute.
 Re-running the installer updates Cliks without resetting saved teams, nickname, preferences, or a custom server URL.
 
 ## Testing

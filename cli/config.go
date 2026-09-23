@@ -241,7 +241,7 @@ func loadConfig() CliksConfig {
 		setConfigLoadWarning("")
 	}
 	normalizeConfig(&cfg)
-	if len(cfg.Teams) == 0 && strings.EqualFold(strings.TrimRight(cfg.APIURL, "/"), legacyProductionAPIURL) &&
+	if strings.EqualFold(strings.TrimRight(cfg.APIURL, "/"), legacyProductionAPIURL) &&
 		strings.EqualFold(strings.TrimRight(cfg.WSURL, "/"), strings.TrimRight(toWSURL(legacyProductionAPIURL), "/")) {
 		cfg.APIURL = productionAPIURL
 		cfg.WSURL = toWSURL(productionAPIURL)
