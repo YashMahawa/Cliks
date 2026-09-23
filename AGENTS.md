@@ -251,5 +251,5 @@ Keep `README.md` from the user point of view. It should explain what Cliks does,
 
 ## Public Backend URL
 
-`cli/config.go` points new installs at `https://cliks-server.onrender.com` and migrates saved configurations only when both endpoints match the old Droplet default. This is a public backend URL, not a secret. Never put Render, DigitalOcean, database, or service credentials into the CLI, website bundle, README, install script, or committed env files.
+`cli/config.go` points new installs at `https://cliks-server.onrender.com` and migrates saved configurations only when both endpoints match the old Droplet default and no teams are saved. Devices with saved Droplet codes retain their endpoint and team history until an explicit Server switch; otherwise the new relay would report those unmigrated codes unavailable and the CLI would erase them locally. This is a public backend URL, not a secret. Never put Render, DigitalOcean, database, or service credentials into the CLI, website bundle, README, install script, or committed env files.
 Re-running `cli/install.sh` must preserve saved teams, nickname, preferences, and any custom backend URL. The installer must not call `cliks set api.url` unconditionally or delete a pre-existing non-Git source directory.

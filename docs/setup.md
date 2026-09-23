@@ -27,7 +27,7 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 
 The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission. Moving through listening mixes and room tones plays a short local preview before you choose.
 
-The public backend is `https://cliks-server.onrender.com`; saved settings using the old Droplet default migrate automatically. A sleeping free Render service can take about a minute to wake on the first connection. The free database expires on October 23, 2026 unless migrated or upgraded. Former Droplet team codes were not imported, so create a new room code.
+The public backend is `https://cliks-server.onrender.com`. Devices without saved teams migrate from the old Droplet default automatically. Devices with old saved room codes keep their endpoint and history, avoiding accidental deletion when the new relay does not recognize those codes. To move, set Server to `public` in Preferences or run `cliks set api.url public`, then create a new room code; former Droplet codes were not imported. A sleeping free Render service can take about a minute to wake. The free database expires on October 23, 2026 unless migrated or upgraded.
 Re-running the installer preserves saved teams, nickname, preferences, and custom server URLs. It updates the executable and setup helper; it refuses to delete an existing source directory that is not a Git checkout.
 
 ---

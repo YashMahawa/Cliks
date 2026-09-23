@@ -109,6 +109,22 @@ func TestSavedDefaultDropletMigratesToRenderWithoutChangingCustomBackend(t *test
 	}
 }
 
+func TestSavedDropletTeamsStayOnOriginalBackendUntilExplicitSwitch(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = toWSURL(legacyProductionAPIURL)
+	cfg.CurrentTeamCode = "CLIK-ABC123"
+	cfg.Teams = []TeamConfig{{Code: cfg.CurrentTeamCode, Name: "Original room"}}
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded := loadConfig()
+	if loaded.APIURL != cfg.APIURL || loaded.WSURL != cfg.WSURL || loaded.CurrentTeamCode != cfg.CurrentTeamCode || len(loaded.Teams) != 1 {
+		t.Fatalf("saved room was changed during backend migration: %+v", loaded)
+	}
+}
+
 func TestPublicBackendLocksBatchWindowToFiveHundredMilliseconds(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BatchWindowMs = 100
