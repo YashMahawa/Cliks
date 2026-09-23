@@ -25,7 +25,10 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 - installs Cliks Capture.app and opens Input Monitoring for that app only
 - runs `cliks setup` for a plain-language readiness check
 
-The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission.
+The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission. Moving through listening mixes and room tones plays a short local preview before you choose.
+
+The public backend is `https://cliks-server.onrender.com`; saved settings using the old Droplet default migrate automatically. A sleeping free Render service can take about a minute to wake on the first connection. The free database expires on October 23, 2026 unless migrated or upgraded. Former Droplet team codes were not imported, so create a new room code.
+Re-running the installer preserves saved teams, nickname, preferences, and custom server URLs. It updates the executable and setup helper; it refuses to delete an existing source directory that is not a Git checkout.
 
 ---
 
@@ -120,6 +123,8 @@ cliks start --terminal --self
 | `cliks solo` | Offline simulated desk; no team, capture, server, or internet |
 
 ## Solo Desk and personal room tones
+
+Escape, q, or Back stops the local simulation and returns to the main control screen. The simulated coworkers have distinct stable typing rhythms.
 
 Run `cliks solo` to leave any connected team and open a local spatial room with 1-12 simulated coworkers. Each simulated coworker types in short bursts with quiet gaps and occasional clicks. Keyboard ambience, click ambience, and the embedded room tone have separate slider tracks. Hover a slider and use arrow keys or natural scrolling, click its track to jump to a level, or press Tab to cycle sliders without a mouse. Choose rain, fireside, coffee house, cloud drift, contemplation, or night drive, and set room-tone volume anywhere up to 100%. Resizing the terminal—or changing terminal font size—automatically switches between two-pane, stacked, and controls-first layouts. Nothing from Solo Desk is captured or sent. The same private room tone and its volume are directly adjustable in a live team room, from Preferences, or with `cliks set ambient rain ambient.volume 0.7`. For scripts, set both Solo levels together with `cliks set solo.keyboardVolume 0.7 solo.mouseVolume 0.8`. Every `cliks set` argument is an exact key/value pair; quote values containing spaces, such as `cliks set nickname "Cosmic Otter"`.
 

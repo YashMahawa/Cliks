@@ -26,10 +26,10 @@ Core promise:
 ## Current Structure
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join/install commands. The landing page uses the "Warm Desk" design system (warm stone palette `#11100f`/`#1a1918`, bone text `#eae5d9`, ember accent `#d97746`; Geist + Geist Mono) and doubles as a live in-browser demo of the CLI ambience (see Sound). Brand assets: `site/public/images/cliks-keycap.png` (keycap logo/favicon) and `site/public/images/warm_desk_workspace.png` (hero photo).
-- `server`: Go API/WebSocket relay currently deployed on a DigitalOcean Droplet. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
+- `server`: Go API/WebSocket relay currently deployed on a free Render web service with Render Postgres. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
 - `cli`: Go-based `cliks` command with Bubble Tea/Lip Gloss terminal interfaces. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.
-- `deploy/render.yaml`: starter Render config.
+- `deploy/render.yaml`: free Render web service and Postgres Blueprint config.
 - `docs/architecture.md`: deeper architecture and scaling notes.
 - `docs/capture-backends.md`: global input capture strategy and platform caveats.
 - `shared/protocol.md`: WebSocket message shapes.
@@ -211,7 +211,9 @@ NEXT_PUBLIC_CLIKS_API_URL=https://your-backend-url
 
 Current production site alias is `https://site-kappa-six-64.vercel.app`. An attempt on 2026-06-20 to assign `https://cliks.vercel.app` failed because Vercel reported that alias was already in use.
 
-The current DigitalOcean backend is a Droplet running the Go `cliks-api` service under systemd with Caddy in front for HTTPS. The bootstrap file is `deploy/droplet-cloud-init.yaml`. The live Droplet should run local Postgres and set `CLIKS_LOCAL_POSTGRES=true` so team codes survive service restarts.
+The current public backend is `https://cliks-server.onrender.com` (Render service `srv-dapuomou01pc73e1knb0`, free Postgres `dpg-dapuoeegekts73f9of0g-a`). Render's free web service sleeps after 15 idle minutes; waking can take about a minute. Its free Postgres expires on October 23, 2026. Migrate or upgrade before then. The former DigitalOcean Droplet is stopped; its team codes were not imported. `deploy/droplet-cloud-init.yaml` remains a self-hosting option.
+
+In Solo, Escape, q, and Back stop the simulation and return to the main control screen, including when launched with `cliks solo`. Simulated peers have stable distinct typing rhythms. The nearest audio ring now reaches full configured activity gain; outer rings attenuate gradually. Moving focus among onboarding mix and room-tone choices previews the selected local sound. The macOS helper emits a `ready` handshake only after its event tap starts, and a source build targets the actual host CPU architecture.
 
 The public `/health` route must stay unauthenticated for uptime checks, but it must not expose team codes, team names, peer ids, nicknames, or per-room snapshots. It returns only `ok`, `totalRooms`, and `totalPeers`.
 
@@ -249,4 +251,5 @@ Keep `README.md` from the user point of view. It should explain what Cliks does,
 
 ## Public Backend URL
 
-`cli/config.go` currently points new installs at `https://139.59.29.207.sslip.io`. This is a public backend URL, not a secret. Never put the DigitalOcean API token, SSH private key, or service credentials into the CLI, website bundle, README, install script, or committed env files.
+`cli/config.go` points new installs at `https://cliks-server.onrender.com` and migrates saved configurations only when both endpoints match the old Droplet default. This is a public backend URL, not a secret. Never put Render, DigitalOcean, database, or service credentials into the CLI, website bundle, README, install script, or committed env files.
+Re-running `cli/install.sh` must preserve saved teams, nickname, preferences, and any custom backend URL. The installer must not call `cliks set api.url` unconditionally or delete a pre-existing non-Git source directory.

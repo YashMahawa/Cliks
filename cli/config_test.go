@@ -87,6 +87,28 @@ func TestEnvironmentURLsOverrideSavedConfiguration(t *testing.T) {
 	}
 }
 
+func TestSavedDefaultDropletMigratesToRenderWithoutChangingCustomBackend(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = toWSURL(legacyProductionAPIURL)
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded := loadConfig()
+	if loaded.APIURL != productionAPIURL || loaded.WSURL != toWSURL(productionAPIURL) {
+		t.Fatalf("saved default did not migrate: %q %q", loaded.APIURL, loaded.WSURL)
+	}
+	cfg.APIURL = "https://my-relay.example"
+	cfg.WSURL = toWSURL(cfg.APIURL)
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadConfig(); got.APIURL != cfg.APIURL || got.WSURL != cfg.WSURL {
+		t.Fatalf("custom backend was changed: %q %q", got.APIURL, got.WSURL)
+	}
+}
+
 func TestPublicBackendLocksBatchWindowToFiveHundredMilliseconds(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BatchWindowMs = 100

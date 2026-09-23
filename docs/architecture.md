@@ -24,6 +24,8 @@ It must not send:
 
 The CLI batches for 500ms by default. This keeps Render/WebSocket load lower while preserving the timing feel.
 
+The public relay is a free Render web service at `https://cliks-server.onrender.com`, with a free Render Postgres instance for team records. Live presence remains process-local. The free web service sleeps after idle periods and may take about a minute to wake. The free Postgres instance expires after 30 days; migrate or upgrade before October 23, 2026 to retain new team codes. Former Droplet codes were not imported. The CLI migrates only saved configurations pointing at the old default URL; user-selected self-hosted URLs stay as configured.
+
 Clients may send local millisecond offsets to the relay, but the server rounds offsets into 50ms buckets before forwarding activity to teammates. This limits keystroke-rhythm fingerprinting while preserving enough timing to sound natural.
 
 Example:
@@ -181,4 +183,4 @@ Vercel should stay mostly idle because it serves a static team-creation page.
 
 Supabase load is tiny because it stores team code records only.
 
-The Go relay keeps the baseline memory footprint low, but live fanout remains the bottleneck because every active sender fans out to room listeners. A $200 DigitalOcean credit runway would be useful for an always-on backend once demos move beyond a small beta.
+The Go relay keeps the baseline memory footprint low, but live fanout remains the bottleneck because every active sender fans out to room listeners. The free Render instance is suitable for a small beta; an always-on paid instance and durable database will be needed for reliable public use.

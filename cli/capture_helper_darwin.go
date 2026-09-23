@@ -22,12 +22,21 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 	}
 	cmd := exec.CommandContext(ctx, helper, "--stdio")
 	stdout, err := cmd.StdoutPipe()
-	if err != nil || cmd.Start() != nil {
+	if err != nil {
+		return CaptureState{Mode: "off", PermissionHint: "Could not open Cliks Capture.app output. Run cliks setup."}
+	}
+	if err := cmd.Start(); err != nil {
 		return CaptureState{Mode: "off", PermissionHint: "Could not start Cliks Capture.app. Run cliks setup; direct compatibility mode remains available in Capture safety."}
 	}
+	scanner := bufio.NewScanner(stdout)
+	ready := make(chan bool, 1)
 	go func() {
 		defer cmd.Wait()
-		scanner := bufio.NewScanner(stdout)
+		if !scanner.Scan() || scanner.Text() != "ready" {
+			ready <- false
+			return
+		}
+		ready <- true
 		for scanner.Scan() {
 			switch scanner.Text() {
 			case "k":
@@ -45,6 +54,18 @@ func (c *ActivityCapture) startGlobalHook(ctx context.Context, sharing SharingCo
 			}
 		}
 	}()
+	select {
+	case ok := <-ready:
+		if !ok {
+			return CaptureState{Mode: "off", PermissionHint: "Cliks Capture could not start its input tap. Allow Cliks Capture.app in Input Monitoring, then restart Cliks."}
+		}
+	case <-time.After(2 * time.Second):
+		_ = cmd.Process.Kill()
+		return CaptureState{Mode: "off", PermissionHint: "Cliks Capture is waiting for Input Monitoring. Approve the macOS prompt, then restart Cliks."}
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		return CaptureState{Mode: "off", PermissionHint: "Capture stopped."}
+	}
 	return CaptureState{Mode: "macos-isolated-app", PermissionHint: "Input Monitoring belongs to Cliks Capture.app, not your terminal. Remove it later in System Settings at any time."}
 }
 
@@ -71,19 +92,29 @@ func macCaptureHelperReady() bool {
 	if helper == "" {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, helper, "--stdio")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false
+	}
 	if err := cmd.Start(); err != nil {
 		return false
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-		return false
-	case <-time.After(350 * time.Millisecond):
+	defer func() {
 		_ = cmd.Process.Kill()
-		return true
+		_ = cmd.Wait()
+	}()
+	ready := make(chan bool, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		ready <- scanner.Scan() && scanner.Text() == "ready"
+	}()
+	select {
+	case ok := <-ready:
+		return ok
+	case <-ctx.Done():
+		return false
 	}
 }

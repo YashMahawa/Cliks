@@ -9,7 +9,10 @@ type CreatedTeam = {
   name: string;
 };
 
-const apiBase = process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "http://localhost:8787";
+const configuredApiBase = process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "https://cliks-server.onrender.com";
+const apiBase = configuredApiBase === "https://139.59.29.207.sslip.io"
+  ? "https://cliks-server.onrender.com"
+  : configuredApiBase;
 const installCommand =
   "curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash";
 

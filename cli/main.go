@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.15"
+const version = "0.6.16"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -57,7 +57,10 @@ func run(args []string) error {
 	case "live":
 		return cmdLive()
 	case "solo":
-		return runSoloExclusive(loadConfig())
+		if err := runSoloExclusive(loadConfig()); err != nil {
+			return err
+		}
+		return runHomeTUI(loadConfig())
 	case "settings", "ui":
 		return runHomeTUI(loadConfig())
 	case "setup":

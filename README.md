@@ -272,7 +272,7 @@ See [docs/setup.md](docs/setup.md) for a full macOS / Windows / Linux walkthroug
 Cliks is split into three parts:
 
 - Website: deploy `site` to Vercel.
-- Backend: deploy the Go `server` to DigitalOcean, Render, App Platform, or another host with WebSocket support.
+- Backend: the public Go relay is at `https://cliks-server.onrender.com`. You can also self-host on Render, DigitalOcean, or another host with WebSocket support.
 - Database: use local Postgres on the same server, or use Supabase/Postgres elsewhere.
 
 To build your own CLI pointed at your own backend:
@@ -306,13 +306,16 @@ SUPABASE_URL=your-supabase-url
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-On a single Droplet, the backend can store team records in local Postgres by setting:
+On a single server, the backend can store team records in local Postgres by setting:
 
 ```text
 CLIKS_LOCAL_POSTGRES=true
 ```
 
 Supabase is optional.
+
+The public relay now runs on a free Render web service with Render Postgres. Saved CLI configurations using the former Droplet default migrate automatically. Render's free database expires on **October 23, 2026** unless it is upgraded or migrated; free services also sleep after idle periods, so the first connection can take around a minute. Existing team codes from the stopped Droplet were not copied to this new database. Create a new code on the website or with `cliks create`.
+Re-running the installer updates Cliks without resetting saved teams, nickname, preferences, or a custom server URL.
 
 ## Testing
 

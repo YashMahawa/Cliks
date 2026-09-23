@@ -211,6 +211,7 @@ type homeModel struct {
 	launchStartedAt       time.Time
 	launchUntil           time.Time
 	launchSoundPhase      int
+	skipLaunchSound       bool
 	firstLaunch           bool
 	onboardingPending     bool
 	onboardingStep        int
@@ -226,71 +227,87 @@ func runHomeTUI(cfg CliksConfig) error {
 	applyTheme(cfg.Theme)
 	ctx, stopSignals := tuiSignalContext(context.Background())
 	defer stopSignals()
-	active, activeOK := activeSession()
-	message := welcomeMessage(cfg)
-	if activeOK {
-		message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
-		if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
-			message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
-			active, activeOK = activeSession()
+	return runHomeControlLoop(ctx, cfg)
+}
+
+func runHomeControlLoop(ctx context.Context, cfg CliksConfig) error {
+	returnedFromSolo := false
+	for {
+		active, activeOK := activeSession()
+		message := welcomeMessage(cfg)
+		if activeOK {
+			message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
+			if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
+				message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
+				active, activeOK = activeSession()
+			}
 		}
-	}
-	now := time.Now()
-	firstLaunch := !cfg.LaunchSeen
-	if firstLaunch {
-		cfg.LaunchSeen = true
-		_ = saveConfig(cfg)
-	}
-	launchDuration := 3 * time.Second
-	if firstLaunch {
-		launchDuration = 10 * time.Second
-	}
-	model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, onboardingPending: !cfg.OnboardingSeen, onboardingStep: cfg.OnboardingStep, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
-	finalModel, err := program.Run()
-	if err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	result, ok := finalModel.(homeModel)
-	if !ok {
-		result = model
-	}
-	switch result.action {
-	case actionStart:
-		return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
-	case actionAttach:
-		return runAttachedSession(result.active)
-	case actionSwitch:
-		if _, err := stopActiveSession(); err != nil {
+		now := time.Now()
+		firstLaunch := !cfg.LaunchSeen
+		if firstLaunch {
+			cfg.LaunchSeen = true
+			_ = saveConfig(cfg)
+		}
+		launchDuration := 3 * time.Second
+		if firstLaunch {
+			launchDuration = 10 * time.Second
+		}
+		if returnedFromSolo {
+			launchDuration = 0
+		}
+		model := homeModel{cfg: cfg, active: active, activeOK: activeOK, mode: "home", message: message, launchStartedAt: now, launchUntil: now.Add(launchDuration), firstLaunch: firstLaunch, skipLaunchSound: returnedFromSolo, onboardingPending: !cfg.OnboardingSeen, onboardingStep: cfg.OnboardingStep, onboardingQuip: int(now.UnixNano() % 7), onboardingSuggestion: randomFunnyNickname()}
+		program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
+		finalModel, err := program.Run()
+		if err != nil && !errors.Is(err, context.Canceled) {
 			return err
 		}
-		return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
-	case actionCreate:
-		return cmdCreate(nil)
-	case actionDelete:
-		return cmdDelete(nil)
-	case actionSetup:
-		return cmdSetup(nil)
-	case actionDoctor:
-		return runDoctor()
-	case actionSoundTest:
-		return runSoundTest()
-	case actionSolo:
-		return runSoloExclusive(result.cfg)
-	case actionBackgroundStart:
-		return cmdBackground([]string{"start", result.cfg.CurrentTeamCode})
-	case actionBackgroundStop:
-		return cmdBackground([]string{"stop"})
-	case actionBackgroundStatus:
-		return cmdBackground([]string{"status"})
-	case actionAutostartEnable:
-		return cmdAutostart([]string{"enable", result.cfg.CurrentTeamCode})
-	case actionAutostartDisable:
-		return cmdAutostart([]string{"disable"})
-	case actionAutostartStatus:
-		return cmdAutostart([]string{"status"})
-	default:
-		return nil
+		result, ok := finalModel.(homeModel)
+		if !ok {
+			result = model
+		}
+		switch result.action {
+		case actionStart:
+			return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
+		case actionAttach:
+			return runAttachedSession(result.active)
+		case actionSwitch:
+			if _, err := stopActiveSession(); err != nil {
+				return err
+			}
+			return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
+		case actionCreate:
+			return cmdCreate(nil)
+		case actionDelete:
+			return cmdDelete(nil)
+		case actionSetup:
+			return cmdSetup(nil)
+		case actionDoctor:
+			return runDoctor()
+		case actionSoundTest:
+			return runSoundTest()
+		case actionSolo:
+			if err := runSoloExclusive(result.cfg); err != nil {
+				return err
+			}
+			cfg = loadConfig()
+			applyTheme(cfg.Theme)
+			returnedFromSolo = true
+			continue
+		case actionBackgroundStart:
+			return cmdBackground([]string{"start", result.cfg.CurrentTeamCode})
+		case actionBackgroundStop:
+			return cmdBackground([]string{"stop"})
+		case actionBackgroundStatus:
+			return cmdBackground([]string{"status"})
+		case actionAutostartEnable:
+			return cmdAutostart([]string{"enable", result.cfg.CurrentTeamCode})
+		case actionAutostartDisable:
+			return cmdAutostart([]string{"disable"})
+		case actionAutostartStatus:
+			return cmdAutostart([]string{"status"})
+		default:
+			return nil
+		}
 	}
 }
 
@@ -306,7 +323,9 @@ type launchTickMsg time.Time
 
 func (m homeModel) Init() tea.Cmd {
 	commands := []tea.Cmd{homeTick(), launchTick()}
-	commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
+	if !m.skipLaunchSound {
+		commands = append(commands, welcomeSoundCmd(m.cfg.Listening))
+	}
 	return tea.Batch(commands...)
 }
 
@@ -477,12 +496,16 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mouseOver = false
 		}
 		if msg.Type == tea.MouseMotion {
+			previousCursor := m.cursor
 			m.codeHover = m.homeCodeHit(msg.X, msg.Y)
 			if m.codeHover {
 				m.mouseOver = false
 				return m, nil
 			}
 			m.mouseOver = m.hover(msg.Y)
+			if m.mouseOver && m.cursor != previousCursor {
+				return m, m.onboardingFocusedPreview()
+			}
 		}
 		if msg.Type == tea.MouseLeft {
 			if m.homeCodeHit(msg.X, msg.Y) {
@@ -583,9 +606,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			m.move(-1)
 			m.mouseOver = false
+			return m, m.onboardingFocusedPreview()
 		case "down", "j":
 			m.move(1)
 			m.mouseOver = false
+			return m, m.onboardingFocusedPreview()
 		case "left", "h":
 			if m.mode == "preferences" {
 				m.changeSetting(-1)
@@ -799,6 +824,34 @@ func (m *homeModel) previewOnboardingTheme() {
 	}
 	theme := strings.TrimPrefix(items[m.cursor].key, "onboarding-theme-")
 	applyTheme(theme)
+}
+
+func (m homeModel) onboardingFocusedPreview() tea.Cmd {
+	if m.mode != "first-setup" {
+		return nil
+	}
+	items := m.onboardingItems()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return nil
+	}
+	listening := m.cfg.Listening
+	switch items[m.cursor].key {
+	case "onboarding-sound-quiet":
+		listening.Volume, listening.Density = 0.42, 0.48
+	case "onboarding-sound-balanced":
+		listening.Volume, listening.Density = 0.7, 0.8
+	case "onboarding-sound-lively":
+		listening.Volume, listening.Density = 0.78, 1
+	default:
+		if strings.HasPrefix(items[m.cursor].key, "onboarding-ambient-") {
+			listening.Ambient = strings.TrimPrefix(items[m.cursor].key, "onboarding-ambient-")
+			if listening.Ambient != "off" {
+				return ambientPreviewCmd(listening)
+			}
+		}
+		return nil
+	}
+	return welcomeSoundCmd(listening)
 }
 
 func (m homeModel) activate() (tea.Model, tea.Cmd) {

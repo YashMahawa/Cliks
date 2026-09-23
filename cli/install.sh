@@ -6,8 +6,8 @@ set -euo pipefail
 REPO_URL="${CLIKS_REPO_URL:-https://github.com/YashMahawa/Cliks.git}"
 INSTALL_DIR="${CLIKS_INSTALL_DIR:-$HOME/.cliks}"
 BIN_DIR="${CLIKS_BIN_DIR:-$HOME/.local/bin}"
-DEFAULT_BACKEND="${CLIKS_API_URL:-https://139.59.29.207.sslip.io}"
-REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.15}"
+DEFAULT_BACKEND="${CLIKS_API_URL:-https://cliks-server.onrender.com}"
+REQUIRED_VERSION="${CLIKS_REQUIRED_VERSION:-0.6.16}"
 CAPTURE_APP_DIR="${CLIKS_CAPTURE_APP_DIR:-$HOME/Applications/Cliks Capture.app}"
 # When piped from curl, default to non-interactive auto setup.
 AUTO_YES="${CLIKS_AUTO_YES:-}"
@@ -108,14 +108,16 @@ install_prebuilt() {
     fi
     if [ "$os" = "linux" ] && [ -x "$tmp/cliks-capture-helper" ] && [ -f "$tmp/cliks-capture.service" ] && command -v systemctl >/dev/null 2>&1; then
       if command -v sudo >/dev/null 2>&1; then
-        sudo mkdir -p /usr/local/libexec
-        sudo install -m 755 "$tmp/cliks-capture-helper" /usr/local/libexec/cliks-capture-helper
-        sudo install -m 644 "$tmp/cliks-capture.service" /etc/systemd/system/cliks-capture.service
-        sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
-        printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$BIN_DIR/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
-        sudo systemctl daemon-reload
-        sudo systemctl enable --now cliks-capture.service
-        ok "Installed privacy-isolated input helper"
+        if sudo mkdir -p /usr/local/libexec &&
+           sudo install -m 755 "$tmp/cliks-capture-helper" /usr/local/libexec/cliks-capture-helper &&
+           sudo install -m 644 "$tmp/cliks-capture.service" /etc/systemd/system/cliks-capture.service &&
+           sudo mkdir -p /etc/systemd/system/cliks-capture.service.d &&
+           printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$BIN_DIR/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null &&
+           sudo systemctl daemon-reload && sudo systemctl enable --now cliks-capture.service; then
+          ok "Installed privacy-isolated input helper"
+        else
+          tip "Input helper setup needs administrator access; Cliks installed, run 'cliks setup' after granting it"
+        fi
       fi
     fi
     PREBUILT=1
@@ -272,8 +274,11 @@ install_system_deps
 if [ "$PREBUILT" = "0" ]; then
   if [ -d "$INSTALL_DIR/.git" ]; then
     git -C "$INSTALL_DIR" pull --ff-only
+  elif [ -e "$INSTALL_DIR" ]; then
+    say "Source directory already exists and is not a Git checkout: $INSTALL_DIR"
+    say "Choose another CLIKS_INSTALL_DIR or move that directory aside; Cliks will not delete it."
+    exit 1
   else
-    rm -rf "$INSTALL_DIR"
     git clone "$REPO_URL" "$INSTALL_DIR"
   fi
   ok "Source ready"
@@ -292,13 +297,17 @@ EOF
   fi
   if [ "$(uname -s)" = "Linux" ] && ! is_termux && command -v systemctl >/dev/null 2>&1; then
     go build -o dist/cliks-capture-helper ./linux-capture-helper
-    sudo mkdir -p /usr/local/libexec
-    sudo install -m 755 dist/cliks-capture-helper /usr/local/libexec/cliks-capture-helper
-    sudo install -m 644 linux-capture-helper/cliks-capture.service /etc/systemd/system/cliks-capture.service
-    sudo mkdir -p /etc/systemd/system/cliks-capture.service.d
-    printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$INSTALL_DIR/cli/dist/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now cliks-capture.service
+    if command -v sudo >/dev/null 2>&1 &&
+       sudo mkdir -p /usr/local/libexec &&
+       sudo install -m 755 dist/cliks-capture-helper /usr/local/libexec/cliks-capture-helper &&
+       sudo install -m 644 linux-capture-helper/cliks-capture.service /etc/systemd/system/cliks-capture.service &&
+       sudo mkdir -p /etc/systemd/system/cliks-capture.service.d &&
+       printf '[Service]\nEnvironment=CLIKS_CAPTURE_UID=%s\nEnvironment="CLIKS_CAPTURE_CLIENT_EXE=%s"\n' "$(id -u)" "$(readlink -f "$INSTALL_DIR/cli/dist/cliks")" | sudo tee /etc/systemd/system/cliks-capture.service.d/user.conf >/dev/null &&
+       sudo systemctl daemon-reload && sudo systemctl enable --now cliks-capture.service; then
+      ok "Installed privacy-isolated input helper"
+    else
+      tip "Input helper setup needs administrator access; Cliks installed, run 'cliks setup' after granting it"
+    fi
   fi
 fi
 
@@ -338,7 +347,8 @@ if ! version_at_least "$installed_version" "$REQUIRED_VERSION"; then
 fi
 ok "Version $installed_version (bundled sounds included)"
 
-"$BIN_DIR/cliks" set api.url "$DEFAULT_BACKEND" >/dev/null 2>&1 || true
+# The CLI supplies the public default and migrates only the retired public URL.
+# Reinstalling must preserve custom server settings, saved teams, and preferences.
 
 # Cliks deliberately does not add desktop users to the Linux input group or
 # grant per-user ACLs anymore. Those permissions would let unrelated programs

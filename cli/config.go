@@ -48,7 +48,8 @@ func printConfigLoadWarningOnce() {
 	})
 }
 
-const productionAPIURL = "https://139.59.29.207.sslip.io"
+const productionAPIURL = "https://cliks-server.onrender.com"
+const legacyProductionAPIURL = "https://139.59.29.207.sslip.io"
 
 func usesPublicBackend(cfg CliksConfig) bool {
 	return strings.EqualFold(strings.TrimRight(cfg.APIURL, "/"), productionAPIURL) &&
@@ -240,6 +241,12 @@ func loadConfig() CliksConfig {
 		setConfigLoadWarning("")
 	}
 	normalizeConfig(&cfg)
+	if strings.EqualFold(strings.TrimRight(cfg.APIURL, "/"), legacyProductionAPIURL) &&
+		strings.EqualFold(strings.TrimRight(cfg.WSURL, "/"), strings.TrimRight(toWSURL(legacyProductionAPIURL), "/")) {
+		cfg.APIURL = productionAPIURL
+		cfg.WSURL = toWSURL(productionAPIURL)
+		_ = saveConfig(cfg)
+	}
 	return applyEnvURLOverrides(cfg)
 }
 
