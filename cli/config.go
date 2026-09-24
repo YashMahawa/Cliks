@@ -437,7 +437,7 @@ func normalizeConfig(cfg *CliksConfig) {
 		cfg.Listening.ShuffleMinutes = 60
 	}
 	switch cfg.Listening.Ambient {
-	case "off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
+	case "off", "still", "lofi", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
 	default:
 		cfg.Listening.Ambient = def.Listening.Ambient
 	}

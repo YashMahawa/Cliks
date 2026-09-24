@@ -7,6 +7,7 @@ import (
 )
 
 func TestMemoryStoreExpiresTeamsAfterFortyEightHoursWithoutConnection(t *testing.T) {
+	t.Setenv("CLIKS_EXPIRE_INACTIVE_TEAMS", "true")
 	store := NewMemoryTeamStore()
 	team, err := store.CreateTeam(context.Background(), CreateTeamInput{Name: "Quiet room", DeletePassword: "secret1"})
 	if err != nil {
@@ -33,6 +34,7 @@ func TestMemoryStoreExpiresTeamsAfterFortyEightHoursWithoutConnection(t *testing
 }
 
 func TestMemoryStoreConnectionRefreshesExpiry(t *testing.T) {
+	t.Setenv("CLIKS_EXPIRE_INACTIVE_TEAMS", "true")
 	store := NewMemoryTeamStore()
 	team, err := store.CreateTeam(context.Background(), CreateTeamInput{Name: "Active room", DeletePassword: "secret1"})
 	if err != nil {
@@ -48,5 +50,25 @@ func TestMemoryStoreConnectionRefreshesExpiry(t *testing.T) {
 	expires, err := time.Parse(time.RFC3339Nano, got.ExpiresAt)
 	if err != nil || time.Until(expires) < 47*time.Hour {
 		t.Fatalf("expiry was not refreshed: %q (%v)", got.ExpiresAt, err)
+	}
+}
+
+func TestSelfHostedMemoryStoreDoesNotExpireRooms(t *testing.T) {
+	t.Setenv("CLIKS_EXPIRE_INACTIVE_TEAMS", "false")
+	store := NewMemoryTeamStore()
+	team, err := store.CreateTeam(context.Background(), CreateTeamInput{Name: "Persistent room", DeletePassword: "secret1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team.ExpiresAt != "" {
+		t.Fatalf("unexpected expiry: %q", team.ExpiresAt)
+	}
+	expired, err := store.ExpireInactiveTeams(context.Background(), time.Now().Add(72*time.Hour))
+	if err != nil || len(expired) != 0 {
+		t.Fatalf("expired = %v, err = %v", expired, err)
+	}
+	got, err := store.GetTeamByCode(context.Background(), team.Code)
+	if err != nil || got == nil {
+		t.Fatalf("room was removed: %v", err)
 	}
 }

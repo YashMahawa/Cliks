@@ -58,11 +58,11 @@ const faqs = [
   },
   {
     q: "Can I use it alone or offline?",
-    a: "Yes. Run cliks solo for a local simulated desk with 1–12 coworkers and personal rain, cafe, or deep-focus room tones. It uses no team, capture permission, or internet.",
+    a: "Yes. Run cliks solo for a local simulated desk with 1–12 coworkers and private soft-focus, slow-flow, or nature room tones. It uses no team, capture permission, or internet.",
   },
   {
     q: "What gets stored?",
-    a: "Room name, code, and a password hash. Live presence is memory-only. Rooms expire after 48 hours without a live connection; reconnecting refreshes the clock.",
+    a: "Room name, code, and a password hash. Live presence is memory-only. Public rooms expire after 48 hours without a live connection; reconnecting refreshes the clock. Self-hosted rooms do not expire by default.",
   },
   {
     q: "Does my terminal get input permission?",

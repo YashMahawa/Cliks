@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "0.6.18"
+const version = "0.6.19"
 
 func main() {
 	// Terminal panic shield: always restore cooked mode / mouse reporting after a crash.
@@ -334,11 +334,19 @@ func cmdStart(args []string) error {
 			return fmt.Errorf("Cliks is already connected to %s; stop it with `cliks service stop` before starting %s", active.TeamCode, cfg.CurrentTeamCode)
 		}
 		if isInteractiveTerminal() {
-			return runAttachedSession(active)
+			exit, err := runAttachedSessionWithExit(active)
+			if err == nil && exit == sessionExitStop {
+				return runHomeTUI(loadConfig())
+			}
+			return err
 		}
 		return fmt.Errorf("Cliks is already running for %s (pid %d); open `cliks live` in a terminal to attach", active.TeamCode, active.PID)
 	}
-	return startSession(cfg, opts)
+	exit, err := startSessionWithExit(cfg, opts)
+	if err == nil && exit == sessionExitStop && isInteractiveTerminal() {
+		return runHomeTUI(loadConfig())
+	}
+	return err
 }
 
 func cmdLive() error {
@@ -349,7 +357,11 @@ func cmdLive() error {
 	if !ok {
 		return errors.New("Cliks is not connected yet; run `cliks start`")
 	}
-	return runAttachedSession(active)
+	exit, err := runAttachedSessionWithExit(active)
+	if err == nil && exit == sessionExitStop {
+		return runHomeTUI(loadConfig())
+	}
+	return err
 }
 
 func cmdCaptureTest(args []string) error {
@@ -568,10 +580,10 @@ func applyConfigSetting(cfg *CliksConfig, key, value string) (bool, error) {
 	case "ambient":
 		mode := strings.ToLower(strings.TrimSpace(value))
 		switch mode {
-		case "off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
+		case "off", "still", "lofi", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo":
 			cfg.Listening.Ambient = mode
 		default:
-			return false, fmt.Errorf("ambient must be off, rain, fire, cafe, cloud, contemplation, or downtempo")
+			return false, fmt.Errorf("ambient must be off, still, lofi, rain, fire, cafe, cloud, contemplation, or downtempo")
 		}
 	case "ambient.volume":
 		parsed, err := strconv.ParseFloat(value, 64)

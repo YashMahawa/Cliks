@@ -56,7 +56,9 @@ func main() {
 		rateLimiterCleanupLoop([]*rateLimiter{joinTeamLimiter, createTeamLimiter, deleteTeamLimiter, lookupTeamLimiter})
 	})
 	go runSafely("heartbeat loop", func() { srv.hub.heartbeatLoop(heartbeatInterval) })
-	go runSafely("team expiry loop", srv.teamExpiryLoop)
+	if teamExpiryEnabled() {
+		go runSafely("team expiry loop", srv.teamExpiryLoop)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.withCORS(srv.handleHealth))

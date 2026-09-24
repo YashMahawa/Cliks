@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -199,6 +200,7 @@ type homeModel struct {
 	batchWindowValue      string
 	backendURLValue       string
 	busy                  bool
+	teamActionAfter       time.Time
 	width                 int
 	height                int
 	helpOpen              bool
@@ -266,15 +268,26 @@ func runHomeControlLoop(ctx context.Context, cfg CliksConfig) error {
 			result = model
 		}
 		switch result.action {
-		case actionStart:
-			return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
-		case actionAttach:
-			return runAttachedSession(result.active)
-		case actionSwitch:
-			if _, err := stopActiveSession(); err != nil {
-				return err
+		case actionStart, actionAttach, actionSwitch:
+			var exit sessionExitAction
+			var sessionErr error
+			if result.action == actionAttach {
+				exit, sessionErr = runAttachedSessionWithExit(result.active)
+			} else {
+				if result.action == actionSwitch {
+					if _, err := stopActiveSession(); err != nil {
+						return err
+					}
+				}
+				exit, sessionErr = startSessionWithExit(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
 			}
-			return startSession(result.cfg, StartOptions{CaptureMode: result.cfg.Capture.Mode, SelfMonitor: result.cfg.Listening.Self})
+			if sessionErr != nil || exit != sessionExitStop {
+				return sessionErr
+			}
+			cfg = loadConfig()
+			applyTheme(cfg.Theme)
+			returnedFromSolo = true
+			continue
 		case actionCreate:
 			return cmdCreate(nil)
 		case actionDelete:
@@ -342,10 +355,38 @@ func welcomeSoundCmd(listening ListeningConfig) tea.Cmd {
 	}
 }
 
+const ambientPreviewDuration = 6 * time.Second
+
+var ambientPreviewMu sync.Mutex
+var ambientPreviewCancel context.CancelFunc
+
+func nextAmbientPreviewContext() context.Context {
+	ambientPreviewMu.Lock()
+	defer ambientPreviewMu.Unlock()
+	if ambientPreviewCancel != nil {
+		ambientPreviewCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ambientPreviewCancel = cancel
+	return ctx
+}
+
 func ambientPreviewCmd(listening ListeningConfig) tea.Cmd {
+	ctx := nextAmbientPreviewContext()
+	if listening.Ambient == "off" {
+		return nil
+	}
 	return func() tea.Msg {
-		audio := newAudioEngine(listening)
-		time.Sleep(1800 * time.Millisecond)
+		if ctx.Err() != nil {
+			return nil
+		}
+		audio := newAudioEngineWithContext(ctx, listening)
+		timer := time.NewTimer(ambientPreviewDuration)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+		}
 		audio.Close()
 		return nil
 	}
@@ -845,9 +886,7 @@ func (m homeModel) onboardingFocusedPreview() tea.Cmd {
 	default:
 		if strings.HasPrefix(items[m.cursor].key, "onboarding-ambient-") {
 			listening.Ambient = strings.TrimPrefix(items[m.cursor].key, "onboarding-ambient-")
-			if listening.Ambient != "off" {
-				return ambientPreviewCmd(listening)
-			}
+			return ambientPreviewCmd(listening)
 		}
 		return nil
 	}
@@ -998,13 +1037,11 @@ func (m homeModel) activate() (tea.Model, tea.Cmd) {
 		applyTheme(m.cfg.Theme)
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Theme saved. Preferences has the deeper tuning whenever you want it.")
-	case "onboarding-ambient-off", "onboarding-ambient-rain", "onboarding-ambient-fire", "onboarding-ambient-cafe", "onboarding-ambient-cloud", "onboarding-ambient-contemplation", "onboarding-ambient-downtempo":
+	case "onboarding-ambient-off", "onboarding-ambient-still", "onboarding-ambient-lofi", "onboarding-ambient-rain", "onboarding-ambient-fire", "onboarding-ambient-cafe", "onboarding-ambient-cloud", "onboarding-ambient-contemplation", "onboarding-ambient-downtempo":
 		m.cfg.Listening.Ambient = strings.TrimPrefix(item.key, "onboarding-ambient-")
 		_ = saveConfig(m.cfg)
 		m.advanceOnboarding("Room tone saved. It stays private to your headphones.")
-		if m.cfg.Listening.Ambient != "off" {
-			return m, ambientPreviewCmd(m.cfg.Listening)
-		}
+		return m, ambientPreviewCmd(m.cfg.Listening)
 	case "advanced":
 		m.mode = "advanced"
 		m.cursor = 0
@@ -1585,12 +1622,14 @@ func (m homeModel) onboardingItems() []homeItem {
 	default:
 		return []homeItem{
 			{key: "onboarding-ambient-off", label: "No room tone", help: "only coworker keyboard and click ambience"},
-			{key: "onboarding-ambient-rain", label: "Rain window", help: "private, low, and steady"},
-			{key: "onboarding-ambient-fire", label: "Fireside", help: "a calm fireplace loop"},
-			{key: "onboarding-ambient-cafe", label: "Coffee house", help: "soft jazz for a warm desk"},
+			{key: "onboarding-ambient-still", label: "Soft focus", help: "gentle synth and a light pulse"},
+			{key: "onboarding-ambient-lofi", label: "Slow flow", help: "unhurried lo-fi for longer sessions"},
 			{key: "onboarding-ambient-cloud", label: "Cloud drift", help: "light and spacious"},
 			{key: "onboarding-ambient-contemplation", label: "Contemplation", help: "gentle focus music"},
 			{key: "onboarding-ambient-downtempo", label: "Night drive", help: "steady downtempo momentum"},
+			{key: "onboarding-ambient-rain", label: "Rain window", help: "private, low, and steady"},
+			{key: "onboarding-ambient-fire", label: "Fireside", help: "a calm fireplace loop"},
+			{key: "onboarding-ambient-cafe", label: "Coffee house", help: "soft jazz for a warm desk"},
 		}
 	}
 }
@@ -2109,7 +2148,7 @@ func settingsRows(cfg CliksConfig) []settingRow {
 			c.Listening.Muted = false
 		}},
 		{"Density", "hear fewer or more activity sounds", func(c CliksConfig) string { return bar(c.Listening.Density) }, func(c *CliksConfig, d int) { c.Listening.Density = clamp(c.Listening.Density+float64(d)*0.05, 0.15, 1) }},
-		{"Room tone", "private embedded soundscape with six choices", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
+		{"Room tone", "private embedded soundscape with eight choices", func(c CliksConfig) string { return ambientLabel(c.Listening.Ambient) }, func(c *CliksConfig, d int) { c.Listening.Ambient = nextAmbient(c.Listening.Ambient, d) }},
 		{"Room tone volume", "left/right changes this private layer from 0-100%", func(c CliksConfig) string { return bar(c.Listening.AmbientVolume) }, func(c *CliksConfig, d int) {
 			c.Listening.AmbientVolume = clamp(c.Listening.AmbientVolume+float64(d)*0.05, 0.05, 1)
 		}},
@@ -2290,6 +2329,9 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 			m.formCursor = 0
 			return m, nil
 		}
+		if !m.teamActionReady() {
+			return m, nil
+		}
 		m.busy = true
 		m.message = "Joining team..."
 		return m, joinTeamCmd(code)
@@ -2303,6 +2345,9 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		if len(password) < 6 {
 			m.message = "Delete password must be at least 6 characters."
 			m.formCursor = 1
+			return m, nil
+		}
+		if !m.teamActionReady() {
 			return m, nil
 		}
 		m.busy = true
@@ -2321,9 +2366,21 @@ func (m homeModel) submitForm() (tea.Model, tea.Cmd) {
 		m.formCursor = 1
 		return m, nil
 	}
+	if !m.teamActionReady() {
+		return m, nil
+	}
 	m.busy = true
 	m.message = "Deleting team..."
 	return m, deleteTeamCmd(code, password)
+}
+
+func (m *homeModel) teamActionReady() bool {
+	if remaining := time.Until(m.teamActionAfter); remaining > 0 {
+		m.message = fmt.Sprintf("Please wait %d seconds before trying another room action.", int(remaining.Seconds())+1)
+		return false
+	}
+	m.teamActionAfter = time.Now().Add(3 * time.Second)
+	return true
 }
 
 func (m homeModel) formFieldCount() int {

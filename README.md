@@ -10,7 +10,7 @@ No login. No chat. No microphone. No keystrokes sent.
 
 Open the Cliks website, create a team code, and copy the install or join command from the page:
 
-[site-kappa-six-64.vercel.app](https://site-kappa-six-64.vercel.app)
+[cliks.agichaos.dev](https://cliks.agichaos.dev) ([alternate Vercel address](https://site-kappa-six-64.vercel.app) if your network blocks the custom domain)
 
 The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything.
 
@@ -125,7 +125,7 @@ For a completely offline room—no team, capture permission, or internet—open 
 cliks solo
 ```
 
-Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of six embedded CC0 room tones: rain, fireside, coffee house, cloud drift, contemplation, or night drive. Master, keyboard, click, and room-tone levels use direct slider tracks: hover one and use arrows or natural scrolling, click a track to jump, or press Tab to cycle sliders. The room reflows from two panes to stacked or controls-first layouts as terminal rows and columns change. Coworkers type in short natural bursts with quiet gaps instead of scattered metronomic clicks. Every sound stays on your device and is never synchronized with a team.
+Choose 1-12 simulated coworkers, separate keyboard and click levels, and one of eight embedded CC0 room tones: soft focus, slow flow, cloud drift, contemplation, night drive, rain, fireside, or coffee house. Master, keyboard, click, and room-tone levels use direct slider tracks: hover one and use arrows or natural scrolling, click a track to jump, or press Tab to cycle sliders. The room reflows from two panes to stacked or controls-first layouts as terminal rows and columns change. Coworkers type in short natural bursts with quiet gaps instead of scattered metronomic clicks. Every sound stays on your device and is never synchronized with a team.
 
 To turn self-monitoring back off:
 
@@ -315,6 +315,7 @@ CLIKS_LOCAL_POSTGRES=true
 Supabase is optional.
 
 The public relay runs on a free Render web service with Render Postgres. Cliks 0.6.18+ updates the exact former public DigitalOcean URL to Render on launch, even for devices with saved rooms; custom self-hosted URLs and environment overrides remain untouched. Active team records from the old public relay were imported with their codes and delete passwords. Render's free database expires on **October 23, 2026** unless it is upgraded or migrated; free services also sleep after idle periods, so the first connection can take around a minute.
+Only the public relay sets `CLIKS_EXPIRE_INACTIVE_TEAMS=true`: a room without a live connection for 48 hours expires. Self-hosted rooms do not expire unless their operator explicitly enables this setting. The website and TUI can both create and password-delete rooms; the relay rate-limits room actions and the interfaces slow repeated submissions.
 Re-running the installer updates Cliks without resetting saved teams, nickname, preferences, or a custom server URL.
 
 ## Testing

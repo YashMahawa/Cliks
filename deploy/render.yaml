@@ -7,6 +7,8 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
+      - key: CLIKS_EXPIRE_INACTIVE_TEAMS
+        value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: cliks-db

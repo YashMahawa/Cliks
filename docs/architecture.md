@@ -63,9 +63,10 @@ Team creation and deletion are protected by lightweight in-memory per-IP throttl
 
 Soft-deleted team rows are retained for history, but code uniqueness is scoped to active rows only. Postgres and Supabase both use a partial unique index on `(code) where deleted_at is null`, so deleting a room does not permanently consume its code.
 
-Teams track `last_connected_at` and expire after 48 hours without a live WebSocket connection. Join refreshes the deadline. The hourly cleanup refreshes currently occupied rooms before soft-deleting inactive rows and closing any matching in-memory room. Creation responses expose `expiresAt` so clients can explain the lifecycle without persisting membership or activity history.
+Teams track `last_connected_at`. Only servers with `CLIKS_EXPIRE_INACTIVE_TEAMS=true` expire rooms after 48 hours without a live WebSocket connection; the public Render service enables this, while self-hosted servers default to no expiry. Join refreshes the deadline when expiry is enabled. The hourly cleanup refreshes currently occupied rooms before soft-deleting inactive rows and closing any matching in-memory room. Public creation responses expose `expiresAt`; self-hosted responses omit it unless expiry is enabled.
 
 Users can create and delete teams from the website, from `cliks create` / `cliks delete`, or from the bare `cliks` TUI. CLI/TUI delete-password entry should remain masked when stdin is an interactive terminal.
+The website confirms a password-protected delete and applies a visible repeat-action cooldown; the TUI has the same short repeat guard. The relay remains the enforcement point for per-IP creation, deletion, lookup, and failed-join limits. Website requests allow 75 seconds for a sleeping Render instance. Interactive Live Stop returns to home without quitting the terminal UI, including direct `cliks start` and `cliks live` launches.
 
 ## Scaling notes
 
@@ -116,7 +117,7 @@ Advanced users can set `audio.device`. Device routing prefers `mpv`, `paplay`, `
 
 The Go CLI uses Bubble Tea for a full-terminal spatial desk and settings UI. The desk centers the listener, draws adaptive depth rings, labels up to 12 peers, marks current typers, animates arrivals and reactions at the sending peer's seat, and uses compact overflow dots as rooms grow. A three-second normal launch and ten-second first launch both use bundled sound; first launch then opens a full-terminal, one-decision-at-a-time setup for nickname (including generated funny names), listening mix, OS capture permission, notification delivery, background behavior, launch-at-login, theme, and a private room tone. Notification titles contain sender and glyph while the body contains the fixed phrase. The first-live-run synthetic arrangement teaches the map without creating network events. The direct action rail derives exact mouse hitboxes from rendered display widths, avoiding stale or shifted coordinates. Interactive listening and presence controls persist locally:
 
-`cliks solo` opens the same spatial desk without capture, a team, a relay connection, or internet. It simulates 1-12 local coworkers and lets the user independently toggle and set levels for simulated keyboard sounds, click sounds, and the personal room tone. Six normalized CC0 tracks are embedded in the binary and decoded locally; they are never synchronized or sent.
+`cliks solo` opens the same spatial desk without capture, a team, a relay connection, or internet. It simulates 1-12 local coworkers and lets the user independently toggle and set levels for simulated keyboard sounds, click sounds, and the personal room tone. Eight normalized CC0 tracks are embedded in the binary and decoded locally; they are never synchronized or sent. First-run room-tone selection previews each option for up to six seconds and cancels the previous preview on navigation.
 
 The public backend policy is 20 peers and exactly 500 ms client batches. Config normalization and both CLI/TUI setters prevent selecting another batch interval while `api.url`/`ws.url` point to the public service. Advanced → Server accepts `public` or a self-hosted HTTP(S) URL and derives `/ws`; custom servers unlock the 100–2000 ms client range. `CLIKS_MAX_PEERS_PER_ROOM` lets a self-hosted relay choose 2–200 peers while retaining 20 as the default.
 
@@ -176,6 +177,7 @@ Required local checks before pushing:
 - `go test ./...` from `server` when relay/store/protocol behavior changes
 
 CI mirrors these on Ubuntu, macOS, and Windows through `.github/workflows/ci.yml`. Tagged releases add native Linux x64/arm64, macOS Intel/Apple Silicon, and Windows x64 archives through `.github/workflows/release.yml`; public installers consume those assets before considering a source build. The Docker job builds `Dockerfile` on Ubuntu. `scripts/smoke-server.mjs` covers health redaction, timing quantization, compact activity frames, nickname truncation, deleted-code lookup behavior, room caps, live-room closure on delete, single-room auto-migration, and failed-join throttling. Go unit tests cover reaction allowlists and room broadcast, lookup throttling, WebSocket oversized/flood protection, slow-peer queue isolation, missed-heartbeat eviction, concurrent join/delete lifecycle ordering, population-scaled fatigue behavior, audio deadlines/cancellation, shared diagnostic rendering, and TUI report/footer behavior.
+The site production build uses Webpack, matching development, after a transient macOS Turbopack `next/font/google` resolver failure on the September 23 CI run. The retried run passed, but consistent bundling removes that particular unstable path.
 
 ## Free-tier expectation
 
