@@ -18,7 +18,15 @@ type localStartProcess struct {
 var siblingProcessFinder = discoverSiblingStartProcesses
 
 func findSiblingStartProcesses(excludePIDs ...int) []localStartProcess {
-	return siblingProcessFinder(excludePIDs...)
+	exclude := excludedPIDSet(excludePIDs...)
+	raw := siblingProcessFinder(excludePIDs...)
+	var filtered []localStartProcess
+	for _, proc := range raw {
+		if !exclude[proc.PID] {
+			filtered = append(filtered, proc)
+		}
+	}
+	return filtered
 }
 
 func discoverSiblingStartProcesses(excludePIDs ...int) []localStartProcess {
@@ -56,6 +64,9 @@ func discoverSiblingStartProcesses(excludePIDs ...int) []localStartProcess {
 
 func excludedPIDSet(pids ...int) map[int]bool {
 	exclude := map[int]bool{os.Getpid(): true}
+	if handoffPID := getHandoffParentPID(); handoffPID > 0 {
+		exclude[handoffPID] = true
+	}
 	for _, pid := range pids {
 		if pid > 0 {
 			exclude[pid] = true

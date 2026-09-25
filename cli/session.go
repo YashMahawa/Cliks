@@ -230,7 +230,7 @@ func finishSessionForExit(controller *sessionController, keepRunning bool) (stri
 	if !keepRunning {
 		return "", nil
 	}
-	return startBackgroundForTeam(code)
+	return startBackgroundForTeam(code, os.Getpid())
 }
 
 func newSessionController(cfg CliksConfig, opts StartOptions, instance *sessionInstance) *sessionController {

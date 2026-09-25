@@ -235,3 +235,119 @@ func stubSiblingProcesses(processes []localStartProcess) func() {
 		siblingProcessFinder = previous
 	}
 }
+
+func TestHandoffParentPIDExcludesParentFromProcessDiscovery(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLIKS_HANDOFF_PARENT_PID", "12345")
+	defer setHandoffParentPIDForTest(0)
+
+	pid := getHandoffParentPID()
+	if pid != 12345 {
+		t.Fatalf("getHandoffParentPID = %d, want 12345", pid)
+	}
+	if os.Getenv("CLIKS_HANDOFF_PARENT_PID") != "" {
+		t.Fatal("CLIKS_HANDOFF_PARENT_PID was not cleared from environment")
+	}
+
+	restore := stubSiblingProcesses([]localStartProcess{
+		{PID: 12345, Command: "cliks start"},
+		{PID: 67890, Command: "cliks start"},
+	})
+	defer restore()
+
+	siblings := findSiblingStartProcesses()
+	if len(siblings) != 1 || siblings[0].PID != 67890 {
+		t.Fatalf("findSiblingStartProcesses = %+v, want only PID 67890", siblings)
+	}
+}
+
+func TestHandoffParentPIDAllowsLockAcquisitionWithExitingParent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	parentPID := 11111
+	t.Setenv("CLIKS_HANDOFF_PARENT_PID", "11111")
+	defer setHandoffParentPIDForTest(0)
+
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := ActiveSessionState{PID: parentPID, TeamCode: "CLIK-LOCAL", Mode: runModeForeground}
+	data, _ := json.MarshalIndent(state, "", "  ")
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	restore := stubSiblingProcesses([]localStartProcess{
+		{PID: parentPID, Command: "cliks start"},
+	})
+	defer restore()
+
+	if _, active := activeSession(); active {
+		t.Fatal("activeSession returned true for exiting parent PID")
+	}
+
+	instance, err := acquireSessionInstance("CLIK-LOCAL", runModeBackground)
+	if err != nil {
+		t.Fatalf("acquireSessionInstance failed during handoff: %v", err)
+	}
+	defer instance.release()
+
+	if instance.state.PID == parentPID {
+		t.Fatalf("acquired instance PID = %d, expected current process PID %d", instance.state.PID, os.Getpid())
+	}
+}
+
+func TestStandardStartupWithoutHandoffPIDDetectsDuplicate(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	setHandoffParentPIDForTest(0)
+
+	restore := stubSiblingProcesses([]localStartProcess{
+		{PID: 88888, Command: "cliks start"},
+	})
+	defer restore()
+
+	active, ok := activeSession()
+	if !ok {
+		t.Fatal("activeSession returned false for duplicate sibling process")
+	}
+	if active.PID != 88888 {
+		t.Fatalf("active PID = %d, want 88888", active.PID)
+	}
+
+	_, err := acquireSessionInstance("CLIK-LOCAL", runModeBackground)
+	var already alreadyRunningError
+	if !errors.As(err, &already) {
+		t.Fatalf("acquireSessionInstance err = %v, want alreadyRunningError", err)
+	}
+}
+
+func TestFilterHandoffEnv(t *testing.T) {
+	env := []string{
+		"PATH=/usr/bin",
+		"CLIKS_HANDOFF_PARENT_PID=123",
+		"CLIKS_PARENT_PID=456",
+		"CLIKS_HANDOFF_PID=789",
+		"CLIKS_RUN_MODE=background",
+	}
+	filtered := filterHandoffEnv(env)
+	for _, item := range filtered {
+		if strings.HasPrefix(item, "CLIKS_HANDOFF_PARENT_PID=") ||
+			strings.HasPrefix(item, "CLIKS_PARENT_PID=") ||
+			strings.HasPrefix(item, "CLIKS_HANDOFF_PID=") {
+			t.Fatalf("filtered env contains handoff var: %s", item)
+		}
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("len(filtered) = %d, want 2", len(filtered))
+	}
+}
+
+func TestHandoffPIDEnvVarsAliases(t *testing.T) {
+	t.Setenv("CLIKS_PARENT_PID", "54321")
+	setHandoffParentPIDForTest(0)
+	pid := getHandoffParentPID()
+	if pid != 54321 {
+		t.Fatalf("getHandoffParentPID() = %d, want 54321", pid)
+	}
+	setHandoffParentPIDForTest(0)
+}
+
