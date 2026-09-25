@@ -117,8 +117,8 @@ func linuxAutostart(action, code string) (string, error) {
 	switch action {
 	case "status":
 		runtimeState := "not running"
-		if exec.Command("systemctl", "--user", "is-active", "--quiet", serviceName+".service").Run() == nil {
-			runtimeState = "running now"
+		if status := getPassiveRuntimeStatus(); status.IsRunning {
+			runtimeState = fmt.Sprintf("running now (pid %d, %s)", status.PID, status.ExecutionMode)
 		}
 		return autostartStatusText(path, "systemd user service", runtimeState), nil
 	case "disable":
@@ -175,8 +175,8 @@ func macAutostart(action, code string) (string, error) {
 	switch action {
 	case "status":
 		runtimeState := "not running"
-		if exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), launchAgentID)).Run() == nil {
-			runtimeState = "loaded by launchd"
+		if status := getPassiveRuntimeStatus(); status.IsRunning {
+			runtimeState = fmt.Sprintf("running now (pid %d, %s)", status.PID, status.ExecutionMode)
 		}
 		return autostartStatusText(path, "LaunchAgent", runtimeState), nil
 	case "disable":
@@ -268,8 +268,8 @@ func windowsAutostart(action, code string) (string, error) {
 	switch action {
 	case "status":
 		runtimeState := "not running"
-		if _, ok := activeSession(); ok {
-			runtimeState = "running now"
+		if status := getPassiveRuntimeStatus(); status.IsRunning {
+			runtimeState = fmt.Sprintf("running now (pid %d, %s)", status.PID, status.ExecutionMode)
 		}
 		if _, err := os.Stat(vbsPath); err == nil {
 			return autostartStatusText(vbsPath, "Startup script (silent)", runtimeState), nil
@@ -318,10 +318,42 @@ func autostartStatusText(path, label, runtimeState string) string {
 	return fmt.Sprintf("Cliks autostart: disabled\nCurrent session: %s\n%s: %s", runtimeState, label, path)
 }
 
+func autostartPath() string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "linux":
+		base := os.Getenv("XDG_CONFIG_HOME")
+		if base == "" {
+			base = filepath.Join(home, ".config")
+		}
+		return filepath.Join(base, "systemd", "user", serviceName+".service")
+	case "darwin":
+		return filepath.Join(home, "Library", "LaunchAgents", launchAgentID+".plist")
+	case "windows":
+		startup := os.Getenv("APPDATA")
+		if startup == "" {
+			return ""
+		}
+		return filepath.Join(startup, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Cliks.vbs")
+	default:
+		return ""
+	}
+}
+
 func autostartEnabled() bool {
-	cfg := loadConfig()
-	message, err := autostartAction([]string{"status", cfg.CurrentTeamCode})
-	return err == nil && strings.Contains(message, "enabled")
+	path := autostartPath()
+	if path == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		cmdPath := filepath.Join(filepath.Dir(path), "Cliks.cmd")
+		_, err := os.Stat(cmdPath)
+		return err == nil
+	}
+	return false
 }
 
 // repairAutostartIfEnabled rewrites login launchers with the current binary path.
