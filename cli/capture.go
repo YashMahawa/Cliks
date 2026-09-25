@@ -57,8 +57,52 @@ type ActivityCapture struct {
 	terminalReader   cancelreader.CancelReader
 }
 
+type TerminalCaptureProvider struct {
+	capture *ActivityCapture
+}
+
+func (p *TerminalCaptureProvider) Name() string { return "terminal" }
+
+func (p *TerminalCaptureProvider) Probe(ctx context.Context) ProbeResult {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		return ProbeResult{
+			Name:      "terminal",
+			Available: true,
+			State:     DriverStateDegraded,
+			Mode:      "terminal",
+		}
+	}
+	return ProbeResult{
+		Name:           "terminal",
+		Available:      false,
+		State:          DriverStateOff,
+		Mode:           "off",
+		PermissionHint: "terminal capture needs an interactive terminal",
+	}
+}
+
+func (p *TerminalCaptureProvider) Start(ctx context.Context, sharing SharingConfig, events chan<- LocalActivityEvent) (CaptureState, error) {
+	if err := p.capture.startTerminal(ctx, sharing); err != nil {
+		return CaptureState{Mode: "off", PermissionHint: err.Error()}, err
+	}
+	return CaptureState{Mode: "terminal"}, nil
+}
+
+func (p *TerminalCaptureProvider) Stop() error {
+	p.capture.restoreTerminal()
+	return nil
+}
+
 func newActivityCapture() *ActivityCapture {
 	return &ActivityCapture{Events: make(chan LocalActivityEvent, 1024), ctx: context.Background()}
+}
+
+func (c *ActivityCapture) getProvidersForMode(mode string) []InputCaptureProvider {
+	if mode == "terminal" {
+		return []InputCaptureProvider{&TerminalCaptureProvider{capture: c}}
+	}
+	return c.platformProviders(mode)
 }
 
 func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, mode string) CaptureState {
@@ -68,24 +112,36 @@ func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, m
 	if !sharing.Keyboard && !sharing.Mouse {
 		return CaptureState{Mode: "off"}
 	}
-	if mode == "terminal" {
-		if err := c.startTerminal(ctx, sharing); err != nil {
-			return CaptureState{Mode: "off", PermissionHint: err.Error()}
+
+	providers := c.getProvidersForMode(mode)
+	var hints []string
+
+	for _, provider := range providers {
+		probeRes := provider.Probe(ctx)
+		state, err := provider.Start(ctx, sharing, c.Events)
+		if err == nil && state.Mode != "off" {
+			if len(hints) > 0 {
+				combined := strings.Join(hints, " ")
+				if state.PermissionHint != "" {
+					state.PermissionHint = combined + " " + state.PermissionHint
+				} else {
+					state.PermissionHint = combined
+				}
+			}
+			return state
 		}
-		return CaptureState{Mode: "terminal"}
-	}
-	if runtime.GOOS == "linux" {
-		if mode == "isolated" || mode == "auto" || mode == "" {
-			return c.startLinuxCaptureHelper(ctx, sharing)
-		}
-		if mode == "direct" || mode == "evdev" {
-			return c.startEvdev(ctx, sharing)
+		if state.PermissionHint != "" {
+			hints = append(hints, state.PermissionHint)
+		} else if probeRes.PermissionHint != "" {
+			hints = append(hints, probeRes.PermissionHint)
 		}
 	}
-	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		return c.startGlobalHook(ctx, sharing, mode)
+
+	finalHint := strings.Join(hints, " ")
+	if finalHint == "" {
+		finalHint = "Global capture is not available in this environment. Try: cliks start --terminal --self"
 	}
-	return CaptureState{Mode: "off", PermissionHint: "Global capture is not available in this environment. Try: cliks start --terminal --self"}
+	return CaptureState{Mode: "off", PermissionHint: finalHint}
 }
 
 func (c *ActivityCapture) stop() {
