@@ -12,7 +12,7 @@ Open the Cliks website, create a team code, and copy the install or join command
 
 [cliks.agichaos.dev](https://cliks.agichaos.dev) ([alternate Vercel address](https://site-kappa-six-64.vercel.app) if your network blocks the custom domain)
 
-The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything.
+The site is also a live preview: press any key or click on the page and it plays the same keyboard and mouse samples the CLI uses, so you can hear the ambience before you install anything. Its listening-room diagram shows six named seats around your desk; selecting a name reveals its role and distance, and active seats respond when the room preview plays.
 
 Install the native CLI on macOS or Linux:
 

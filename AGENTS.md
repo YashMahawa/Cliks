@@ -26,6 +26,7 @@ Core promise:
 ## Current Structure
 
 - `site`: Next.js app intended for Vercel. It creates teams and displays copyable join/install commands. The landing page uses the "Warm Desk" design system (warm stone palette `#11100f`/`#1a1918`, bone text `#eae5d9`, ember accent `#d97746`; Geist + Geist Mono) and doubles as a live in-browser demo of the CLI ambience (see Sound). Brand assets: `site/public/images/cliks-keycap.png` (keycap logo/favicon) and `site/public/images/warm_desk_workspace.png` (hero photo).
+- The website's `RoomDemo` is a contained, responsive listening-room panel with six named seat boxes around a typographic "Your desk" listener. Seats stay inside the stage on narrow screens, reveal role/distance on hover, focus, or selection, and take a restrained brand-accent border when activity plays. The hero/demo status is text-only: do not reintroduce decorative diamond/dot badges, lamp icons, or concentric orbit rings. The demo's existing local sample playback and 14-second interaction remain unchanged.
 - `server`: Go API/WebSocket relay currently deployed on a free Render web service with Render Postgres. It stores teams in Supabase when configured, local Postgres when `CLIKS_LOCAL_POSTGRES=true` or `DATABASE_URL` is set, otherwise an in-memory local test store.
 - `cli`: Go-based `cliks` command with Bubble Tea/Lip Gloss terminal interfaces. It joins a team, captures local activity, sends 500ms batches, receives teammate activity, and plays local sounds.
 - `supabase/schema.sql`: minimal team table.

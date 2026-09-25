@@ -155,7 +155,6 @@ export default function HomePage() {
             <div className="flex flex-col justify-center lg:col-span-6">
               <div className="reveal mb-5">
                 <span className="live-kicker">
-                  <span className="status-mark is-on" aria-hidden />
                   <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-soft">
                     ambient coworking · free
                   </span>
