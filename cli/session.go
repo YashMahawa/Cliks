@@ -94,15 +94,20 @@ type sessionController struct {
 }
 
 func startSession(cfg CliksConfig, opts StartOptions) error {
+	_, err := startSessionWithExit(cfg, opts)
+	return err
+}
+
+func startSessionWithExit(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 	applyTheme(cfg.Theme)
 	exit, err := runSession(cfg, opts)
 	if err != nil {
-		return err
+		return exit, err
 	}
 	if exit == sessionExitSwitch && isInteractiveTerminal() {
-		return startSession(loadConfig(), opts)
+		return startSessionWithExit(loadConfig(), opts)
 	}
-	return nil
+	return exit, nil
 }
 
 func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
@@ -157,14 +162,19 @@ func runSession(cfg CliksConfig, opts StartOptions) (sessionExitAction, error) {
 }
 
 func runAttachedSession(active ActiveSessionState) error {
+	_, err := runAttachedSessionWithExit(active)
+	return err
+}
+
+func runAttachedSessionWithExit(active ActiveSessionState) (sessionExitAction, error) {
 	if sessionNeedsUpgrade(active) {
 		code := strings.ToUpper(strings.TrimSpace(active.TeamCode))
 		mode := active.Mode
 		if _, err := stopActiveSession(); err != nil {
-			return fmt.Errorf("refresh the running Cliks session: %w", err)
+			return sessionExitStop, fmt.Errorf("refresh the running Cliks session: %w", err)
 		}
 		if !waitForProcessExit(active.PID, 3*time.Second) {
-			return fmt.Errorf("the older Cliks session did not stop; run `cliks service stop` and try again")
+			return sessionExitStop, fmt.Errorf("the older Cliks session did not stop; run `cliks service stop` and try again")
 		}
 		cfg := loadConfig()
 		if code != "" {
@@ -173,17 +183,17 @@ func runAttachedSession(active ActiveSessionState) error {
 		}
 		if mode == runModeBackground || mode == runModeBoot {
 			if _, err := startBackgroundForTeam(code); err != nil {
-				return fmt.Errorf("restart Cliks after update: %w", err)
+				return sessionExitStop, fmt.Errorf("restart Cliks after update: %w", err)
 			}
 			for attempt := 0; attempt < 20; attempt++ {
 				if refreshed, ok := activeSession(); ok && !sessionNeedsUpgrade(refreshed) {
-					return runAttachedSession(refreshed)
+					return runAttachedSessionWithExit(refreshed)
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
-			return fmt.Errorf("Cliks updated, but the refreshed background session did not become ready")
+			return sessionExitStop, fmt.Errorf("Cliks updated, but the refreshed background session did not become ready")
 		}
-		return startSession(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
+		return startSessionWithExit(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
 	}
 	controller := newAttachedSessionController(active)
 	defer controller.stop()
@@ -193,7 +203,7 @@ func runAttachedSession(active ActiveSessionState) error {
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(tuiCtx))
 	finalModel, err := program.Run()
 	if err != nil && !errors.Is(err, context.Canceled) {
-		return err
+		return sessionExitStop, err
 	}
 	result, ok := finalModel.(sessionModel)
 	if !ok {
@@ -202,15 +212,15 @@ func runAttachedSession(active ActiveSessionState) error {
 	switch result.exit {
 	case sessionExitStop:
 		_, err := stopActiveSession()
-		return err
+		return sessionExitStop, err
 	case sessionExitSwitch:
 		if _, err := stopActiveSession(); err != nil {
-			return err
+			return sessionExitSwitch, err
 		}
 		cfg := loadConfig()
-		return startSession(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
+		return startSessionWithExit(cfg, StartOptions{CaptureMode: cfg.Capture.Mode, SelfMonitor: cfg.Listening.Self})
 	default:
-		return nil
+		return result.exit, nil
 	}
 }
 

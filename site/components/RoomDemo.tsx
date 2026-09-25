@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAcoustic } from "./AcousticProvider";
 
-/** Six peers scattered across near / mid / far rings — angles offset so they don't clump. */
+/** Six peers at listener-relative distances. */
 const PEERS = [
   { name: "Mira", role: "design", seat: "near" as const, angle: 28, ring: 0 },
   { name: "Jules", role: "backend", seat: "mid" as const, angle: 97, ring: 1 },
@@ -13,8 +13,8 @@ const PEERS = [
   { name: "Sam", role: "research", seat: "near" as const, angle: 331, ring: 0 },
 ];
 
-/** Distance from center as % of stage — keeps clear air around YOU. */
-const RING_R = [34, 41, 46];
+/** Seat centers leave room for full name labels at narrow widths. */
+const RING_R = [28, 33, 37];
 
 type EventKind = "keyboard" | "mouse";
 
@@ -184,35 +184,19 @@ export function RoomDemo() {
   }, []);
 
   return (
-    <div className={`room-orbit mx-auto w-full max-w-[420px] ${running ? "is-live" : ""} ${welcoming ? "is-welcoming" : ""}`}>
+    <div className="room-orbit mx-auto w-full max-w-[540px]">
       <div className="orbit-chrome">
-        <div className="status-chip">
-          <span className={`status-mark ${running ? "is-on" : finished ? "is-done" : ""}`} aria-hidden />
-          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-soft">
-            {running ? `room live · ${secondsLeft}s` : welcoming ? "people arriving" : finished ? "room quiet" : "your room"}
-          </span>
-        </div>
-        <span className="font-mono text-[10px] text-mute">6 peers · 3 depths</span>
+        <span className={`status-chip ${running ? "is-on" : ""}`} aria-live="polite">
+          {running ? `Now playing / ${secondsLeft}s` : welcoming ? "Taking seats" : finished ? "Room quiet" : "Listening room"}
+        </span>
+        <span className="orbit-meta" aria-live="polite">
+          {tip === null ? "6 people / spatial sound" : `${PEERS[tip].name} / ${PEERS[tip].role} / ${PEERS[tip].seat}`}
+        </span>
       </div>
 
-      <div className="orbit-stage relative mx-auto aspect-square w-full">
-        <div className="depth-ring depth-near" aria-hidden />
-        <div className="depth-ring depth-mid" aria-hidden />
-        <div className="depth-ring depth-far" aria-hidden />
-        {running ? <div className="orbit-haze" aria-hidden /> : null}
-
-        {/* YOU — listener, not a logo */}
+      <div className="orbit-stage relative mx-auto w-full">
         <div ref={youRef} className="you-node" aria-label="You, listening">
-          <span className="you-halo" aria-hidden />
-          <span className="you-core">
-            <svg viewBox="0 0 24 24" className="you-icon" aria-hidden>
-              <path
-                fill="currentColor"
-                d="M12 3a4 4 0 0 0-4 4v2.5A6.5 6.5 0 0 0 5 15.5V17h14v-1.5A6.5 6.5 0 0 0 16 9.5V7a4 4 0 0 0-4-4Zm0 2a2 2 0 0 1 2 2v2.2c0 .3.1.5.2.7A4.5 4.5 0 0 1 16.5 14H7.5a4.5 4.5 0 0 1 2.3-3.1c.1-.2.2-.4.2-.7V7a2 2 0 0 1 2-2Zm-1 13h2v2h-2v-2Z"
-              />
-            </svg>
-          </span>
-          <span className="you-label">you</span>
+          <span className="you-core">YOUR DESK</span>
         </div>
 
         {placements.slice(0, visiblePeers).map((peer, i) => (
@@ -222,7 +206,7 @@ export function RoomDemo() {
             ref={(el) => {
               peerRefs.current[i] = el;
             }}
-            className={`orbit-node ring-${peer.seat}`}
+            className="orbit-node"
             style={{
               left: `${peer.left}%`,
               top: `${peer.top}%`,
@@ -230,22 +214,14 @@ export function RoomDemo() {
             }}
             onMouseEnter={() => setTip(i)}
             onMouseLeave={() => setTip(null)}
+            onFocus={() => setTip(i)}
+            onBlur={() => setTip(null)}
+            onClick={() => setTip(i)}
             aria-label={`${peer.name}, ${peer.role}, ${peer.seat}`}
           >
-            <span className="orbit-link" aria-hidden />
-            <span className="orbit-avatar">{peer.name.slice(0, 1)}</span>
-            <span className="orbit-strike" aria-hidden />
+            <span className="orbit-avatar">{peer.name}</span>
           </button>
         ))}
-
-        {tip !== null ? (
-          <div className="orbit-tip">
-            <strong>{PEERS[tip].name}</strong>
-            <span>
-              {PEERS[tip].role} · {PEERS[tip].seat}
-            </span>
-          </div>
-        ) : null}
       </div>
 
       <div className="orbit-actions">
@@ -270,11 +246,7 @@ export function RoomDemo() {
               Create your room
             </a>
           </p>
-        ) : (
-          <p className="mt-2 text-center font-mono text-[10px] text-mute">
-            Hover a peer · type anywhere to feel presence
-          </p>
-        )}
+        ) : null}
       </div>
     </div>
   );
