@@ -53,6 +53,7 @@ type ActivityCapture struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mu               sync.Mutex
+	sharing          SharingConfig
 	terminalOldState *term.State
 	terminalReader   cancelreader.CancelReader
 }
@@ -61,13 +62,23 @@ func newActivityCapture() *ActivityCapture {
 	return &ActivityCapture{Events: make(chan LocalActivityEvent, 1024), ctx: context.Background()}
 }
 
+func (c *ActivityCapture) getSharing() SharingConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sharing
+}
+
+func (c *ActivityCapture) updateSharing(sharing SharingConfig) {
+	c.mu.Lock()
+	c.sharing = sharing
+	c.mu.Unlock()
+}
+
 func (c *ActivityCapture) start(parent context.Context, sharing SharingConfig, mode string) CaptureState {
 	ctx, cancel := context.WithCancel(parent)
 	c.ctx = ctx
 	c.cancel = cancel
-	if !sharing.Keyboard && !sharing.Mouse {
-		return CaptureState{Mode: "off"}
-	}
+	c.updateSharing(sharing)
 	if mode == "terminal" {
 		if err := c.startTerminal(ctx, sharing); err != nil {
 			return CaptureState{Mode: "off", PermissionHint: err.Error()}
@@ -155,7 +166,7 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 				return
 			}
 			withoutMouse := terminalMousePattern.ReplaceAllStringFunc(text, func(match string) string {
-				if !sharing.Mouse {
+				if !c.getSharing().Mouse {
 					return ""
 				}
 				button := terminalMouseButton(match)
@@ -164,7 +175,7 @@ func (c *ActivityCapture) startTerminal(ctx context.Context, sharing SharingConf
 				}
 				return ""
 			})
-			if sharing.Keyboard && withoutMouse != "" {
+			if c.getSharing().Keyboard && withoutMouse != "" {
 				c.emit(LocalActivityEvent{Kind: "keyboard", At: time.Now()})
 			}
 		}
@@ -263,7 +274,7 @@ func (c *ActivityCapture) readEvdev(ctx context.Context, file *os.File, sharing 
 			continue
 		}
 		consecutiveErrors = 0
-		c.handleEvdev(buf[:n], sharing, touchpad)
+		c.handleEvdev(buf[:n], c.getSharing(), touchpad)
 	}
 }
 
