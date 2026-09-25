@@ -39,7 +39,7 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 }
 
 func probeWindowsNativeCapture() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	capture := newActivityCapture()
 	state := capture.start(ctx, SharingConfig{Keyboard: true, Mouse: true}, "auto")

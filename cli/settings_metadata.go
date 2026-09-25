@@ -43,6 +43,10 @@ var configSettingCatalog = []configSettingMetadata{
 	{Key: "spatial.shuffleMinutes", Label: "Shuffle minutes", Description: "dynamic placement refresh interval from 1 to 60"},
 	{Key: "batch.ms", Label: "Batch window", Description: "public relay: fixed 500 ms; self-hosted: 100 to 2000 ms"},
 	{Key: "audio.device", Label: "Audio device", Description: "player output device name, or default"},
+	{Key: "boot.delay", Label: "Boot delay", Description: "startup delay in seconds when launched at system boot"},
+	{Key: "boot.capture.mode", Label: "Boot capture mode", Description: "capture mode when launched at system boot (isolated, direct, or terminal)"},
+	{Key: "boot.audio.device", Label: "Boot audio device", Description: "audio output device when launched at system boot, or default"},
+	{Key: "boot.volume", Label: "Boot volume", Description: "playback volume when launched at system boot from 0 to 1"},
 	{Key: "api.url", Label: "Server", Description: "public/default or a self-hosted http(s) backend URL"},
 	{Key: "ws.url", Label: "WebSocket URL", Description: "advanced relay WebSocket override"},
 }
