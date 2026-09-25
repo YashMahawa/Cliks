@@ -78,12 +78,12 @@ func TestModeTransitionsKeepOnlyOneOwner(t *testing.T) {
 
 func TestClassifySessionLockTreatsYoungEmptyLockAsWait(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := sessionLockPath()
 	// Simulate O_EXCL create before metadata is written.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestClassifySessionLockTreatsYoungEmptyLockAsWait(t *testing.T) {
 
 func TestClassifySessionLockTreatsDeadPIDAsStale(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// PID 1 is usually init/systemd and looks alive; use an absurd high PID instead.
@@ -107,7 +107,7 @@ func TestClassifySessionLockTreatsDeadPIDAsStale(t *testing.T) {
 	}
 	state := ActiveSessionState{PID: deadPID, TeamCode: "CLIK-DEAD", Mode: runModeForeground}
 	data, _ := json.MarshalIndent(state, "", "  ")
-	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	action, _ := classifySessionLock(sessionLockPath())
@@ -165,12 +165,12 @@ func TestSessionInstanceIgnoresOwnPendingBackgroundPID(t *testing.T) {
 
 func TestBackgroundReadinessRequiresMatchingSessionLock(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	state := ActiveSessionState{PID: os.Getpid(), TeamCode: "CLIK-READY1", Mode: runModeBackground}
 	data, _ := json.MarshalIndent(state, "", "  ")
-	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(sessionLockPath(), append(data, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := waitForBackgroundReady(os.Getpid(), "CLIK-READY1", 300*time.Millisecond); err != nil {

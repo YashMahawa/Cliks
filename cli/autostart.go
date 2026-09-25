@@ -127,9 +127,10 @@ func linuxAutostart(action, code string) (string, error) {
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 		return "Cliks autostart disabled.", nil
 	case "enable":
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
+		_ = os.Chmod(dir, 0o700)
 		exe := stableServiceExecutable()
 		quotedExe, err := systemdQuote(exe)
 		if err != nil {
@@ -154,7 +155,7 @@ Environment=CLIKS_RUN_MODE=%s
 [Install]
 WantedBy=default.target
 `, quotedExe, code, runModeBoot)
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := atomicWriteFile(path, []byte(body), 0o600); err != nil {
 			return "", err
 		}
 		reload := exec.Command("systemctl", "--user", "daemon-reload").Run()
@@ -184,9 +185,10 @@ func macAutostart(action, code string) (string, error) {
 		_ = os.Remove(path)
 		return "Cliks autostart disabled.", nil
 	case "enable":
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
+		_ = os.Chmod(dir, 0o700)
 		exe := stableServiceExecutable()
 		var err error
 		if err := validateLauncherValue("executable path", exe); err != nil {
@@ -232,7 +234,7 @@ func macAutostart(action, code string) (string, error) {
 </dict>
 </plist>
 `, launchAgentID, xmlText(exe), code, runModeBoot, xmlText(filepath.Join(home, "Library", "Logs", "cliks.log")), xmlText(filepath.Join(home, "Library", "Logs", "cliks.err.log")))
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := atomicWriteFile(path, []byte(body), 0o600); err != nil {
 			return "", err
 		}
 		err = exec.Command("launchctl", "bootstrap", domain, path).Run()
@@ -280,7 +282,7 @@ func windowsAutostart(action, code string) (string, error) {
 		_ = os.Remove(cmdPath)
 		return "Cliks autostart disabled.", nil
 	case "enable":
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
 		exe := stableServiceExecutable()
@@ -300,7 +302,7 @@ func windowsAutostart(action, code string) (string, error) {
 				"sh.Run \"\"\"%s\"\" start\", 0, False\r\n",
 			code, runModeBoot, strings.ReplaceAll(exe, `"`, `""`),
 		)
-		if err := os.WriteFile(vbsPath, []byte(body), 0o644); err != nil {
+		if err := atomicWriteFile(vbsPath, []byte(body), 0o600); err != nil {
 			return "", err
 		}
 		_ = os.Remove(cmdPath)
