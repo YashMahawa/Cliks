@@ -67,6 +67,8 @@ func run(args []string) error {
 		return cmdSetup(rest[1:])
 	case "doctor":
 		return runDoctor()
+	case "status":
+		return cmdStatus(rest[1:])
 	case "sound-test":
 		return runSoundTest()
 	case "notification-test":
@@ -113,8 +115,10 @@ func cmdService(args []string) error {
 			"  keep.running        set with: cliks set keep.running on|off")
 	}
 	switch args[0] {
-	case "start", "stop", "status":
+	case "start", "stop":
 		return cmdBackground(args)
+	case "status":
+		return cmdStatus(args[1:])
 	case "enable", "disable":
 		return cmdAutostart(args)
 	case "login-status":
@@ -859,6 +863,7 @@ Usage:
   %[1]s settings         Open the control screen
   %[1]s setup            One-time easy setup (sound + capture)
   %[1]s doctor           Print the full setup and permission report
+  %[1]s status           Show unified status summary (daemon, autostart, connection)
   %[1]s sound-test       Play local sample sounds
   %[1]s notification-test
                          Send one native notification test
