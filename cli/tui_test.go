@@ -474,8 +474,18 @@ func TestSpacedOnboardingCardsKeepMouseRowsAligned(t *testing.T) {
 	x, y := renderedTextPosition(t, model.View(), "Rain window")
 	updated, _ := model.Update(tea.MouseMsg{Type: tea.MouseMotion, X: x, Y: y})
 	got := updated.(homeModel)
-	if got.cursor != 1 || !got.mouseOver {
-		t.Fatalf("hovering Rain window selected cursor=%d hover=%v, want 1/true", got.cursor, got.mouseOver)
+	if got.cursor != 6 || !got.mouseOver {
+		t.Fatalf("hovering Rain window selected cursor=%d hover=%v, want 6/true", got.cursor, got.mouseOver)
+	}
+}
+
+func TestTeamActionCooldownBlocksRepeatedSubmission(t *testing.T) {
+	model := homeModel{cfg: defaultConfig(), mode: "create", createName: "Focus", createPassword: "secret1"}
+	first, command := model.submitForm()
+	if command == nil { t.Fatal("first submission did not start") }
+	repeated, command := first.(homeModel).submitForm()
+	if command != nil || !strings.Contains(repeated.(homeModel).message, "Please wait") {
+		t.Fatalf("repeat submission was not throttled: cmd=%v message=%q", command, repeated.(homeModel).message)
 	}
 }
 

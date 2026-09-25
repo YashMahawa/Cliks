@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAcoustic } from "./AcousticProvider";
 import { CommandLine, CopyButton, InstallCopy } from "./CommandBits";
 
@@ -9,7 +9,10 @@ type CreatedTeam = {
   name: string;
 };
 
-const apiBase = process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "http://localhost:8787";
+const configuredApiBase = (process.env.NEXT_PUBLIC_CLIKS_API_URL ?? "https://cliks-server.onrender.com").replace(/\/+$/, "");
+const apiBase = configuredApiBase === "https://139.59.29.207.sslip.io"
+  ? "https://cliks-server.onrender.com"
+  : configuredApiBase;
 const installCommand =
   "curl -fsSL https://raw.githubusercontent.com/YashMahawa/Cliks/main/cli/install.sh | bash";
 
@@ -20,7 +23,46 @@ export function RoomForm() {
   const [createdTeam, setCreatedTeam] = useState<CreatedTeam | null>(null);
   const [error, setError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
+	const [mode, setMode] = useState<"create" | "delete">("create");
+	const [teamCode, setTeamCode] = useState("");
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deletedCode, setDeletedCode] = useState("");
+	const [cooldown, setCooldown] = useState(0);
 	const [codeCopied, setCodeCopied] = useState(false);
+
+	useEffect(() => {
+		if (cooldown <= 0) return;
+		const timer = window.setTimeout(() => setCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
+		return () => window.clearTimeout(timer);
+	}, [cooldown]);
+
+	async function requestTeam(path: string, method: "POST" | "DELETE", body: object) {
+		const controller = new AbortController();
+		const timer = window.setTimeout(() => controller.abort(), 75000);
+		try {
+			const response = await fetch(`${apiBase}${path}`, {
+				method,
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+				signal: controller.signal,
+			});
+			const payload: { error?: string; team?: CreatedTeam; ok?: boolean } = await response.json();
+			if (!response.ok) {
+				if (response.status === 429) setCooldown(300);
+				throw new Error(payload.error ?? "The request could not be completed.");
+			}
+			return payload;
+		} finally {
+			window.clearTimeout(timer);
+		}
+	}
+
+	function requestError(caught: unknown, action: string) {
+		if (caught instanceof DOMException && caught.name === "AbortError") return "The room server took too long to wake. Please try again.";
+		if (caught instanceof TypeError) return "Could not reach the room server. Check your connection and try again.";
+		return caught instanceof Error ? caught.message : `Could not ${action} the room.`;
+	}
 
   const joinCommand = useMemo(
     () => (createdTeam ? `cliks join ${createdTeam.code}` : ""),
@@ -37,42 +79,53 @@ export function RoomForm() {
 
   async function createTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+		if (isCreating || cooldown > 0) return;
     setError("");
     setCreatedTeam(null);
     setIsCreating(true);
+		setCooldown(3);
     try {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 8000);
-      const response = await fetch(`${apiBase}/api/teams`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, deletePassword }),
-        signal: controller.signal,
-      });
-      window.clearTimeout(timer);
-
-      let payload: { error?: string; team?: CreatedTeam } = {};
-      try {
-        payload = await response.json();
-      } catch {
-        throw new Error("Server returned an unexpected response.");
-      }
-      if (!response.ok) throw new Error(payload.error ?? "Could not create room.");
+			const payload = await requestTeam("/api/teams", "POST", { name, deletePassword });
       if (!payload.team?.code) throw new Error("Could not create room.");
       setCreatedTeam(payload.team);
+			setDeletePassword("");
       triggerSound();
     } catch (caught) {
-      if (caught instanceof DOMException && caught.name === "AbortError") {
-        setError("Server took too long. Is the Cliks API running on :8787?");
-      } else if (caught instanceof TypeError) {
-        setError("Cannot reach the API. Start it with npm run dev:server.");
-      } else {
-        setError(caught instanceof Error ? caught.message : "Could not create room.");
-      }
+			setError(requestError(caught, "create"));
     } finally {
       setIsCreating(false);
     }
   }
+
+	async function deleteTeam(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (isDeleting || cooldown > 0) return;
+		const code = teamCode.trim().toUpperCase();
+		if (!/^CLIK-[A-Z0-9]{6}$/.test(code)) {
+			setError("Enter a valid CLIK-XXXXXX room code.");
+			return;
+		}
+		if (!confirmDelete) {
+			setConfirmDelete(true);
+			setError("");
+			return;
+		}
+		setIsDeleting(true);
+		setCooldown(3);
+		setError("");
+		try {
+			await requestTeam(`/api/teams/${code}`, "DELETE", { deletePassword });
+			setDeletedCode(code);
+			setCreatedTeam(null);
+			setDeletePassword("");
+			setTeamCode("");
+			setConfirmDelete(false);
+		} catch (caught) {
+			setError(requestError(caught, "delete"));
+		} finally {
+			setIsDeleting(false);
+		}
+	}
 
   if (createdTeam) {
     return (
@@ -141,9 +194,49 @@ export function RoomForm() {
         >
           Create another room
         </button>
+		<button
+			type="button"
+			onClick={() => {
+				setCreatedTeam(null);
+				setMode("delete");
+				setTeamCode(createdTeam.code);
+				setConfirmDelete(false);
+				setError("");
+			}}
+			className="ml-6 font-mono text-xs text-mute underline-offset-2 hover:text-soft hover:underline"
+		>
+			Delete this room
+		</button>
       </div>
     );
   }
+
+	if (mode === "delete") {
+		return (
+			<div className="panel p-7 md:p-9 xl:p-10">
+				<p className="font-mono text-[11px] uppercase tracking-[0.16em] text-mute">Room management</p>
+				<h3 className="mt-2 text-xl font-bold tracking-tight xl:text-2xl">Delete a room</h3>
+				<p className="mt-2 text-sm text-soft">You need the room code and its delete password. Everyone connected will be disconnected.</p>
+				{deletedCode ? <p className="mt-5 text-sm text-accent" role="status">{deletedCode} was deleted.</p> : null}
+				<form onSubmit={deleteTeam} className="mt-8 flex flex-col gap-7">
+					<div className="flex flex-col gap-2">
+						<label htmlFor="delete-team-code" className="font-mono text-xs text-mute">Room code</label>
+						<input id="delete-team-code" value={teamCode} onChange={(event) => { setTeamCode(event.target.value.toUpperCase()); setConfirmDelete(false); }} placeholder="CLIK-XXXXXX" required maxLength={11} className="w-full border-b border-line bg-transparent pb-2 font-mono text-lg text-fg outline-none focus:border-[var(--accent)]" />
+					</div>
+					<div className="flex flex-col gap-2">
+						<label htmlFor="delete-team-password" className="font-mono text-xs text-mute">Delete password</label>
+						<input id="delete-team-password" type="password" value={deletePassword} onChange={(event) => { setDeletePassword(event.target.value); setConfirmDelete(false); }} required maxLength={128} className="w-full border-b border-line bg-transparent pb-2 text-lg text-fg outline-none focus:border-[var(--accent)]" />
+					</div>
+					{confirmDelete ? <p className="text-sm text-accent" role="alert">This cannot be undone. Confirm deletion of {teamCode.trim().toUpperCase()}.</p> : null}
+					<button type="submit" disabled={isDeleting || cooldown > 0} className="btn-primary flex h-12 items-center justify-center disabled:opacity-50">
+						{isDeleting ? "Deleting…" : cooldown > 0 ? `Wait ${cooldown}s` : confirmDelete ? "Confirm deletion" : "Delete room"}
+					</button>
+				</form>
+				{error ? <p className="mt-5 font-mono text-xs text-accent" role="alert">{error}</p> : null}
+				<button type="button" onClick={() => { setMode("create"); setConfirmDelete(false); setError(""); setDeletePassword(""); }} className="mt-8 font-mono text-xs text-mute underline-offset-2 hover:text-soft hover:underline">Back to create</button>
+			</div>
+		);
+	}
 
   return (
     <div className="panel p-7 md:p-9 xl:p-10">
@@ -188,8 +281,8 @@ export function RoomForm() {
           <p className="text-xs text-mute">Not a login. Just a kill switch for this room.</p>
         </div>
 
-        <button type="submit" disabled={isCreating} className="btn-primary mt-1 flex h-12 items-center justify-center">
-          {isCreating ? "Generating…" : "Generate room code"}
+        <button type="submit" disabled={isCreating || cooldown > 0} className="btn-primary mt-1 flex h-12 items-center justify-center disabled:opacity-50">
+          {isCreating ? "Generating…" : cooldown > 0 ? `Wait ${cooldown}s` : "Generate room code"}
         </button>
       </form>
 
@@ -198,6 +291,7 @@ export function RoomForm() {
           {error}
         </p>
       ) : null}
+		<button type="button" onClick={() => { setMode("delete"); setError(""); setDeletedCode(""); setDeletePassword(""); }} className="mt-8 font-mono text-xs text-mute underline-offset-2 hover:text-soft hover:underline">Delete an existing room</button>
     </div>
   );
 }

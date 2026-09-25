@@ -401,7 +401,7 @@ func (a *AudioEngine) enqueueScaled(event RemoteActivityEvent, placement peerPla
 	}
 	job := playbackJob{
 		File:   samples[rand.Intn(len(samples))],
-		Gain:   clamp(listening.Volume*sourceGain*(1/placement.Distance)*fatigueGain, 0, 1),
+		Gain:   clamp(listening.Volume*sourceGain*distanceGain(placement.Distance)*fatigueGain, 0, 1),
 		Pan:    0,
 		Device: listening.AudioDevice,
 	}
@@ -424,6 +424,10 @@ func (a *AudioEngine) enqueueScaled(event RemoteActivityEvent, placement peerPla
 		default:
 		}
 	}
+}
+
+func distanceGain(distance float64) float64 {
+	return 1 / math.Sqrt(math.Max(1, distance/2))
 }
 
 func queuePressureDropProbability(queueLength int, queueCapacity int) float64 {
@@ -746,7 +750,10 @@ func scaleWavFileGain(path string, gain float64) (string, func(), error) {
 		chunkID := string(data[offset : offset+4])
 		chunkSize := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
 		payload := offset + 8
-		if chunkID == "fmt " && payload+16 <= len(data) {
+		if chunkSize > len(data)-payload {
+			return "", nil, fmt.Errorf("invalid WAV chunk")
+		}
+		if chunkID == "fmt " && chunkSize >= 16 {
 			bitsPerSample = int(binary.LittleEndian.Uint16(data[payload+14 : payload+16]))
 		}
 		if chunkID == "data" {
@@ -759,7 +766,7 @@ func scaleWavFileGain(path string, gain float64) (string, func(), error) {
 			offset++
 		}
 	}
-	if dataStart < 0 || bitsPerSample != 16 || dataStart+dataSize > len(data) {
+	if dataStart < 0 || bitsPerSample != 16 || dataSize > len(data)-dataStart {
 		return "", nil, fmt.Errorf("unsupported WAV layout")
 	}
 	out := append([]byte(nil), data...)
