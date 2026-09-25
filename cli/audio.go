@@ -451,6 +451,7 @@ func (a *AudioEngine) playWorker() {
 		}
 		a.mu.Lock()
 		player := a.player
+		targetDevice := job.Device
 		a.mu.Unlock()
 		if player == nil {
 			continue
@@ -460,7 +461,25 @@ func (a *AudioEngine) playWorker() {
 		playbackCanceled := ctx.Err() != nil
 		cancel()
 		if err != nil && !playbackCanceled && a.ctx.Err() == nil {
-			a.warnUnavailableOnce()
+			if strings.TrimSpace(targetDevice) != "" && !strings.EqualFold(targetDevice, "default") {
+				a.mu.Lock()
+				a.listening.AudioDevice = ""
+				a.player = detectAudioPlayerForDevice("")
+				fallbackPlayer := a.player
+				a.mu.Unlock()
+
+				a.warnFallbackOnce(targetDevice)
+
+				if fallbackPlayer != nil {
+					fallbackJob := job
+					fallbackJob.Device = ""
+					retryCtx, retryCancel := context.WithTimeout(a.ctx, audioPlaybackTimeout)
+					_ = runAudioCommand(retryCtx, fallbackPlayer, fallbackJob)
+					retryCancel()
+				}
+			} else {
+				a.warnUnavailableOnce()
+			}
 		}
 	}
 }
@@ -567,6 +586,16 @@ func (a *AudioEngine) warnUnavailableOnce() {
 	}
 	a.warned = true
 	fmt.Fprintln(os.Stderr, "\nAudio disabled: "+audioInstallMessage())
+}
+
+func (a *AudioEngine) warnFallbackOnce(device string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.warned {
+		return
+	}
+	a.warned = true
+	fmt.Fprintf(os.Stderr, "\nAudio warning: configured device %q failed playback; falling back to default audio output.\n", device)
 }
 
 func detectAudioPlayer() *audioPlayer {

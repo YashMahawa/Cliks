@@ -46,10 +46,18 @@ func buildDoctorReportOptions(cfg CliksConfig, thorough bool) doctorReport {
 	if player != "" {
 		report.checks = append(report.checks, doctorCheck{"Audio player", "ok (" + player + ")"})
 		if cfg.Listening.AudioDevice != "" {
-			if hint == "" {
-				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice})
-			} else {
+			if !IsAudioDeviceAvailable(cfg.Listening.AudioDevice) {
+				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice + " (disconnected)"})
+				report.issues = append(report.issues, doctorIssue{
+					title:    "Configured audio output device unavailable",
+					detail:   fmt.Sprintf("Configured audio output %q is disconnected, unavailable, or missing from system audio outputs.", cfg.Listening.AudioDevice),
+					commands: []string{"cliks set audio.device default"},
+				})
+			} else if hint != "" {
+				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice + " (unsupported player)"})
 				report.issues = append(report.issues, doctorIssue{"Choose a supported audio output", hint, []string{"cliks set audio.device default"}})
+			} else {
+				report.checks = append(report.checks, doctorCheck{"Audio output", cfg.Listening.AudioDevice + " (connected)"})
 			}
 		}
 		if spatial {
