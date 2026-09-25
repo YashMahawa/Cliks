@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -134,7 +135,8 @@ func main() {
 				continue
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
-			if _, err := io.WriteString(conn, "ready\n"); err != nil {
+			status := peers.seatGate.currentStatus()
+			if _, err := io.WriteString(conn, fmt.Sprintf("ready seat:%s\n", status)); err != nil {
 				_ = conn.Close()
 				continue
 			}
@@ -239,44 +241,81 @@ func configuredUID() (int, error) {
 	return int(value), err
 }
 
+type seatStatus string
+
+const (
+	seatStatusActive   seatStatus = "active"
+	seatStatusMuted    seatStatus = "muted"
+	seatStatusFallback seatStatus = "fallback"
+)
+
 type activeSeatGate struct {
 	sync.Mutex
 	targetUID int
 	checkedAt time.Time
-	active    bool
+	status    seatStatus
+}
+
+func (g *activeSeatGate) currentStatus() seatStatus {
+	g.Lock()
+	defer g.Unlock()
+	if time.Since(g.checkedAt) < 1500*time.Millisecond && g.status != "" {
+		return g.status
+	}
+	g.checkedAt = time.Now()
+	g.status = checkSeatStatus(g.targetUID)
+	return g.status
 }
 
 func (g *activeSeatGate) allowed() bool {
-	g.Lock()
-	defer g.Unlock()
-	if time.Since(g.checkedAt) < 1500*time.Millisecond {
-		return g.active
-	}
-	g.checkedAt = time.Now()
-	g.active = targetOwnsActiveSeat(g.targetUID)
-	return g.active
+	st := g.currentStatus()
+	return st == seatStatusActive || st == seatStatusFallback
 }
 
-func targetOwnsActiveSeat(targetUID int) bool {
-	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
-	if err != nil {
-		return false
+func checkSeatStatus(targetUID int) seatStatus {
+	loginctlPath, err := exec.LookPath("loginctl")
+	if err != nil || loginctlPath == "" {
+		return seatStatusFallback
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+
+	output, err := exec.Command(loginctlPath, "list-seats", "--no-legend", "--no-pager").Output()
+	if err != nil {
+		return seatStatusFallback
+	}
+
+	lines := strings.Split(string(output), "\n")
+	validSeatCount := 0
+	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
-		session, err := exec.Command("loginctl", "show-seat", fields[0], "-p", "ActiveSession", "--value").Output()
-		if err != nil || strings.TrimSpace(string(session)) == "" {
+		seatName := fields[0]
+		validSeatCount++
+
+		session, err := exec.Command(loginctlPath, "show-seat", seatName, "-p", "ActiveSession", "--value").Output()
+		if err != nil {
+			return seatStatusFallback
+		}
+		activeSession := strings.TrimSpace(string(session))
+		if activeSession == "" {
 			continue
 		}
-		uid, err := exec.Command("loginctl", "show-session", strings.TrimSpace(string(session)), "-p", "User", "--value").Output()
-		if err == nil && strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
-			return true
+
+		uid, err := exec.Command(loginctlPath, "show-session", activeSession, "-p", "User", "--value").Output()
+		if err != nil {
+			return seatStatusFallback
+		}
+		if strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
+			return seatStatusActive
 		}
 	}
-	return false
+
+	if validSeatCount == 0 {
+		return seatStatusFallback
+	}
+
+	return seatStatusMuted
 }
 
 func readDevice(file *os.File, peers *clients, done func()) {

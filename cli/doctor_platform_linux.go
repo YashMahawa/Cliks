@@ -11,8 +11,22 @@ import (
 func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 	_ = thorough
 	input := linuxInputStatus()
-	isolated := isolatedLinuxCaptureReady()
-	report.checks = append(report.checks, doctorCheck{"Isolated capture helper", yesNo(isolated)})
+	hs := probeLinuxCaptureHelper()
+	isolated := hs.ready && hs.seat != "muted"
+
+	if hs.ready {
+		switch hs.seat {
+		case "muted":
+			report.checks = append(report.checks, doctorCheck{"Isolated capture helper", "muted (seat ownership check failed)"})
+		case "fallback":
+			report.checks = append(report.checks, doctorCheck{"Isolated capture helper", "yes (fallback owner verification)"})
+		default:
+			report.checks = append(report.checks, doctorCheck{"Isolated capture helper", "yes"})
+		}
+	} else {
+		report.checks = append(report.checks, doctorCheck{"Isolated capture helper", yesNo(false)})
+	}
+
 	report.checks = append(report.checks, doctorCheck{"Linux input devices", yesNo(input.hasInputDir)})
 	if input.hasInputDir {
 		report.checks = append(report.checks,
@@ -42,6 +56,9 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 		report.issues = append(report.issues, doctorIssue{"Use a desktop session for ambient capture", detail, []string{"cliks setup", "cliks start --terminal --self"}})
 	case input.eventCount == 0:
 		report.issues = append(report.issues, doctorIssue{"No input devices found", "Open Cliks from a real desktop session (not a remote shell).", []string{"cliks setup"}})
+	case hs.ready && hs.seat == "muted":
+		detail := "The capture helper is connected, but input capture is muted because seat ownership verification failed or your user session is not active on the seat."
+		report.issues = append(report.issues, doctorIssue{"Activate active user session or check seat status", detail, []string{"Switch to active user session or check seat ownership with loginctl", "cliks setup"}})
 	case !isolated:
 		commands := []string{"cliks setup", "Re-run the Cliks installer"}
 		detail := "Install the isolated helper so the Cliks client and unrelated user programs never receive raw input-device access."
@@ -60,7 +77,11 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 
 func platformStartupCaptureNotice() string {
 	input := linuxInputStatus()
-	if isolatedLinuxCaptureReady() {
+	hs := probeLinuxCaptureHelper()
+	if hs.ready && hs.seat == "muted" {
+		return "Linux: capture helper is connected but muted (seat ownership check failed)."
+	}
+	if hs.ready && hs.seat != "muted" {
 		return ""
 	}
 	if os.Getenv("FLATPAK_ID") != "" || os.Getenv("container") != "" {

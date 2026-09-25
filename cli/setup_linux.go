@@ -11,11 +11,56 @@ import (
 	"time"
 )
 
+type linuxCaptureHelperHandshake struct {
+	ready bool
+	seat  string
+}
+
+func probeLinuxCaptureHelper() linuxCaptureHelperHandshake {
+	conn, err := net.DialTimeout("unix", linuxCaptureSocket(), 250*time.Millisecond)
+	if err != nil {
+		return linuxCaptureHelperHandshake{ready: false}
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return linuxCaptureHelperHandshake{ready: false}
+	}
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "ready") {
+		return linuxCaptureHelperHandshake{ready: false}
+	}
+
+	hs := linuxCaptureHelperHandshake{ready: true, seat: "active"}
+	fields := strings.Fields(line)
+	for _, field := range fields[1:] {
+		if strings.HasPrefix(field, "seat:") {
+			hs.seat = strings.TrimPrefix(field, "seat:")
+		} else if strings.HasPrefix(field, "seat=") {
+			hs.seat = strings.TrimPrefix(field, "seat=")
+		}
+	}
+	return hs
+}
+
 func platformCaptureSetup() []setupStep {
-	if isolatedLinuxCaptureReady() {
+	hs := probeLinuxCaptureHelper()
+	if hs.ready && hs.seat != "muted" {
+		detail := "The isolated Cliks helper is ready. Your terminal and user account cannot read raw input devices."
+		if hs.seat == "fallback" {
+			detail = "The isolated Cliks helper is ready (using peer process owner verification). Your terminal and user account cannot read raw input devices."
+		}
 		return []setupStep{{
 			title: "Private background capture", status: "ok",
-			detail: "The isolated Cliks helper is ready. Your terminal and user account cannot read raw input devices.",
+			detail: detail,
+		}}
+	}
+	if hs.ready && hs.seat == "muted" {
+		return []setupStep{{
+			title: "Private background capture", status: "warning",
+			detail: "The Cliks capture helper is connected, but input capture is muted because seat ownership verification failed.",
+			command: "Switch to active user session or check seat ownership with loginctl",
 		}}
 	}
 	input := linuxInputStatus()
@@ -34,14 +79,8 @@ func platformCaptureSetup() []setupStep {
 }
 
 func isolatedLinuxCaptureReady() bool {
-	conn, err := net.DialTimeout("unix", linuxCaptureSocket(), 250*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
-	line, err := bufio.NewReader(conn).ReadString('\n')
-	return err == nil && strings.TrimSpace(line) == "ready"
+	hs := probeLinuxCaptureHelper()
+	return hs.ready && hs.seat != "muted"
 }
 
 // Kept for migration diagnostics only. Cliks no longer grants ACLs or adds the
