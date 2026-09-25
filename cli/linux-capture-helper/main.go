@@ -141,27 +141,142 @@ func main() {
 			peers.add(client)
 		}
 	}()
-	opened := map[string]bool{}
-	var openedMu sync.Mutex
+	scanner := newDeviceScanner()
 	for {
-		devices, _ := filepath.Glob("/dev/input/event*")
-		for _, path := range devices {
-			openedMu.Lock()
-			alreadyOpen := opened[path]
-			openedMu.Unlock()
-			if alreadyOpen {
-				continue
-			}
-			file, err := os.Open(path)
-			if err != nil {
-				continue
-			}
-			openedMu.Lock()
-			opened[path] = true
-			openedMu.Unlock()
-			go readDevice(file, peers, func() { openedMu.Lock(); delete(opened, path); openedMu.Unlock() })
-		}
+		scanner.scan(targetUID, peers, "/dev/input/event*")
 		time.Sleep(3 * time.Second)
+	}
+}
+
+var (
+	getDeviceSeatOverride  func(path string) string
+	getActiveSeatsOverride func(targetUID int) map[string]bool
+)
+
+func getDeviceSeat(path string) string {
+	if getDeviceSeatOverride != nil {
+		seat := getDeviceSeatOverride(path)
+		if seat == "" {
+			return "seat0"
+		}
+		return seat
+	}
+	output, err := exec.Command("udevadm", "info", "-q", "property", "-n", path).Output()
+	if err != nil {
+		return "seat0"
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ID_SEAT=") {
+			seat := strings.TrimPrefix(line, "ID_SEAT=")
+			if seat != "" {
+				return seat
+			}
+		}
+	}
+	return "seat0"
+}
+
+func getActiveSeatsForUID(targetUID int) map[string]bool {
+	if getActiveSeatsOverride != nil {
+		return getActiveSeatsOverride(targetUID)
+	}
+	seats := make(map[string]bool)
+	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
+	if err != nil {
+		return seats
+	}
+	targetUIDStr := strconv.Itoa(targetUID)
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		seatName := fields[0]
+		session, err := exec.Command("loginctl", "show-seat", seatName, "-p", "ActiveSession", "--value").Output()
+		if err != nil {
+			continue
+		}
+		sessionID := strings.TrimSpace(string(session))
+		if sessionID == "" {
+			continue
+		}
+		uid, err := exec.Command("loginctl", "show-session", sessionID, "-p", "User", "--value").Output()
+		if err == nil && strings.TrimSpace(string(uid)) == targetUIDStr {
+			seats[seatName] = true
+		}
+	}
+	return seats
+}
+
+type deviceScanner struct {
+	mu     sync.Mutex
+	opened map[string]*os.File
+	opener func(path string) (*os.File, error)
+}
+
+func newDeviceScanner() *deviceScanner {
+	return &deviceScanner{
+		opened: make(map[string]*os.File),
+		opener: os.Open,
+	}
+}
+
+func (s *deviceScanner) scan(targetUID int, peers *clients, globPattern string) {
+	activeSeats := getActiveSeatsForUID(targetUID)
+	devices, _ := filepath.Glob(globPattern)
+	deviceSet := make(map[string]bool, len(devices))
+	for _, path := range devices {
+		deviceSet[path] = true
+	}
+
+	s.mu.Lock()
+	for path, f := range s.opened {
+		if !deviceSet[path] {
+			delete(s.opened, path)
+			if f != nil {
+				_ = f.Close()
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	for _, path := range devices {
+		seat := getDeviceSeat(path)
+
+		s.mu.Lock()
+		f, isOpen := s.opened[path]
+		if !activeSeats[seat] {
+			if isOpen {
+				delete(s.opened, path)
+				if f != nil {
+					_ = f.Close()
+				}
+			}
+			s.mu.Unlock()
+			continue
+		}
+
+		if isOpen {
+			s.mu.Unlock()
+			continue
+		}
+		s.mu.Unlock()
+
+		file, err := s.opener(path)
+		if err != nil {
+			continue
+		}
+
+		s.mu.Lock()
+		s.opened[path] = file
+		s.mu.Unlock()
+
+		go readDevice(file, peers, func() {
+			s.mu.Lock()
+			delete(s.opened, path)
+			s.mu.Unlock()
+		})
 	}
 }
 
@@ -258,25 +373,7 @@ func (g *activeSeatGate) allowed() bool {
 }
 
 func targetOwnsActiveSeat(targetUID int) bool {
-	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		session, err := exec.Command("loginctl", "show-seat", fields[0], "-p", "ActiveSession", "--value").Output()
-		if err != nil || strings.TrimSpace(string(session)) == "" {
-			continue
-		}
-		uid, err := exec.Command("loginctl", "show-session", strings.TrimSpace(string(session)), "-p", "User", "--value").Output()
-		if err == nil && strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
-			return true
-		}
-	}
-	return false
+	return len(getActiveSeatsForUID(targetUID)) > 0
 }
 
 func readDevice(file *os.File, peers *clients, done func()) {
