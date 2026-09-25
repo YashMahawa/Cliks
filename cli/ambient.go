@@ -7,12 +7,13 @@ import (
 )
 
 type ambientController struct {
-	parent context.Context
-	mu     sync.Mutex
-	mode   string
-	volume float64
-	cancel context.CancelFunc
-	done   chan struct{}
+	parent  context.Context
+	mu      sync.Mutex
+	mode    string
+	volume  float64
+	cancel  context.CancelFunc
+	done    chan struct{}
+	volChan chan float64
 }
 
 func newAmbientController(parent context.Context) *ambientController {
@@ -26,23 +27,60 @@ func (a *ambientController) update(listening ListeningConfig) {
 		mode = "off"
 	}
 	a.mu.Lock()
+
 	if mode == a.mode && math.Abs(volume-a.volume) < 0.001 {
 		a.mu.Unlock()
 		return
 	}
+
+	playerActive := false
+	if a.done != nil {
+		select {
+		case <-a.done:
+			playerActive = false
+		default:
+			playerActive = true
+		}
+	}
+
+	if supportsDynamicAmbientVolume() && mode == a.mode && mode != "off" && playerActive && a.volChan != nil {
+		a.volume = volume
+		volChan := a.volChan
+		a.mu.Unlock()
+
+		select {
+		case volChan <- volume:
+		default:
+			select {
+			case <-volChan:
+			default:
+			}
+			select {
+			case volChan <- volume:
+			default:
+			}
+		}
+		return
+	}
+
 	oldCancel, oldDone := a.cancel, a.done
-	a.cancel, a.done = nil, nil
+	a.cancel, a.done, a.volChan = nil, nil, nil
 	a.mode, a.volume = mode, volume
 	a.mu.Unlock()
+
 	if oldCancel != nil {
 		oldCancel()
 		<-oldDone
 	}
+
 	if mode == "off" {
 		return
 	}
+
 	ctx, cancel := context.WithCancel(a.parent)
 	done := make(chan struct{})
+	volChan := make(chan float64, 1)
+
 	a.mu.Lock()
 	if a.mode != mode || math.Abs(a.volume-volume) >= 0.001 {
 		a.mu.Unlock()
@@ -50,18 +88,19 @@ func (a *ambientController) update(listening ListeningConfig) {
 		close(done)
 		return
 	}
-	a.cancel, a.done = cancel, done
+	a.cancel, a.done, a.volChan = cancel, done, volChan
 	a.mu.Unlock()
+
 	go func() {
 		defer close(done)
-		_ = playAmbient(ctx, mode, volume)
+		_ = playAmbient(ctx, mode, volume, volChan)
 	}()
 }
 
 func (a *ambientController) close() {
 	a.mu.Lock()
 	cancel, done := a.cancel, a.done
-	a.cancel, a.done = nil, nil
+	a.cancel, a.done, a.volChan = nil, nil, nil
 	a.mode = "off"
 	a.mu.Unlock()
 	if cancel != nil {

@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-func playAmbient(ctx context.Context, mode string, volume float64) error {
+func supportsDynamicAmbientVolume() bool {
+	return false
+}
+
+func playAmbient(ctx context.Context, mode string, volume float64, volChan <-chan float64) error {
 	path, err := ambientWAVPath(mode)
 	if err != nil {
 		return err
