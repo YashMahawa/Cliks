@@ -38,18 +38,18 @@ cliks setup                 # grant access / check readiness
 - Device read errors use exponential backoff + jitter (no busy loop)
 
 The installer runs a small root-owned hardened helper. Its socket is owned by
-the configured desktop user with mode `0600`; connections must also come from
-the installed Cliks executable as that UID. The helper emits only while that
-user owns an active local logind seat, preventing activity from another signed-
-in desktop session from entering the room. The client receives only `k`, `l`,
-or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically grants
+the configured desktop user with mode `0600`; connections must present an active
+ephemeral token generated in restricted runtime storage (`0600`) and originate from
+that UID. Environment variable overrides for client binary paths are ignored.
+The helper emits only while that user owns an active local logind seat, preventing activity
+from another signed-in desktop session from entering the room. The client receives only `k`,
+`l`, or `r` tokens over `/run/cliks/capture.sock`. Cliks never automatically grants
 the desktop user raw input ACLs or adds that user to `input`.
 
-Authorization is tied to the exact connecting process, not only its numeric
-PID. The helper obtains and retains a Linux pidfd, checks that identity around
-the `/proc/PID/exe` verification, and closes the socket when either the process
-or connection exits. Kernels with `SO_PEERPIDFD` use its race-free peer handle;
-older supported kernels use `pidfd_open` as the compatibility path.
+Authorization combines kernel peer credentials with the ephemeral token handshake.
+The helper obtains and retains a Linux pidfd, verifies process liveness, and closes the
+socket when either the process or connection exits. Kernels with `SO_PEERPIDFD` use its
+race-free peer handle; older supported kernels use `pidfd_open` as the compatibility path.
 
 Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop session or terminal mode.
 
