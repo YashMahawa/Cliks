@@ -235,13 +235,13 @@ func runHomeTUI(cfg CliksConfig) error {
 func runHomeControlLoop(ctx context.Context, cfg CliksConfig) error {
 	returnedFromSolo := false
 	for {
-		active, activeOK := activeSession()
+		active, activeOK := activeSession(false)
 		message := welcomeMessage(cfg)
 		if activeOK {
 			message = "Already connected. Use Stop to disconnect, or Quit to leave it running."
 			if stopped := stopDuplicateLocalSessions(active); stopped > 0 {
 				message = fmt.Sprintf("Cleaned up %d older duplicate Cliks session(s).", stopped)
-				active, activeOK = activeSession()
+				active, activeOK = activeSession(false)
 			}
 		}
 		now := time.Now()
@@ -1851,7 +1851,7 @@ func (m homeModel) activeTeamLabel() string {
 }
 
 func (m *homeModel) refreshRuntime() {
-	m.active, m.activeOK = activeSession()
+	m.active, m.activeOK = activeSession(false)
 	if !isFormMode(m.mode) {
 		m.cfg = loadConfig()
 	}

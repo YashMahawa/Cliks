@@ -16,6 +16,9 @@ const (
 	runModeExisting   = "existing"
 )
 
+var sessionCleanupAllowed = false
+
+
 type ActiveSessionState struct {
 	PID                 int              `json:"pid"`
 	Version             string           `json:"version,omitempty"`
@@ -56,7 +59,7 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 	if mode == "" {
 		mode = runModeForeground
 	}
-	if active, ok := activeSession(); ok {
+	if active, ok := activeSession(false); ok {
 		return nil, alreadyRunningError{state: active}
 	}
 	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
@@ -118,13 +121,13 @@ func acquireSessionInstance(teamCode string, mode string) (*sessionInstance, err
 			continue
 		default:
 			// Unknown — re-check active session and fail closed.
-			if active, ok := activeSession(); ok {
+			if active, ok := activeSession(false); ok {
 				return nil, alreadyRunningError{state: active}
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	if active, ok := activeSession(); ok {
+	if active, ok := activeSession(false); ok {
 		return nil, alreadyRunningError{state: active}
 	}
 	return nil, fmt.Errorf("could not acquire session lock at %s", path)
@@ -146,7 +149,7 @@ func waitForProcessExit(pid int, timeout time.Duration) bool {
 // boundary: the old process must be gone before a new room or Solo Desk opens.
 // A matching non-empty team is already the desired owner and is left alone.
 func disconnectActiveSessionForTransition(targetTeam string) (ActiveSessionState, bool, error) {
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		return ActiveSessionState{}, false, nil
 	}
@@ -271,7 +274,17 @@ func runModeFromEnv() string {
 	}
 }
 
-func activeSession() (ActiveSessionState, bool) {
+func confirmProcessIsDead(pid int) bool {
+	for i := 0; i < 3; i++ {
+		if processLooksAlive(pid) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return true
+}
+
+func activeSession(mutate bool) (ActiveSessionState, bool) {
 	if lock, ok := readSessionFile(sessionLockPath()); ok {
 		if processLooksAlive(lock.PID) {
 			state, _ := readSessionFile(sessionStatePath())
@@ -291,7 +304,9 @@ func activeSession() (ActiveSessionState, bool) {
 			state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(lock.PID))
 			return state, true
 		}
-		cleanupStaleSession()
+		if mutate {
+			cleanupStaleSession()
+		}
 	}
 	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
@@ -323,7 +338,7 @@ func activeSession() (ActiveSessionState, bool) {
 }
 
 func stopActiveSession() (string, error) {
-	active, ok := activeSession()
+	active, ok := activeSession(false)
 	if !ok {
 		if stopped := cleanupOrphanAmbientPlayers(); stopped > 0 {
 			return fmt.Sprintf("Cliks was already stopped. Cleaned up %d leftover room-tone player(s).", stopped), nil
@@ -355,9 +370,17 @@ func stopActiveSession() (string, error) {
 }
 
 func cleanupStaleSession() {
+	if !sessionCleanupAllowed {
+		return
+	}
+	if lock, ok := readSessionFile(sessionLockPath()); ok {
+		if !confirmProcessIsDead(lock.PID) {
+			return
+		}
+	}
 	_ = os.Remove(sessionLockPath())
 	_ = os.RemoveAll(sessionCommandDir())
-	if pid, ok := readBackgroundPID(); ok && !processLooksAlive(pid) {
+	if pid, ok := readBackgroundPID(); ok && confirmProcessIsDead(pid) {
 		_ = os.Remove(backgroundPIDPath())
 	}
 }
@@ -470,7 +493,7 @@ func consumeDeferredStopIfNeeded() string {
 	if !ok {
 		return ""
 	}
-	active, activeOK := activeSession()
+	active, activeOK := activeSession(false)
 	if !activeOK || active.PID != deferred.PID {
 		_ = clearDeferredStop()
 		return ""

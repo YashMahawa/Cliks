@@ -268,7 +268,7 @@ func windowsAutostart(action, code string) (string, error) {
 	switch action {
 	case "status":
 		runtimeState := "not running"
-		if _, ok := activeSession(); ok {
+		if _, ok := activeSession(false); ok {
 			runtimeState = "running now"
 		}
 		if _, err := os.Stat(vbsPath); err == nil {
