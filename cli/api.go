@@ -14,19 +14,24 @@ import (
 var apiClient = &http.Client{Timeout: 15 * time.Second}
 
 type apiTeam struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	HasPasscode bool   `json:"hasPasscode"`
 }
 
-func createTeamViaAPI(cfg CliksConfig, name string, deletePassword string) (apiTeam, error) {
+func createTeamViaAPI(cfg CliksConfig, name string, deletePassword string, passcode string) (apiTeam, error) {
 	var out struct {
 		Team  apiTeam `json:"team"`
 		Error string  `json:"error"`
 	}
-	err := apiJSON("POST", strings.TrimRight(cfg.APIURL, "/")+"/api/teams", map[string]string{
+	body := map[string]string{
 		"name":           name,
 		"deletePassword": deletePassword,
-	}, &out)
+	}
+	if passcode != "" {
+		body["passcode"] = passcode
+	}
+	err := apiJSON("POST", strings.TrimRight(cfg.APIURL, "/")+"/api/teams", body, &out)
 	if err != nil {
 		return apiTeam{}, err
 	}
@@ -74,6 +79,27 @@ func deleteTeamViaAPI(cfg CliksConfig, code string, deletePassword string) error
 		Error string `json:"error"`
 	}
 	err = apiJSON("DELETE", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+normalizedCode, map[string]string{
+		"deletePassword": deletePassword,
+	}, &out)
+	if err != nil {
+		return err
+	}
+	if out.Error != "" {
+		return errors.New(out.Error)
+	}
+	return nil
+}
+
+func kickPeerViaAPI(cfg CliksConfig, code string, targetPeerID string, deletePassword string) error {
+	normalizedCode, err := normalizeTeamCode(code)
+	if err != nil {
+		return err
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	err = apiJSON("POST", strings.TrimRight(cfg.APIURL, "/")+"/api/teams/"+normalizedCode+"/kick", map[string]string{
+		"targetPeerId":   targetPeerID,
 		"deletePassword": deletePassword,
 	}, &out)
 	if err != nil {
