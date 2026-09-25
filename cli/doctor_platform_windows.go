@@ -22,15 +22,16 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 			report.checks = append(report.checks, doctorCheck{"Elevation check", detail})
 		}
 		// Tip only — not a blocking issue. Everyday apps work without user action.
-		report.checks = append(report.checks, doctorCheck{"Elevated-window note", "capture pauses only while Admin windows are focused"})
+		report.checks = append(report.checks, doctorCheck{"Elevated privilege warning", "capture pauses while elevated (Administrator) windows are focused"})
 	}
 	if thorough {
-		probe := probeWindowsNativeCapture()
+		vitality, probe := probeWindowsNativeCaptureVitality()
+		report.checks = append(report.checks, doctorCheck{"Hook vitality", vitality})
 		report.checks = append(report.checks, doctorCheck{"Capture backend probe", probe})
-		if strings.Contains(probe, "failed") {
+		if strings.Contains(probe, "failed") || strings.Contains(vitality, "fail") {
 			report.issues = append(report.issues, doctorIssue{
-				title:    "Windows native capture could not start",
-				detail:   "The built-in low-level keyboard/mouse hooks did not initialize. Restart Cliks; security software may be blocking hooks.",
+				title:    "Windows native hook vitality failure",
+				detail:   "Low-level keyboard/mouse hooks are detached or unresponsive. System security (UIPI) or OS callback timeouts may have evicted hooks.",
 				commands: []string{"cliks capture-test"},
 			})
 		}
@@ -38,16 +39,37 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 	report.recommendation = []string{"Recommended run command:", "cliks start"}
 }
 
-func probeWindowsNativeCapture() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+func probeWindowsNativeCaptureVitality() (string, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	capture := newActivityCapture()
 	state := capture.start(ctx, SharingConfig{Keyboard: true, Mouse: true}, "auto")
-	capture.stop()
+	defer capture.stop()
+
 	if state.Mode != "windows-native" {
-		return fmt.Sprintf("failed (%s)", valuePlain(state.PermissionHint, "native hooks unavailable"))
+		return "fail (hooks unavailable)", fmt.Sprintf("failed (%s)", valuePlain(state.PermissionHint, "native hooks unavailable"))
 	}
-	return "ok (windows-native)"
+
+	windowsNativeCaptureLock.RLock()
+	session := windowsNativeCapture
+	windowsNativeCaptureLock.RUnlock()
+
+	if session == nil {
+		return "fail (session missing)", "failed (session missing)"
+	}
+
+	sendVitalityProbe(SharingConfig{Keyboard: true, Mouse: true})
+	time.Sleep(100 * time.Millisecond)
+
+	if session.checkVitality(1 * time.Second) {
+		return "pass (hooks attached and responding)", "ok (windows-native)"
+	}
+	return "fail (detached or unresponsive hooks detected)", "failed (vitality probe failed: hooks detached or unresponsive)"
+}
+
+func probeWindowsNativeCapture() string {
+	_, probe := probeWindowsNativeCaptureVitality()
+	return probe
 }
 
 func windowsElevationStatus() (bool, string) {
