@@ -22,7 +22,7 @@ meeting-software clutter.
 - [x] First-run welcome, normal launch animation, bundled UI sounds, factory
   reset, nickname and generated-name onboarding, notification setup, themes,
   backend selection, Keep Running, and launch-at-login setup.
-- [x] Embedded keyboard/click samples and six embedded private room tones with
+- [x] Embedded keyboard/click samples and eight embedded private room tones with
   source notices; built-in desktop playback on macOS and Windows.
 - [x] Offline Solo Desk with simulated coworkers, keyboard/click controls, room
   tone, and no backend or capture dependency.

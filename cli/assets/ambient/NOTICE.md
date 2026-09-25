@@ -3,7 +3,12 @@
 These optional personal room tones are bundled in the Cliks binary, normalized
 for quiet background listening, and never sent to a team or backend.
 
-All six source works are licensed CC0:
+All eight source works are licensed CC0:
+
+- `still.mp3`: "Calm Loop" by wipics
+  - https://opengameart.org/content/calm-loop
+- `lofi.mp3`: "Chill (Loopable)" by Pro Sensory / Alex McCulloch
+  - https://opengameart.org/content/chill-loopable
 
 - `rain.mp3`: "Rain on Window Loop" by alxl
   - https://opengameart.org/content/rain-on-window-loop

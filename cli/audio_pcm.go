@@ -15,10 +15,10 @@ func stereoPCMFromMonoWAV(data []byte, gain float64, pan float64) ([]byte, int, 
 	for offset := 12; offset+8 <= len(data); {
 		chunkSize := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
 		start := offset + 8
-		end := start + chunkSize
-		if end > len(data) {
+		if chunkSize > len(data)-start {
 			return nil, 0, fmt.Errorf("invalid WAV chunk")
 		}
+		end := start + chunkSize
 		switch string(data[offset : offset+4]) {
 		case "fmt ":
 			if chunkSize < 16 {

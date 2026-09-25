@@ -25,7 +25,11 @@ That is usually enough on macOS and Linux. It downloads a native release first, 
 - installs Cliks Capture.app and opens Input Monitoring for that app only
 - runs `cliks setup` for a plain-language readiness check
 
-The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission.
+The first `cliks` launch then uses one full-screen card at a time. It can generate a funny nickname, open the correct permission screen, test notifications, and remember whether you want background and launch-at-login behavior. Those launchers are user-level and do not need administrator permission. Moving through listening mixes and room tones plays a short local preview before you choose.
+
+The public backend is `https://cliks-server.onrender.com`. Cliks 0.6.18+ automatically replaces the exact former DigitalOcean public API and WebSocket URLs with Render, including when local teams are saved. User-configured self-hosted URLs and environment overrides are unchanged. The former active team records were imported to Render with their codes and delete passwords intact. A sleeping free Render service can take about a minute to wake. The free database expires on October 23, 2026 unless migrated or upgraded.
+Public rooms expire after 48 hours without a live connection. Self-hosted rooms stay until deleted unless the operator sets `CLIKS_EXPIRE_INACTIVE_TEAMS=true`. The website can create and delete rooms with their delete password, and both the website and TUI slow repeated room actions; the server also enforces per-IP limits. The public website has an [alternate Vercel address](https://site-kappa-six-64.vercel.app) for networks that cannot reach `cliks.agichaos.dev`.
+Re-running the installer preserves saved teams, nickname, preferences, and custom server URLs. It updates the executable and setup helper; it refuses to delete an existing source directory that is not a Git checkout.
 
 ---
 
@@ -121,7 +125,9 @@ cliks start --terminal --self
 
 ## Solo Desk and personal room tones
 
-Run `cliks solo` to leave any connected team and open a local spatial room with 1-12 simulated coworkers. Each simulated coworker types in short bursts with quiet gaps and occasional clicks. Keyboard ambience, click ambience, and the embedded room tone have separate slider tracks. Hover a slider and use arrow keys or natural scrolling, click its track to jump to a level, or press Tab to cycle sliders without a mouse. Choose rain, fireside, coffee house, cloud drift, contemplation, or night drive, and set room-tone volume anywhere up to 100%. Resizing the terminal—or changing terminal font size—automatically switches between two-pane, stacked, and controls-first layouts. Nothing from Solo Desk is captured or sent. The same private room tone and its volume are directly adjustable in a live team room, from Preferences, or with `cliks set ambient rain ambient.volume 0.7`. For scripts, set both Solo levels together with `cliks set solo.keyboardVolume 0.7 solo.mouseVolume 0.8`. Every `cliks set` argument is an exact key/value pair; quote values containing spaces, such as `cliks set nickname "Cosmic Otter"`.
+Escape, q, or Back stops the local simulation and returns to the main control screen. The simulated coworkers have distinct stable typing rhythms.
+
+Run `cliks solo` to leave any connected team and open a local spatial room with 1-12 simulated coworkers. Each simulated coworker types in short bursts with quiet gaps and occasional clicks. Keyboard ambience, click ambience, and the embedded room tone have separate slider tracks. Hover a slider and use arrow keys or natural scrolling, click its track to jump to a level, or press Tab to cycle sliders without a mouse. Choose soft focus, slow flow, cloud drift, contemplation, night drive, rain, fireside, or coffee house, and set room-tone volume anywhere up to 100%. Resizing the terminal—or changing terminal font size—automatically switches between two-pane, stacked, and controls-first layouts. Nothing from Solo Desk is captured or sent. The same private room tone and its volume are directly adjustable in a live team room, from Preferences, or with `cliks set ambient still ambient.volume 0.7`. For scripts, set both Solo levels together with `cliks set solo.keyboardVolume 0.7 solo.mouseVolume 0.8`. Every `cliks set` argument is an exact key/value pair; quote values containing spaces, such as `cliks set nickname "Cosmic Otter"`.
 
 ## Public or self-hosted server
 

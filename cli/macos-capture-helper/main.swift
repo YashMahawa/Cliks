@@ -41,4 +41,5 @@ guard let tap = CGEvent.tapCreate(
 let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
+emit("ready")
 CFRunLoopRun()

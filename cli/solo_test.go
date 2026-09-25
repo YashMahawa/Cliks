@@ -75,6 +75,17 @@ func TestSoloTypingContinuesAsAPersonSpecificBurst(t *testing.T) {
 	}
 }
 
+func TestSoloPeersHaveDistinctStableRhythms(t *testing.T) {
+	steady := soloRhythmForPeer("solo-00")
+	brief := soloRhythmForPeer("solo-01")
+	if steady == brief || steady.weight <= brief.weight || steady.minBurst <= brief.minBurst {
+		t.Fatalf("Solo peers have indistinct rhythms: %+v %+v", steady, brief)
+	}
+	if soloRhythmForPeer("solo-00") != steady {
+		t.Fatal("Solo rhythm changed for a fixed seat")
+	}
+}
+
 func TestSoloShowsAndPersistsIndependentSoundLevels(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := defaultConfig()
