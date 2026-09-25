@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -193,6 +194,12 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 
 	var state ActiveSessionState
 	parseOK := json.Unmarshal(data, &state) == nil && state.PID > 0
+	if !parseOK {
+		if pid := parsePIDFromData(data); pid > 0 {
+			state.PID = pid
+			parseOK = true
+		}
+	}
 	if parseOK {
 		if processLooksAlive(state.PID) {
 			// Prefer richer session.json metadata when available.
@@ -207,7 +214,13 @@ func classifySessionLock(path string) (sessionLockAction, ActiveSessionState) {
 				if richer.TeamCode == "" {
 					richer.TeamCode = state.TeamCode
 				}
+				if richer.ConnectionStatus == "" || richer.ConnectionStatus == "stopped" {
+					richer.ConnectionStatus = "starting"
+				}
 				return lockLive, richer
+			}
+			if state.ConnectionStatus == "" || state.ConnectionStatus == "stopped" {
+				state.ConnectionStatus = "starting"
 			}
 			return lockLive, state
 		}
@@ -275,7 +288,7 @@ func activeSession() (ActiveSessionState, bool) {
 	if lock, ok := readSessionFile(sessionLockPath()); ok {
 		if processLooksAlive(lock.PID) {
 			state, _ := readSessionFile(sessionStatePath())
-			if state.PID == 0 {
+			if state.PID != lock.PID {
 				state = lock
 			}
 			state.PID = lock.PID
@@ -288,6 +301,19 @@ func activeSession() (ActiveSessionState, bool) {
 			if state.TeamCode == "" {
 				state.TeamCode = lock.TeamCode
 			}
+			if state.TeamCode == "" {
+				state.TeamCode = loadConfig().CurrentTeamCode
+			}
+			if state.TeamName == "" && state.TeamCode != "" {
+				state.TeamName = teamNameForCode(loadConfig(), state.TeamCode)
+			}
+			if state.ConnectionStatus == "" || state.ConnectionStatus == "stopped" {
+				if lock.ConnectionStatus != "" && lock.ConnectionStatus != "stopped" {
+					state.ConnectionStatus = lock.ConnectionStatus
+				} else {
+					state.ConnectionStatus = "starting"
+				}
+			}
 			state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(lock.PID))
 			return state, true
 		}
@@ -295,24 +321,65 @@ func activeSession() (ActiveSessionState, bool) {
 	}
 	if pid, ok := readBackgroundPID(); ok && pid != os.Getpid() && processLooksAlive(pid) {
 		state, _ := readSessionFile(sessionStatePath())
+		if state.PID != pid {
+			state = ActiveSessionState{}
+		}
 		state.PID = pid
 		if state.Mode == "" {
 			state.Mode = runModeBackground
 		}
-		if state.ConnectionStatus == "" {
+		if state.TeamCode == "" {
+			state.TeamCode = loadConfig().CurrentTeamCode
+		}
+		if state.TeamName == "" && state.TeamCode != "" {
+			state.TeamName = teamNameForCode(loadConfig(), state.TeamCode)
+		}
+		if state.ConnectionStatus == "" || state.ConnectionStatus == "stopped" {
 			state.ConnectionStatus = "starting"
 		}
 		state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(pid))
 		return state, true
 	}
+	if state, ok := readSessionFile(sessionStatePath()); ok && state.PID != os.Getpid() && processLooksAlive(state.PID) {
+		if state.Mode == "" {
+			state.Mode = runModeBackground
+		}
+		if state.TeamCode == "" {
+			state.TeamCode = loadConfig().CurrentTeamCode
+		}
+		if state.TeamName == "" && state.TeamCode != "" {
+			state.TeamName = teamNameForCode(loadConfig(), state.TeamCode)
+		}
+		if state.ConnectionStatus == "" || state.ConnectionStatus == "stopped" {
+			state.ConnectionStatus = "starting"
+		}
+		state.DuplicateLocalPIDs = siblingPIDs(findSiblingStartProcesses(state.PID))
+		return state, true
+	}
 	if siblings := findSiblingStartProcesses(); len(siblings) > 0 {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		state := ActiveSessionState{
-			PID:              siblings[0].PID,
-			Mode:             runModeExisting,
-			ConnectionStatus: "running",
-			StartedAt:        now,
-			UpdatedAt:        now,
+		state, _ := readSessionFile(sessionStatePath())
+		if state.PID != siblings[0].PID {
+			state = ActiveSessionState{}
+		}
+		state.PID = siblings[0].PID
+		if state.Mode == "" {
+			state.Mode = runModeExisting
+		}
+		if state.TeamCode == "" {
+			state.TeamCode = loadConfig().CurrentTeamCode
+		}
+		if state.TeamName == "" && state.TeamCode != "" {
+			state.TeamName = teamNameForCode(loadConfig(), state.TeamCode)
+		}
+		if state.ConnectionStatus == "" || state.ConnectionStatus == "stopped" {
+			state.ConnectionStatus = "running"
+		}
+		if state.StartedAt == "" {
+			state.StartedAt = now
+		}
+		if state.UpdatedAt == "" {
+			state.UpdatedAt = now
 		}
 		if len(siblings) > 1 {
 			state.DuplicateLocalPIDs = siblingPIDs(siblings[1:])
@@ -387,10 +454,39 @@ func readSessionFile(path string) (ActiveSessionState, bool) {
 		return ActiveSessionState{}, false
 	}
 	var state ActiveSessionState
-	if json.Unmarshal(data, &state) != nil || state.PID <= 0 {
-		return ActiveSessionState{}, false
+	if json.Unmarshal(data, &state) == nil && state.PID > 0 {
+		return state, true
 	}
-	return state, true
+	if pid := parsePIDFromData(data); pid > 0 {
+		state.PID = pid
+		return state, true
+	}
+	return ActiveSessionState{}, false
+}
+
+func parsePIDFromData(data []byte) int {
+	s := strings.TrimSpace(string(data))
+	if pid, err := strconv.Atoi(s); err == nil && pid > 0 {
+		return pid
+	}
+	idx := strings.Index(s, `"pid"`)
+	if idx < 0 {
+		return 0
+	}
+	rest := s[idx+5:]
+	rest = strings.TrimLeft(rest, " \t\r\n:")
+	numStr := ""
+	for _, ch := range rest {
+		if ch >= '0' && ch <= '9' {
+			numStr += string(ch)
+		} else if numStr != "" {
+			break
+		}
+	}
+	if pid, err := strconv.Atoi(numStr); err == nil && pid > 0 {
+		return pid
+	}
+	return 0
 }
 
 func modeLabel(mode string) string {
