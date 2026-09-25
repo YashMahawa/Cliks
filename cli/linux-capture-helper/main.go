@@ -260,13 +260,16 @@ func (g *activeSeatGate) allowed() bool {
 func targetOwnsActiveSeat(targetUID int) bool {
 	output, err := exec.Command("loginctl", "list-seats", "--no-legend", "--no-pager").Output()
 	if err != nil {
-		return false
+		return true
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	lines := strings.Split(string(output), "\n")
+	hasSeats := false
+	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
+		hasSeats = true
 		session, err := exec.Command("loginctl", "show-seat", fields[0], "-p", "ActiveSession", "--value").Output()
 		if err != nil || strings.TrimSpace(string(session)) == "" {
 			continue
@@ -275,6 +278,9 @@ func targetOwnsActiveSeat(targetUID int) bool {
 		if err == nil && strings.TrimSpace(string(uid)) == strconv.Itoa(targetUID) {
 			return true
 		}
+	}
+	if !hasSeats {
+		return true
 	}
 	return false
 }
