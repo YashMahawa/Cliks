@@ -29,6 +29,41 @@ type soloModel struct {
 
 var soloNames = []string{"Mira", "Noor", "Sam", "Juniper", "Otter", "Pixel", "Toast", "Mochi", "Orbit", "Noodle", "Pebble", "Basil"}
 
+type soloRhythm struct {
+	weight   int
+	minBurst int
+	maxBurst int
+}
+
+var soloRhythms = []soloRhythm{
+	{3, 5, 11}, {1, 2, 5}, {2, 3, 8}, {1, 2, 4},
+	{3, 4, 10}, {1, 2, 5}, {2, 3, 7}, {1, 2, 4},
+	{3, 5, 12}, {2, 3, 8}, {1, 2, 4}, {2, 4, 9},
+}
+
+func soloRhythmForPeer(peerID string) soloRhythm {
+	var index int
+	if _, err := fmt.Sscanf(peerID, "solo-%02d", &index); err != nil || index < 0 {
+		return soloRhythms[0]
+	}
+	return soloRhythms[index%len(soloRhythms)]
+}
+
+func chooseSoloPeer(peers []PeerPresence) PeerPresence {
+	total := 0
+	for _, peer := range peers {
+		total += soloRhythmForPeer(peer.PeerID).weight
+	}
+	pick := rand.Intn(total)
+	for _, peer := range peers {
+		pick -= soloRhythmForPeer(peer.PeerID).weight
+		if pick < 0 {
+			return peer
+		}
+	}
+	return peers[len(peers)-1]
+}
+
 func runSoloTUI(cfg CliksConfig) error {
 	if !term.IsTerminal(int(stdinFD())) || !term.IsTerminal(int(stdoutFD())) {
 		return fmt.Errorf("Solo Desk needs an interactive terminal; run cliks in a terminal and choose Solo Desk")
@@ -163,9 +198,10 @@ func (m *soloModel) simulatePulse() {
 	}
 	// Let an existing sentence finish before usually starting another one. This
 	// creates recognizable coworkers and quiet gaps instead of a click metronome.
-	if !emitted && m.cfg.Solo.Keyboard && rand.Float64() < .11 {
-		peer := m.state.Peers[rand.Intn(len(m.state.Peers))]
-		m.typingBursts[peer.PeerID] = 2 + rand.Intn(9)
+	if !emitted && m.cfg.Solo.Keyboard && rand.Float64() < clamp(.07+.02*float64(len(m.state.Peers)), .08, .2) {
+		peer := chooseSoloPeer(m.state.Peers)
+		rhythm := soloRhythmForPeer(peer.PeerID)
+		m.typingBursts[peer.PeerID] = rhythm.minBurst + rand.Intn(rhythm.maxBurst-rhythm.minBurst+1)
 		m.emitSoloEvent(peer, "keyboard")
 		return
 	}

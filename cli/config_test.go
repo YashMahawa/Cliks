@@ -87,6 +87,60 @@ func TestEnvironmentURLsOverrideSavedConfiguration(t *testing.T) {
 	}
 }
 
+func TestSavedDefaultDropletMigratesToRenderWithoutChangingCustomBackend(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = toWSURL(legacyProductionAPIURL)
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded := loadConfig()
+	if loaded.APIURL != productionAPIURL || loaded.WSURL != toWSURL(productionAPIURL) {
+		t.Fatalf("saved default did not migrate: %q %q", loaded.APIURL, loaded.WSURL)
+	}
+	cfg.APIURL = "https://my-relay.example"
+	cfg.WSURL = toWSURL(cfg.APIURL)
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadConfig(); got.APIURL != cfg.APIURL || got.WSURL != cfg.WSURL {
+		t.Fatalf("custom backend was changed: %q %q", got.APIURL, got.WSURL)
+	}
+}
+
+func TestSavedDropletTeamsMigrateWithoutLosingHistory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = toWSURL(legacyProductionAPIURL)
+	cfg.CurrentTeamCode = "CLIK-ABC123"
+	cfg.Teams = []TeamConfig{{Code: cfg.CurrentTeamCode, Name: "Original room"}}
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded := loadConfig()
+	if loaded.APIURL != productionAPIURL || loaded.WSURL != toWSURL(productionAPIURL) || loaded.CurrentTeamCode != cfg.CurrentTeamCode || len(loaded.Teams) != 1 || loaded.Teams[0].Name != "Original room" {
+		t.Fatalf("saved room was changed during backend migration: %+v", loaded)
+	}
+	if reloaded := loadConfig(); reloaded.APIURL != productionAPIURL || len(reloaded.Teams) != 1 {
+		t.Fatalf("migration was not persisted: %+v", reloaded)
+	}
+}
+
+func TestCustomWebsocketEndpointIsNotMigrated(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultConfig()
+	cfg.APIURL = legacyProductionAPIURL
+	cfg.WSURL = "wss://my-relay.example/ws"
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadConfig(); got.APIURL != cfg.APIURL || got.WSURL != cfg.WSURL {
+		t.Fatalf("custom websocket endpoint was changed: %+v", got)
+	}
+}
+
 func TestPublicBackendLocksBatchWindowToFiveHundredMilliseconds(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.BatchWindowMs = 100
