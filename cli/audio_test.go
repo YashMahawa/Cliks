@@ -19,6 +19,12 @@ func TestFFmpegSpatialFilterUsesMonoSampleForStereoPan(t *testing.T) {
 	}
 }
 
+func TestDistanceGainKeepsNearestRingAudible(t *testing.T) {
+	if near, far := distanceGain(2), distanceGain(4); near != 1 || far >= near || far <= 0 {
+		t.Fatalf("unexpected ring gains: near=%v far=%v", near, far)
+	}
+}
+
 func TestReactionPatternsAreDistinctAndBrief(t *testing.T) {
 	seen := map[string]bool{}
 	for _, reaction := range []string{"wave", "nice", "coffee", "focus", "celebrate", "break"} {

@@ -13,7 +13,7 @@ import (
 //go:embed assets/ambient/*.mp3
 var ambientAssets embed.FS
 
-var ambientModes = []string{"off", "rain", "fire", "cafe", "cloud", "contemplation", "downtempo"}
+var ambientModes = []string{"off", "still", "lofi", "cloud", "contemplation", "downtempo", "rain", "fire", "cafe"}
 
 func ambientMP3(mode string) ([]byte, error) {
 	if mode == "off" {

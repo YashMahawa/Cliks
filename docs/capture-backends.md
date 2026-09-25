@@ -57,6 +57,8 @@ Wayland sandboxes / Flatpak often cannot see `/dev/input`. Use a host desktop se
 
 - Input Monitoring permission is required for the native listen-only Event Tap (OS rule — apps cannot bypass it)
 - Grant Input Monitoring only to Cliks Capture.app. The terminal remains unprivileged.
+- The helper confirms that its listen-only event tap is active before Cliks reports capture as ready; an unanswered or denied permission prompt leaves capture off with a setup hint.
+- Source builds target the actual host architecture, including Apple Silicon when the installer terminal runs under Rosetta.
 - `cliks setup` and the installer open System Settings to the right pane
 - Unsigned community builds may need Privacy & Security → Open Anyway once. Never disable Gatekeeper.
 - Direct mode is retained only as a labeled trial/fallback. Remove the terminal's Input Monitoring permission after use.
