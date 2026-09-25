@@ -25,16 +25,11 @@ const (
 )
 
 var (
-	windowsShell32             = windows.NewLazySystemDLL("shell32.dll")
-	windowsUser32Notify        = windows.NewLazySystemDLL("user32.dll")
-	windowsKernel32Notify      = windows.NewLazySystemDLL("kernel32.dll")
-	procShellNotifyIconW       = windowsShell32.NewProc("Shell_NotifyIconW")
-	procCreateWindowExW        = windowsUser32Notify.NewProc("CreateWindowExW")
-	procDestroyWindow          = windowsUser32Notify.NewProc("DestroyWindow")
-	procLoadIconW              = windowsUser32Notify.NewProc("LoadIconW")
-	procTranslateMessage       = windowsUser32Notify.NewProc("TranslateMessage")
-	procDispatchMessageW       = windowsUser32Notify.NewProc("DispatchMessageW")
-	procGetModuleHandleWNotify = windowsKernel32Notify.NewProc("GetModuleHandleW")
+	windowsShell32       = windows.NewLazySystemDLL("shell32.dll")
+	procShellNotifyIconW = windowsShell32.NewProc("Shell_NotifyIconW")
+	procLoadIconW        = user32.NewProc("LoadIconW")
+	procTranslateMessage = user32.NewProc("TranslateMessage")
+	procDispatchMessageW = user32.NewProc("DispatchMessageW")
 )
 
 type windowsNotifyIconData struct {
@@ -58,14 +53,13 @@ type windowsNotifyIconData struct {
 func sendNativeNotification(title string, body string, sound bool) error {
 	className, _ := windows.UTF16PtrFromString("STATIC")
 	windowName, _ := windows.UTF16PtrFromString("Cliks Notifications")
-	module, _, _ := procGetModuleHandleWNotify.Call(0)
-	messageWindow := ^uintptr(2) // HWND_MESSAGE
+	module, _, _ := procGetModuleHandleW.Call(0)
 	window, _, createErr := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
 		0, 0, 0, 0, 0,
-		messageWindow,
+		0,
 		0,
 		module,
 		0,

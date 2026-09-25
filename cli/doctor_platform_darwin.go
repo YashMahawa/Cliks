@@ -27,7 +27,7 @@ func appendPlatformCaptureChecks(report *doctorReport, thorough bool) {
 
 	if thorough {
 		// Self-test only for explicit doctor runs — never block session startup.
-		probe := probeGlobalCapture(1500 * time.Millisecond)
+		probe := probeGlobalCapture(180 * time.Millisecond)
 		report.checks = append(report.checks, doctorCheck{"Capture backend probe", probe})
 		if strings.Contains(probe, "off") || strings.Contains(probe, "failed") {
 			report.issues = append(report.issues, doctorIssue{
