@@ -72,6 +72,10 @@ func (a *ambientController) close() {
 
 func ambientLabel(mode string) string {
 	switch mode {
+	case "still":
+		return "soft focus"
+	case "lofi":
+		return "slow flow"
 	case "rain":
 		return "rain window"
 	case "fire":

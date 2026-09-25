@@ -34,3 +34,14 @@ func TestStereoPCMFromMonoWAVAppliesPan(t *testing.T) {
 		t.Fatal("hard-right pan produced silence")
 	}
 }
+
+func TestStereoPCMRejectsOversizedChunk(t *testing.T) {
+	data := make([]byte, 44)
+	copy(data[:4], "RIFF")
+	copy(data[8:12], "WAVE")
+	copy(data[12:16], "data")
+	binary.LittleEndian.PutUint32(data[16:20], ^uint32(0))
+	if _, _, err := stereoPCMFromMonoWAV(data, 1, 0); err == nil {
+		t.Fatal("accepted a chunk extending beyond the file")
+	}
+}
